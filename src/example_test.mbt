@@ -10,7 +10,7 @@ test "example connection config" {
 
 ///|
 test "example custom config" {
-  let mut config = @postgres.ConnectionConfig::default()
+  let config = @postgres.ConnectionConfig::default()
   config.host = "example.com"
   config.port = 5433
   config.database = "mydb"

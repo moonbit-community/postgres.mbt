@@ -56,9 +56,9 @@ pub enum FrontendMessage {
   Bind(
     String,
     String,
-    Array[@postgres.FormatCode],
+    Array[FormatCode],
     Array[Bytes?],
-    Array[@postgres.FormatCode]
+    Array[FormatCode]
   ) // portal, statement, param_formats, params, result_formats
   Execute(String, Int) // portal, max_rows (0 = no limit)
   Describe(DescribeTarget, String) // target, name
@@ -78,16 +78,16 @@ pub enum FrontendMessage {
   // Function calls
   FunctionCall(
     Int,
-    Array[@postgres.FormatCode],
+    Array[FormatCode],
     Array[Bytes?],
-    @postgres.FormatCode
+    FormatCode
   ) // function_oid, arg_formats, args, result_format
 
   // Connection termination
   Terminate
 
   // Cancel request (sent on separate connection)
-  CancelRequest(@postgres.BackendKeyData)
+  CancelRequest(BackendKeyData)
 
   // SSL request
   SSLRequest
@@ -128,8 +128,8 @@ pub fn CloseTarget::to_char(self : CloseTarget) -> Char {
 /// Serialize a frontend message to bytes
 pub fn FrontendMessage::serialize(
   self : FrontendMessage,
-) -> Bytes raise @postgres.ProtocolError {
-  let writer = @postgres.MessageWriter::new()
+) -> Bytes {
+  let writer = MessageWriter::new()
   match self {
     StartupMessage(params) => serialize_startup_message(writer, params)
     PasswordMessage(password) => serialize_password_message(writer, password)
@@ -163,7 +163,7 @@ pub fn FrontendMessage::serialize(
 
 ///|
 fn serialize_startup_message(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   params : Map[String, String],
 ) -> Unit {
   // Length placeholder - will be filled later
@@ -172,7 +172,7 @@ fn serialize_startup_message(
 
   // Protocol version
   writer.write_int32(
-    (@postgres.PROTOCOL_VERSION_MAJOR << 16) | @postgres.PROTOCOL_VERSION_MINOR,
+    (PROTOCOL_VERSION_MAJOR << 16) | PROTOCOL_VERSION_MINOR,
   )
 
   // Parameters
@@ -192,7 +192,7 @@ fn serialize_startup_message(
 
 ///|
 fn serialize_password_message(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   password : String,
 ) -> Unit {
   serialize_message_with_tag(writer, PASSWORD_MESSAGE_TAG, fn() {
@@ -202,7 +202,7 @@ fn serialize_password_message(
 
 ///|
 fn serialize_sasl_initial_response(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   mechanism : String,
   response : Bytes,
 ) -> Unit {
@@ -215,7 +215,7 @@ fn serialize_sasl_initial_response(
 
 ///|
 fn serialize_sasl_response(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   response : Bytes,
 ) -> Unit {
   serialize_message_with_tag(writer, PASSWORD_MESSAGE_TAG, fn() {
@@ -224,7 +224,7 @@ fn serialize_sasl_response(
 }
 
 ///|
-fn serialize_query(writer : @postgres.MessageWriter, sql : String) -> Unit {
+fn serialize_query(writer : MessageWriter, sql : String) -> Unit {
   serialize_message_with_tag(writer, QUERY_TAG, fn() {
     writer.write_cstring(sql)
   })
@@ -232,7 +232,7 @@ fn serialize_query(writer : @postgres.MessageWriter, sql : String) -> Unit {
 
 ///|
 fn serialize_parse(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   name : String,
   query : String,
   param_types : Array[Int],
@@ -249,12 +249,12 @@ fn serialize_parse(
 
 ///|
 fn serialize_bind(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   portal : String,
   statement : String,
-  param_formats : Array[@postgres.FormatCode],
+  param_formats : Array[FormatCode],
   params : Array[Bytes?],
-  result_formats : Array[@postgres.FormatCode],
+  result_formats : Array[FormatCode],
 ) -> Unit {
   serialize_message_with_tag(writer, BIND_TAG, fn() {
     writer.write_cstring(portal)
@@ -288,7 +288,7 @@ fn serialize_bind(
 
 ///|
 fn serialize_execute(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   portal : String,
   max_rows : Int,
 ) -> Unit {
@@ -300,7 +300,7 @@ fn serialize_execute(
 
 ///|
 fn serialize_describe(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   target : DescribeTarget,
   name : String,
 ) -> Unit {
@@ -312,7 +312,7 @@ fn serialize_describe(
 
 ///|
 fn serialize_close(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   target : CloseTarget,
   name : String,
 ) -> Unit {
@@ -323,28 +323,28 @@ fn serialize_close(
 }
 
 ///|
-fn serialize_sync(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_sync(writer : MessageWriter) -> Unit {
   serialize_message_with_tag(writer, SYNC_TAG, fn() {
     // No payload
   })
 }
 
 ///|
-fn serialize_flush(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_flush(writer : MessageWriter) -> Unit {
   serialize_message_with_tag(writer, FLUSH_TAG, fn() {
     // No payload
   })
 }
 
 ///|
-fn serialize_copy_data(writer : @postgres.MessageWriter, data : Bytes) -> Unit {
+fn serialize_copy_data(writer : MessageWriter, data : Bytes) -> Unit {
   serialize_message_with_tag(writer, COPY_DATA_TAG, fn() {
     writer.write_bytes(data)
   })
 }
 
 ///|
-fn serialize_copy_done(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_copy_done(writer : MessageWriter) -> Unit {
   serialize_message_with_tag(writer, COPY_DONE_TAG, fn() {
     // No payload
   })
@@ -352,7 +352,7 @@ fn serialize_copy_done(writer : @postgres.MessageWriter) -> Unit {
 
 ///|
 fn serialize_copy_fail(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   error : String,
 ) -> Unit {
   serialize_message_with_tag(writer, COPY_FAIL_TAG, fn() {
@@ -362,11 +362,11 @@ fn serialize_copy_fail(
 
 ///|
 fn serialize_function_call(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   oid : Int,
-  arg_formats : Array[@postgres.FormatCode],
+  arg_formats : Array[FormatCode],
   args : Array[Bytes?],
-  result_format : @postgres.FormatCode,
+  result_format : FormatCode,
 ) -> Unit {
   serialize_message_with_tag(writer, FUNCTION_CALL_TAG, fn() {
     writer.write_int32(oid)
@@ -393,7 +393,7 @@ fn serialize_function_call(
 }
 
 ///|
-fn serialize_terminate(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_terminate(writer : MessageWriter) -> Unit {
   serialize_message_with_tag(writer, TERMINATE_TAG, fn() {
     // No payload
   })
@@ -401,31 +401,31 @@ fn serialize_terminate(writer : @postgres.MessageWriter) -> Unit {
 
 ///|
 fn serialize_cancel_request(
-  writer : @postgres.MessageWriter,
-  key_data : @postgres.BackendKeyData,
+  writer : MessageWriter,
+  key_data : BackendKeyData,
 ) -> Unit {
   writer.write_int32(16) // Total length
-  writer.write_int32(@postgres.CANCEL_REQUEST_CODE)
+  writer.write_int32(CANCEL_REQUEST_CODE)
   writer.write_int32(key_data.process_id)
   writer.write_int32(key_data.secret_key)
 }
 
 ///|
-fn serialize_ssl_request(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_ssl_request(writer : MessageWriter) -> Unit {
   writer.write_int32(8) // Total length
-  writer.write_int32(@postgres.SSL_REQUEST_CODE)
+  writer.write_int32(SSL_REQUEST_CODE)
 }
 
 ///|
-fn serialize_gss_enc_request(writer : @postgres.MessageWriter) -> Unit {
+fn serialize_gss_enc_request(writer : MessageWriter) -> Unit {
   writer.write_int32(8) // Total length
-  writer.write_int32(@postgres.GSSAPI_ENC_REQUEST_CODE)
+  writer.write_int32(GSSAPI_ENC_REQUEST_CODE)
 }
 
 ///|
 /// Helper function to serialize a message with tag and length prefix
 fn serialize_message_with_tag(
-  writer : @postgres.MessageWriter,
+  writer : MessageWriter,
   tag : Byte,
   payload_fn : () -> Unit,
 ) -> Unit {

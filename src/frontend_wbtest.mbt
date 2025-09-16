@@ -1,6 +1,6 @@
 ///|
 test "serialize Query message" {
-  let msg = @postgres.FrontendMessage::Query("SELECT 1")
+  let msg = FrontendMessage::Query("SELECT 1")
   let data = msg.serialize()
 
   // Check message starts with 'Q' tag
@@ -15,25 +15,25 @@ test "serialize Query message" {
 
   // Check the SQL string
   let sql_bytes = data[5:]
-  let sql = @encoding.decode(sql_bytes, encoding=UTF8).unwrap()
+  let sql = @encoding.decode(sql_bytes, encoding=UTF8)
   inspect(sql, content="SELECT 1\x00")
 }
 
 ///|
 test "serialize PasswordMessage" {
-  let msg = @postgres.FrontendMessage::PasswordMessage("secret123")
+  let msg = FrontendMessage::PasswordMessage("secret123")
   let data = msg.serialize()
   inspect(data[0], content="112") // 'p'
 
   // Verify password content
   let password_bytes = data[5:]
-  let password = @encoding.decode(password_bytes, encoding=UTF8).unwrap()
+  let password = @encoding.decode(password_bytes, encoding=UTF8)
   inspect(password, content="secret123\x00")
 }
 
 ///|
 test "serialize Parse message" {
-  let msg = @postgres.FrontendMessage::Parse("stmt1", "SELECT $1", [23]) // INT4 type
+  let msg = FrontendMessage::Parse("stmt1", "SELECT $1", [23]) // INT4 type
   let data = msg.serialize()
   inspect(data[0], content="80") // 'P'
 
@@ -47,10 +47,10 @@ test "serialize Parse message" {
 
 ///|
 test "serialize Bind message" {
-  let param_formats = [@postgres.FormatCode::Text]
+  let param_formats = [FormatCode::Text]
   let params = [Some(b"42")]
-  let result_formats = [@postgres.FormatCode::Text]
-  let msg = @postgres.FrontendMessage::Bind(
+  let result_formats = [FormatCode::Text]
+  let msg = FrontendMessage::Bind(
     "portal1", "stmt1", param_formats, params, result_formats,
   )
   let data = msg.serialize()
@@ -60,20 +60,20 @@ test "serialize Bind message" {
 
 ///|
 test "serialize Execute message" {
-  let msg = @postgres.FrontendMessage::Execute("portal1", 100)
+  let msg = FrontendMessage::Execute("portal1", 100)
   let data = msg.serialize()
   inspect(data[0], content="69") // 'E'
 
   // Should contain portal name and max rows
   let portal_start = 5 // After tag and length
   let portal_bytes = data[portal_start:portal_start + 8]
-  let portal = @encoding.decode(portal_bytes, encoding=UTF8).unwrap()
+  let portal = @encoding.decode(portal_bytes, encoding=UTF8)
   inspect(portal, content="portal1\x00")
 }
 
 ///|
 test "serialize Sync message" {
-  let msg = @postgres.FrontendMessage::Sync
+  let msg = FrontendMessage::Sync
   let data = msg.serialize()
   inspect(data[0], content="83") // 'S'
   inspect(data.length(), content="5") // Just tag + length (4 bytes)
@@ -81,7 +81,7 @@ test "serialize Sync message" {
 
 ///|
 test "serialize Terminate message" {
-  let msg = @postgres.FrontendMessage::Terminate
+  let msg = FrontendMessage::Terminate
   let data = msg.serialize()
   inspect(data[0], content="88") // 'X'
   inspect(data.length(), content="5") // Just tag + length
@@ -90,7 +90,7 @@ test "serialize Terminate message" {
 ///|
 test "serialize StartupMessage" {
   let params = { "user": "testuser", "database": "testdb" }
-  let msg = @postgres.FrontendMessage::StartupMessage(params)
+  let msg = FrontendMessage::StartupMessage(params)
   let data = msg.serialize()
 
   // StartupMessage doesn't have a type tag, starts with length
@@ -110,7 +110,7 @@ test "serialize StartupMessage" {
 
 ///|
 test "serialize SSLRequest" {
-  let msg = @postgres.FrontendMessage::SSLRequest
+  let msg = FrontendMessage::SSLRequest
   let data = msg.serialize()
 
   // Check length (8 bytes total)
@@ -130,11 +130,11 @@ test "serialize SSLRequest" {
 
 ///|
 test "serialize CancelRequest" {
-  let key_data = @postgres.BackendKeyData::{
+  let key_data = BackendKeyData::{
     process_id: 12345,
     secret_key: 67890,
   }
-  let msg = @postgres.FrontendMessage::CancelRequest(key_data)
+  let msg = FrontendMessage::CancelRequest(key_data)
   let data = msg.serialize()
 
   // Check length (16 bytes total)
@@ -154,8 +154,8 @@ test "serialize CancelRequest" {
 
 ///|
 test "DescribeTarget and CloseTarget conversions" {
-  inspect(@postgres.DescribeTarget::Statement.to_char(), content="S")
-  inspect(@postgres.DescribeTarget::Portal.to_char(), content="P")
-  inspect(@postgres.CloseTarget::Statement.to_char(), content="S")
-  inspect(@postgres.CloseTarget::Portal.to_char(), content="P")
+  inspect(DescribeTarget::Statement.to_char(), content="S")
+  inspect(DescribeTarget::Portal.to_char(), content="P")
+  inspect(CloseTarget::Statement.to_char(), content="S")
+  inspect(CloseTarget::Portal.to_char(), content="P")
 }
