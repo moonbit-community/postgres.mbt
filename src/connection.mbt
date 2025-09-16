@@ -43,7 +43,7 @@ pub(all) struct Connection {
   mut backend_key_data : BackendKeyData?
   mut parameters : Map[String, String]
   mut transaction_status : TransactionStatus
-} derive(Show)
+}
 
 ///|
 pub fn Connection::new(config : ConnectionConfig) -> Connection {
