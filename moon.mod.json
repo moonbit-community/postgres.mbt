@@ -2,7 +2,7 @@
   "name": "myfreess/postgres",
   "version": "0.1.0",
   "deps": {
-    "moonbitlang/async": "0.3.0",
+    "moonbitlang/async": "0.8.1",
     "tonyfettes/encoding": "0.3.6"
   },
   "readme": "README.md",
