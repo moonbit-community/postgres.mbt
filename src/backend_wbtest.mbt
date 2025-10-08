@@ -125,10 +125,7 @@ test "parse simple completion messages" {
   inspect(BackendMessage::parse('1', b""), content="ParseComplete")
   inspect(BackendMessage::parse('2', b""), content="BindComplete")
   inspect(BackendMessage::parse('3', b""), content="CloseComplete")
-  inspect(
-    BackendMessage::parse('I', b""),
-    content="EmptyQueryResponse",
-  )
+  inspect(BackendMessage::parse('I', b""), content="EmptyQueryResponse")
   inspect(BackendMessage::parse('n', b""), content="NoData")
   inspect(BackendMessage::parse('s', b""), content="PortalSuspended")
   inspect(BackendMessage::parse('c', b""), content="CopyDone")

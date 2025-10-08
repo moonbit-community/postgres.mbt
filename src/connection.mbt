@@ -59,7 +59,7 @@ pub fn Connection::new(config : ConnectionConfig) -> Connection {
 
 ///|
 /// Connect to PostgreSQL server
-pub async fn Connection::connect(self : Connection) -> Unit raise {
+pub async fn Connection::connect(self : Connection) -> Unit {
   // Create socket connection
   let socket = @socket.TCP::new()
   socket.connect(self.config.host, self.config.port)
@@ -89,7 +89,7 @@ pub async fn Connection::connect(self : Connection) -> Unit raise {
 
 ///|
 /// Handle SSL negotiation
-async fn Connection::handle_ssl_negotiation(self : Connection) -> Unit raise {
+async fn Connection::handle_ssl_negotiation(self : Connection) -> Unit {
   let socket = match self.socket {
     Some(s) => s
     None => raise ProtocolError::ConnectionError("No socket connection")
@@ -121,7 +121,7 @@ async fn Connection::handle_ssl_negotiation(self : Connection) -> Unit raise {
 
 ///|
 /// Send startup message to server
-async fn Connection::send_startup_message(self : Connection) -> Unit raise {
+async fn Connection::send_startup_message(self : Connection) -> Unit {
   let socket = match self.socket {
     Some(s) => s
     None => raise ProtocolError::ConnectionError("No socket connection")
@@ -142,7 +142,7 @@ async fn Connection::send_startup_message(self : Connection) -> Unit raise {
 
 ///|
 /// Handle authentication process
-async fn Connection::handle_authentication(self : Connection) -> Unit raise {
+async fn Connection::handle_authentication(self : Connection) -> Unit {
   let socket = match self.socket {
     Some(s) => s
     None => raise ProtocolError::ConnectionError("No socket connection")
@@ -201,7 +201,7 @@ async fn Connection::handle_authentication(self : Connection) -> Unit raise {
 
 ///|
 /// Read a complete message from the server
-async fn Connection::read_message(self : Connection) -> BackendMessage raise {
+async fn Connection::read_message(self : Connection) -> BackendMessage {
   let socket = match self.socket {
     Some(s) => s
     None => raise ProtocolError::ConnectionError("No socket connection")
@@ -252,7 +252,7 @@ async fn Connection::handle_scram_authentication(
   self : Connection,
   socket : @socket.TCP,
   mechanism : String,
-) -> Unit raise {
+) -> Unit {
   // This would implement SCRAM-SHA-256 authentication
   // For now, we'll just raise an error
   raise ProtocolError::AuthenticationFailed(
@@ -265,7 +265,7 @@ async fn Connection::handle_scram_authentication(
 pub async fn Connection::query(
   self : Connection,
   sql : String,
-) -> Array[BackendMessage] raise {
+) -> Array[BackendMessage] {
   match self.state {
     ReadyForQuery(_) => () // Continue
     _ =>
@@ -301,7 +301,7 @@ pub async fn Connection::query(
 
 ///|
 /// Close the connection
-pub async fn Connection::close(self : Connection) -> Unit raise {
+pub async fn Connection::close(self : Connection) -> Unit {
   match self.socket {
     Some(socket) => {
       // Send terminate message

@@ -53,13 +53,7 @@ pub enum FrontendMessage {
   // Query execution
   Query(String)
   Parse(String, String, Array[Int]) // name, query, parameter_types
-  Bind(
-    String,
-    String,
-    Array[FormatCode],
-    Array[Bytes?],
-    Array[FormatCode]
-  ) // portal, statement, param_formats, params, result_formats
+  Bind(String, String, Array[FormatCode], Array[Bytes?], Array[FormatCode]) // portal, statement, param_formats, params, result_formats
   Execute(String, Int) // portal, max_rows (0 = no limit)
   Describe(DescribeTarget, String) // target, name
 
@@ -76,12 +70,7 @@ pub enum FrontendMessage {
   CopyFail(String) // error_message
 
   // Function calls
-  FunctionCall(
-    Int,
-    Array[FormatCode],
-    Array[Bytes?],
-    FormatCode
-  ) // function_oid, arg_formats, args, result_format
+  FunctionCall(Int, Array[FormatCode], Array[Bytes?], FormatCode) // function_oid, arg_formats, args, result_format
 
   // Connection termination
   Terminate
@@ -126,9 +115,7 @@ pub fn CloseTarget::to_char(self : CloseTarget) -> Char {
 
 ///|
 /// Serialize a frontend message to bytes
-pub fn FrontendMessage::serialize(
-  self : FrontendMessage,
-) -> Bytes {
+pub fn FrontendMessage::serialize(self : FrontendMessage) -> Bytes {
   let writer = MessageWriter::new()
   match self {
     StartupMessage(params) => serialize_startup_message(writer, params)
@@ -171,9 +158,7 @@ fn serialize_startup_message(
   writer.write_int32(0)
 
   // Protocol version
-  writer.write_int32(
-    (PROTOCOL_VERSION_MAJOR << 16) | PROTOCOL_VERSION_MINOR,
-  )
+  writer.write_int32((PROTOCOL_VERSION_MAJOR << 16) | PROTOCOL_VERSION_MINOR)
 
   // Parameters
   for key, value in params {
@@ -214,10 +199,7 @@ fn serialize_sasl_initial_response(
 }
 
 ///|
-fn serialize_sasl_response(
-  writer : MessageWriter,
-  response : Bytes,
-) -> Unit {
+fn serialize_sasl_response(writer : MessageWriter, response : Bytes) -> Unit {
   serialize_message_with_tag(writer, PASSWORD_MESSAGE_TAG, fn() {
     writer.write_bytes(response)
   })
@@ -351,10 +333,7 @@ fn serialize_copy_done(writer : MessageWriter) -> Unit {
 }
 
 ///|
-fn serialize_copy_fail(
-  writer : MessageWriter,
-  error : String,
-) -> Unit {
+fn serialize_copy_fail(writer : MessageWriter, error : String) -> Unit {
   serialize_message_with_tag(writer, COPY_FAIL_TAG, fn() {
     writer.write_cstring(error)
   })
@@ -459,10 +438,7 @@ fn Int::to_byte_array_big_endian(self : Int) -> Array[Byte] {
 
 ///|
 /// Async helper for TCP socket to write C strings
-async fn @socket.TCP::write_cstr(
-  self : @socket.TCP,
-  bytes : Bytes,
-) -> Unit raise {
+async fn @socket.TCP::write_cstr(self : @socket.TCP, bytes : Bytes) -> Unit {
   self.write(bytes)
   self.write(b"\x00")
 }
@@ -472,7 +448,7 @@ async fn @socket.TCP::write_cstr(
 pub async fn send_startup_message(
   parameters : Map[String, String],
   conn : @socket.TCP,
-) -> Unit raise {
+) -> Unit {
   let msg = FrontendMessage::StartupMessage(parameters)
   let data = msg.serialize()
   conn.write(data)
@@ -483,7 +459,7 @@ pub async fn send_startup_message(
 pub async fn send_password_message(
   password : String,
   conn : @socket.TCP,
-) -> Unit raise {
+) -> Unit {
   let msg = FrontendMessage::PasswordMessage(password)
   let data = msg.serialize()
   conn.write(data)
@@ -491,7 +467,7 @@ pub async fn send_password_message(
 
 ///|
 /// Send simple query
-pub async fn send_query(sql : String, conn : @socket.TCP) -> Unit raise {
+pub async fn send_query(sql : String, conn : @socket.TCP) -> Unit {
   let msg = FrontendMessage::Query(sql)
   let data = msg.serialize()
   conn.write(data)
@@ -499,7 +475,7 @@ pub async fn send_query(sql : String, conn : @socket.TCP) -> Unit raise {
 
 ///|
 /// Send SSL request
-pub async fn send_ssl_request(conn : @socket.TCP) -> Unit raise {
+pub async fn send_ssl_request(conn : @socket.TCP) -> Unit {
   let msg = FrontendMessage::SSLRequest
   let data = msg.serialize()
   conn.write(data)

@@ -130,10 +130,7 @@ test "serialize SSLRequest" {
 
 ///|
 test "serialize CancelRequest" {
-  let key_data = BackendKeyData::{
-    process_id: 12345,
-    secret_key: 67890,
-  }
+  let key_data = BackendKeyData::{ process_id: 12345, secret_key: 67890 }
   let msg = FrontendMessage::CancelRequest(key_data)
   let data = msg.serialize()
 

@@ -1,4 +1,5 @@
 //|
+
 ///|
 test "MessageReader basic operations" {
   let data = b"Hello\x00World\x01\x02\x03\x04"

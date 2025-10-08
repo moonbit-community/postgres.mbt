@@ -30,10 +30,7 @@ pub fn hash_md5_password(
 ) -> String {
   // PostgreSQL uses: md5(md5(password + username) + salt)
   let inner_hash = md5_hash(password + username)
-  let salt_str = match @encoding.decode(salt, encoding=UTF8) {
-    Ok(s) => s
-    Err(_) => ""
-  }
+  let salt_str = @encoding/utf8.decode(salt) catch { _ => "" }
   let final_hash = md5_hash(inner_hash + salt_str)
   "md5" + final_hash
 }
@@ -261,7 +258,7 @@ pub async fn authenticate(
   username : String,
   password : String,
   salt : Bytes?,
-) -> Unit raise {
+) -> Unit {
   match method {
     AuthMethod::None => () // No authentication required
     AuthMethod::Password => send_password_message(password, socket)
