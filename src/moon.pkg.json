@@ -1,7 +1,6 @@
 {
   "import": [
     "moonbitlang/async/socket",
-    "moonbitlang/async/io",
-    "tonyfettes/encoding"
+    "moonbitlang/async/io"
   ]
 }
