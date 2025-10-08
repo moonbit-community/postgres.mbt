@@ -41,7 +41,7 @@ test "example SCRAM authenticator" {
   inspect(initial.length() > 10, content="true")
 
   // Check that initial response contains username
-  let response_str = @encoding.decode(initial, encoding=UTF8).unwrap()
+  let response_str = @encoding/utf8.decode(initial).unwrap()
   inspect(response_str.contains("testuser"), content="true")
 }
 

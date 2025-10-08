@@ -79,7 +79,7 @@ test "MessageReader read_bytes and read_string" {
 
   // Test read_bytes
   let bytes = reader.read_bytes(5)
-  inspect(@encoding.decode(bytes, encoding=UTF8), content="Ok(\"Hello\")")
+  inspect(@encoding/utf8.decode(bytes), content="Ok(\"Hello\")")
 
   // Skip null byte
   reader.read_byte()

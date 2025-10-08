@@ -15,7 +15,7 @@ test "serialize Query message" {
 
   // Check the SQL string
   let sql_bytes = data[5:]
-  let sql = @encoding.decode(sql_bytes, encoding=UTF8)
+  let sql = @encoding/utf8.decode(sql_bytes)
   inspect(sql, content="SELECT 1\x00")
 }
 
@@ -27,7 +27,7 @@ test "serialize PasswordMessage" {
 
   // Verify password content
   let password_bytes = data[5:]
-  let password = @encoding.decode(password_bytes, encoding=UTF8)
+  let password = @encoding/utf8.decode(password_bytes)
   inspect(password, content="secret123\x00")
 }
 
@@ -67,7 +67,7 @@ test "serialize Execute message" {
   // Should contain portal name and max rows
   let portal_start = 5 // After tag and length
   let portal_bytes = data[portal_start:portal_start + 8]
-  let portal = @encoding.decode(portal_bytes, encoding=UTF8)
+  let portal = @encoding/utf8.decode(portal_bytes)
   inspect(portal, content="portal1\x00")
 }
 

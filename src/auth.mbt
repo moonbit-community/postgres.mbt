@@ -41,7 +41,7 @@ pub fn hash_md5_password(
 fn md5_hash(input : String) -> String {
   // This is a placeholder implementation
   // In practice, you would use a proper MD5 implementation
-  let bytes = @encoding.encode(input, encoding=UTF8)
+  let bytes = @encoding/utf8.encode(input)
   let mut hash = 0
   for i = 0; i < bytes.length(); i = i + 1 {
     hash = hash * 31 + bytes[i].to_int()
@@ -95,7 +95,7 @@ pub fn SCRAMAuthenticator::initial_response(self : SCRAMAuthenticator) -> Bytes 
   let client_first_message_bare = "n=" + self.username + ",r=" + client_nonce
   self.state.client_first_message_bare = Some(client_first_message_bare)
   let client_first_message = "n,," + client_first_message_bare
-  @encoding.encode(client_first_message, encoding=UTF8)
+  @encoding/utf8.encode(client_first_message)
 }
 
 ///|
@@ -104,10 +104,8 @@ pub fn SCRAMAuthenticator::process_challenge(
   self : SCRAMAuthenticator,
   challenge : Bytes,
 ) -> Bytes raise ProtocolError {
-  let challenge_str = match @encoding.decode(challenge, encoding=UTF8) {
-    Ok(s) => s
-    Err(_) =>
-      raise ProtocolError::InvalidMessage("Invalid UTF-8 in SCRAM challenge")
+  let challenge_str = @encoding/utf8.decode(challenge) catch {
+    _ => raise ProtocolError::InvalidMessage("Invalid UTF-8 in SCRAM challenge")
   }
   self.state.server_first_message = Some(challenge_str)
 
@@ -139,7 +137,7 @@ pub fn SCRAMAuthenticator::process_challenge(
   let client_proof = self.xor_bytes(client_key, client_signature)
   let proof_b64 = encode_base64_simple(client_proof)
   let client_final_message = client_final_without_proof + ",p=" + proof_b64
-  @encoding.encode(client_final_message, encoding=UTF8)
+  @encoding/utf8.encode(client_final_message)
 }
 
 ///|
@@ -150,9 +148,8 @@ pub fn SCRAMAuthenticator::verify_server_final(
 ) -> Bool {
   // In a real implementation, this would verify the server signature
   // For now, we'll just check if it starts with "v="
-  match @encoding.decode(server_final, encoding=UTF8) {
-    Ok(s) => s.starts_with("v=")
-    Err(_) => false
+  @encoding/utf8.decode(server_final).has_prefix("v=") catch {
+    _ => false
   }
 }
 
@@ -178,7 +175,7 @@ fn SCRAMAuthenticator::pbkdf2_simple(
   iterations : Int,
 ) -> Bytes {
   // Simplified implementation - not cryptographically secure
-  let password_bytes = @encoding.encode(password, encoding=UTF8)
+  let password_bytes = @encoding/utf8.encode(password)
   let mut result = Bytes::new(32) // SHA-256 output size
   for i = 0; i < result.length(); i = i + 1 {
     let mut val = 0
@@ -203,7 +200,7 @@ fn SCRAMAuthenticator::hmac_sha256(
   message : String,
 ) -> Bytes {
   // Simplified implementation - not cryptographically secure
-  let message_bytes = @encoding.encode(message, encoding=UTF8)
+  let message_bytes = @encoding/utf8.encode(message)
   let mut result = Bytes::new(32)
   for i = 0; i < result.length(); i = i + 1 {
     let mut val = 0
@@ -237,16 +234,15 @@ fn SCRAMAuthenticator::xor_bytes(
 /// Simplified base64 decode (placeholder implementation)
 fn decode_base64_simple(input : String) -> Bytes {
   // This is a placeholder - use a proper base64 implementation in production
-  @encoding.encode(input, encoding=UTF8)
+  @encoding/utf8.encode(input)
 }
 
 ///|
 /// Simplified base64 encode (placeholder implementation)
 fn encode_base64_simple(input : Bytes) -> String {
   // This is a placeholder - use a proper base64 implementation in production
-  match @encoding.decode(input, encoding=UTF8) {
-    Ok(s) => s
-    Err(_) => ""
+  @encoding/utf8.decode(input) catch {
+    _ => ""
   }
 }
 

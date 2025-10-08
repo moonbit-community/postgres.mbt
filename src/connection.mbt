@@ -242,7 +242,7 @@ fn Connection::hash_md5_password(
   // md5(md5(password + username) + salt)
   // For now, we'll use a placeholder implementation
   "md5" +
-  @encoding.encode(password + self.config.user, encoding=UTF8).to_string() +
+  @encoding/utf8.encode(password + self.config.user).to_string() +
   salt.to_string()
 }
 

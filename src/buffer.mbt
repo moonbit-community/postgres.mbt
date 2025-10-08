@@ -76,12 +76,11 @@ pub fn MessageReader::read_cstring(
   if self.position >= self.data.length() {
     raise ProtocolError::InvalidMessage("Unterminated C string")
   }
-  let result = @encoding.decode(self.data[start:self.position], encoding=UTF8)
-  self.position += 1 // Skip null terminator
-  match result {
-    Ok(s) => s
-    Err(_) => raise ProtocolError::EncodingError("Invalid UTF-8 in C string")
+  let result = @encoding/utf8.decode(self.data[start:self.position]) catch {
+    _ => raise ProtocolError::EncodingError("Invalid UTF-8 in C string")
   }
+  self.position += 1 // Skip null terminator
+  return result
 }
 
 ///|
@@ -103,9 +102,8 @@ pub fn MessageReader::read_string(
   length : Int,
 ) -> String raise ProtocolError {
   let bytes = self.read_bytes(length)
-  match @encoding.decode(bytes, encoding=UTF8) {
-    Ok(s) => s
-    Err(_) => raise ProtocolError::EncodingError("Invalid UTF-8 in string")
+  @encoding/utf8.decode(bytes) catch {
+    _ => raise ProtocolError::EncodingError("Invalid UTF-8 in string")
   }
 }
 
@@ -151,7 +149,7 @@ pub fn MessageWriter::write_int32(self : MessageWriter, value : Int) -> Unit {
 
 ///|
 pub fn MessageWriter::write_cstring(self : MessageWriter, s : String) -> Unit {
-  let bytes = @encoding.encode(s, encoding=UTF8)
+  let bytes = @encoding/utf8.encode(s)
   for i = 0; i < bytes.length(); i = i + 1 {
     self.write_byte(bytes[i])
   }
@@ -167,6 +165,6 @@ pub fn MessageWriter::write_bytes(self : MessageWriter, bytes : Bytes) -> Unit {
 
 ///|
 pub fn MessageWriter::write_string(self : MessageWriter, s : String) -> Unit {
-  let bytes = @encoding.encode(s, encoding=UTF8)
+  let bytes = @encoding/utf8.encode(s)
   self.write_bytes(bytes)
 }
