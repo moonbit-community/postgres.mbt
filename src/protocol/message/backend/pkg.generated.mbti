@@ -1,0 +1,286 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/message/backend"
+
+import {
+  "myfreess/postgres/protocol",
+}
+
+// Values
+pub const AUTHENTICATION_TAG : Byte = R
+
+pub const BACKEND_KEY_DATA_TAG : Byte = K
+
+pub const BIND_COMPLETE_TAG : Byte = 2
+
+pub const CLOSE_COMPLETE_TAG : Byte = 3
+
+pub const COMMAND_COMPLETE_TAG : Byte = C
+
+pub const COPY_DATA_TAG : Byte = d
+
+pub const COPY_DONE_TAG : Byte = c
+
+pub const COPY_IN_RESPONSE_TAG : Byte = G
+
+pub const COPY_OUT_RESPONSE_TAG : Byte = H
+
+pub const DATA_ROW_TAG : Byte = D
+
+pub const EMPTY_QUERY_RESPONSE_TAG : Byte = I
+
+pub const ERROR_RESPONSE_TAG : Byte = E
+
+pub const NOTICE_RESPONSE_TAG : Byte = N
+
+pub const NOTIFICATION_RESPONSE_TAG : Byte = A
+
+pub const NO_DATA_TAG : Byte = n
+
+pub const PARAMETER_DESCRIPTION_TAG : Byte = t
+
+pub const PARAMETER_STATUS_TAG : Byte = S
+
+pub const PARSE_COMPLETE_TAG : Byte = 1
+
+pub const PORTAL_SUSPENDED_TAG : Byte = s
+
+pub const READY_FOR_QUERY_TAG : Byte = Z
+
+pub const ROW_DESCRIPTION_TAG : Byte = T
+
+// Errors
+
+// Types and methods
+pub struct AuthenticationGssContinueBody {
+  data : Bytes
+}
+pub fn AuthenticationGssContinueBody::data(Self) -> BytesView
+
+pub struct AuthenticationMd5PasswordBody {
+  salt : Bytes
+}
+pub fn AuthenticationMd5PasswordBody::salt(Self) -> Bytes
+
+pub struct AuthenticationSaslBody {
+  data : Bytes
+}
+pub fn AuthenticationSaslBody::mechanisms(Self) -> SaslMechanisms
+
+pub struct AuthenticationSaslContinueBody {
+  data : Bytes
+}
+pub fn AuthenticationSaslContinueBody::data(Self) -> BytesView
+
+pub struct AuthenticationSaslFinalBody {
+  data : Bytes
+}
+pub fn AuthenticationSaslFinalBody::data(Self) -> BytesView
+
+pub struct BackendKeyDataBody {
+  process_id : Int
+  secret_key : Int
+}
+pub fn BackendKeyDataBody::process_id(Self) -> Int
+pub fn BackendKeyDataBody::secret_key(Self) -> Int
+
+pub struct ByteRange {
+  start : Int
+  end : Int
+}
+pub fn ByteRange::end(Self) -> Int
+pub fn ByteRange::start(Self) -> Int
+
+pub struct ColumnFormats {
+  mut buf : BytesView
+  mut remaining : Int
+}
+pub fn ColumnFormats::next(Self) -> Int? raise @protocol.ProtocolError
+
+pub struct CommandCompleteBody {
+  tag : Bytes
+}
+pub fn CommandCompleteBody::tag_bytes(Self) -> BytesView
+
+pub struct CopyDataBody {
+  storage : Bytes
+}
+pub fn CopyDataBody::data(Self) -> BytesView
+pub fn CopyDataBody::into_bytes(Self) -> Bytes
+
+pub struct CopyInResponseBody {
+  format : Byte
+  len : Int
+  storage : Bytes
+}
+pub fn CopyInResponseBody::column_formats(Self) -> ColumnFormats
+pub fn CopyInResponseBody::format(Self) -> Byte
+
+pub struct CopyOutResponseBody {
+  format : Byte
+  len : Int
+  storage : Bytes
+}
+pub fn CopyOutResponseBody::column_formats(Self) -> ColumnFormats
+pub fn CopyOutResponseBody::format(Self) -> Byte
+
+pub struct DataRowBody {
+  storage : Bytes
+  len : Int
+}
+pub fn DataRowBody::buffer(Self) -> BytesView
+pub fn DataRowBody::buffer_bytes(Self) -> Bytes
+pub fn DataRowBody::ranges(Self) -> DataRowRanges
+pub impl Eq for DataRowBody
+pub impl Show for DataRowBody
+
+pub struct DataRowRanges {
+  mut buf : BytesView
+  len : Int
+  mut remaining : Int
+}
+pub fn DataRowRanges::next(Self) -> ByteRange?? raise @protocol.ProtocolError
+
+pub struct ErrorField {
+  type_ : Byte
+  value : Bytes
+}
+pub fn ErrorField::type_(Self) -> Byte
+pub fn ErrorField::value_bytes(Self) -> BytesView
+
+pub struct ErrorFields {
+  mut buf : BytesView
+}
+pub fn ErrorFields::next(Self) -> ErrorField? raise @protocol.ProtocolError
+
+pub struct ErrorResponseBody {
+  storage : Bytes
+}
+pub fn ErrorResponseBody::fields(Self) -> ErrorFields
+
+pub struct Field {
+  name : Bytes
+  table_oid : UInt
+  column_id : Int
+  type_oid : UInt
+  type_size : Int
+  type_modifier : Int
+  format : Int
+}
+pub fn Field::column_id(Self) -> Int
+pub fn Field::format(Self) -> Int
+pub fn Field::name_bytes(Self) -> BytesView
+pub fn Field::table_oid(Self) -> UInt
+pub fn Field::type_modifier(Self) -> Int
+pub fn Field::type_oid(Self) -> UInt
+pub fn Field::type_size(Self) -> Int
+
+pub struct Fields {
+  mut buf : BytesView
+  mut remaining : Int
+}
+pub fn Fields::next(Self) -> Field? raise @protocol.ProtocolError
+
+pub struct Header {
+  tag : Byte
+  len : Int
+}
+pub fn Header::len(Self) -> Int
+pub fn Header::parse(BytesView) -> Self? raise @protocol.ProtocolError
+pub fn Header::tag(Self) -> Byte
+pub impl Show for Header
+
+pub enum Message {
+  AuthenticationCleartextPassword
+  AuthenticationGss
+  AuthenticationKerberosV5
+  AuthenticationMd5Password(AuthenticationMd5PasswordBody)
+  AuthenticationOk
+  AuthenticationScmCredential
+  AuthenticationSspi
+  AuthenticationGssContinue(AuthenticationGssContinueBody)
+  AuthenticationSasl(AuthenticationSaslBody)
+  AuthenticationSaslContinue(AuthenticationSaslContinueBody)
+  AuthenticationSaslFinal(AuthenticationSaslFinalBody)
+  BackendKeyData(BackendKeyDataBody)
+  BindComplete
+  CloseComplete
+  CommandComplete(CommandCompleteBody)
+  CopyData(CopyDataBody)
+  CopyDone
+  CopyInResponse(CopyInResponseBody)
+  CopyOutResponse(CopyOutResponseBody)
+  DataRow(DataRowBody)
+  EmptyQueryResponse
+  ErrorResponse(ErrorResponseBody)
+  NoData
+  NoticeResponse(NoticeResponseBody)
+  NotificationResponse(NotificationResponseBody)
+  ParameterDescription(ParameterDescriptionBody)
+  ParameterStatus(ParameterStatusBody)
+  ParseComplete
+  PortalSuspended
+  ReadyForQuery(ReadyForQueryBody)
+  RowDescription(RowDescriptionBody)
+}
+pub fn Message::parse(BytesView) -> ParsedMessage? raise @protocol.ProtocolError
+
+pub struct NoticeResponseBody {
+  storage : Bytes
+}
+pub fn NoticeResponseBody::fields(Self) -> ErrorFields
+
+pub struct NotificationResponseBody {
+  process_id : Int
+  channel : Bytes
+  message : Bytes
+}
+pub fn NotificationResponseBody::channel_bytes(Self) -> BytesView
+pub fn NotificationResponseBody::message_bytes(Self) -> BytesView
+pub fn NotificationResponseBody::process_id(Self) -> Int
+
+pub struct ParameterDescriptionBody {
+  storage : Bytes
+  len : Int
+}
+pub fn ParameterDescriptionBody::parameters(Self) -> Parameters
+
+pub struct ParameterStatusBody {
+  name : Bytes
+  value : Bytes
+}
+pub fn ParameterStatusBody::name_bytes(Self) -> BytesView
+pub fn ParameterStatusBody::value_bytes(Self) -> BytesView
+
+pub struct Parameters {
+  mut buf : BytesView
+  mut remaining : Int
+}
+pub fn Parameters::next(Self) -> UInt? raise @protocol.ProtocolError
+
+pub struct ParsedMessage {
+  message : Message
+  consumed : Int
+}
+pub fn ParsedMessage::consumed(Self) -> Int
+pub fn ParsedMessage::message(Self) -> Message
+
+pub struct ReadyForQueryBody {
+  status : Byte
+}
+pub fn ReadyForQueryBody::status(Self) -> Byte
+
+pub struct RowDescriptionBody {
+  storage : Bytes
+  len : Int
+}
+pub fn RowDescriptionBody::fields(Self) -> Fields
+
+pub struct SaslMechanisms {
+  mut buf : BytesView
+}
+pub fn SaslMechanisms::next(Self) -> Bytes? raise @protocol.ProtocolError
+
+// Type aliases
+
+// Traits
+

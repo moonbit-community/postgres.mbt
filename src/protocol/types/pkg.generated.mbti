@@ -1,0 +1,240 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/types"
+
+import {
+  "moonbitlang/core/buffer",
+  "myfreess/postgres/protocol",
+}
+
+// Values
+pub fn array_from_sql(BytesView) -> PgArray raise @protocol.ProtocolError
+
+pub fn[T] array_to_sql(Iter[ArrayDimension], UInt, Iter[T], (T, @buffer.Buffer) -> @protocol.IsNull raise @protocol.ProtocolError, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn bool_from_sql(BytesView) -> Bool raise @protocol.ProtocolError
+
+pub fn bool_to_sql(Bool, @buffer.Buffer) -> Unit
+
+pub fn box_from_sql(BytesView) -> Box raise @protocol.ProtocolError
+
+pub fn box_to_sql(Double, Double, Double, Double, @buffer.Buffer) -> Unit
+
+pub fn bytea_from_sql(BytesView) -> BytesView
+
+pub fn bytea_to_sql(BytesView, @buffer.Buffer) -> Unit
+
+pub fn char_from_sql(BytesView) -> Int raise @protocol.ProtocolError
+
+pub fn char_to_sql(Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn date_from_sql(BytesView) -> Int raise @protocol.ProtocolError
+
+pub fn date_to_sql(Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn empty_range_to_sql(@buffer.Buffer) -> Unit
+
+pub fn float4_from_sql(BytesView) -> Float raise @protocol.ProtocolError
+
+pub fn float4_to_sql(Float, @buffer.Buffer) -> Unit
+
+pub fn float8_from_sql(BytesView) -> Double raise @protocol.ProtocolError
+
+pub fn float8_to_sql(Double, @buffer.Buffer) -> Unit
+
+pub fn hstore_from_sql(BytesView) -> HstoreEntries raise @protocol.ProtocolError
+
+pub fn hstore_to_sql(Iter[(BytesView, BytesView?)], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn inet_from_sql(BytesView) -> Inet raise @protocol.ProtocolError
+
+pub fn inet_to_sql(IpAddr, Byte, @buffer.Buffer) -> Unit
+
+pub fn int2_from_sql(BytesView) -> Int raise @protocol.ProtocolError
+
+pub fn int2_to_sql(Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn int4_from_sql(BytesView) -> Int raise @protocol.ProtocolError
+
+pub fn int4_to_sql(Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn int8_from_sql(BytesView) -> Int64 raise @protocol.ProtocolError
+
+pub fn int8_to_sql(Int64, @buffer.Buffer) -> Unit
+
+pub fn lquery_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn lquery_to_sql(BytesView, @buffer.Buffer) -> Unit
+
+pub fn lsn_from_sql(BytesView) -> UInt64 raise @protocol.ProtocolError
+
+pub fn lsn_to_sql(UInt64, @buffer.Buffer) -> Unit
+
+pub fn ltree_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn ltree_to_sql(BytesView, @buffer.Buffer) -> Unit
+
+pub fn ltxtquery_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn ltxtquery_to_sql(BytesView, @buffer.Buffer) -> Unit
+
+pub fn macaddr_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn macaddr_to_sql(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn oid_from_sql(BytesView) -> UInt raise @protocol.ProtocolError
+
+pub fn oid_to_sql(UInt, @buffer.Buffer) -> Unit
+
+pub fn path_from_sql(BytesView) -> Path raise @protocol.ProtocolError
+
+pub fn path_to_sql(Bool, Iter[(Double, Double)], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn point_from_sql(BytesView) -> Point raise @protocol.ProtocolError
+
+pub fn point_to_sql(Double, Double, @buffer.Buffer) -> Unit
+
+pub fn range_from_sql(BytesView) -> Range raise @protocol.ProtocolError
+
+pub fn range_to_sql((@buffer.Buffer) -> RangeBound[@protocol.IsNull] raise @protocol.ProtocolError, (@buffer.Buffer) -> RangeBound[@protocol.IsNull] raise @protocol.ProtocolError, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn text_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn text_to_sql(BytesView, @buffer.Buffer) -> Unit
+
+pub fn time_from_sql(BytesView) -> Int64 raise @protocol.ProtocolError
+
+pub fn time_to_sql(Int64, @buffer.Buffer) -> Unit
+
+pub fn timestamp_from_sql(BytesView) -> Int64 raise @protocol.ProtocolError
+
+pub fn timestamp_to_sql(Int64, @buffer.Buffer) -> Unit
+
+pub fn uuid_from_sql(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn uuid_to_sql(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn varbit_from_sql(BytesView) -> Varbit raise @protocol.ProtocolError
+
+pub fn varbit_to_sql(Int, Iter[Byte], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+// Errors
+
+// Types and methods
+pub struct ArrayDimension {
+  len : Int
+  lower_bound : Int
+}
+pub fn ArrayDimension::len(Self) -> Int
+pub fn ArrayDimension::lower_bound(Self) -> Int
+pub fn ArrayDimension::new(Int, Int) -> Self
+pub impl Eq for ArrayDimension
+pub impl Show for ArrayDimension
+
+pub struct ArrayDimensions {
+  mut buf : BytesView
+}
+pub fn ArrayDimensions::next(Self) -> ArrayDimension? raise @protocol.ProtocolError
+
+pub struct ArrayValues {
+  mut remaining : Int
+  mut buf : BytesView
+}
+pub fn ArrayValues::next(Self) -> Bytes?? raise @protocol.ProtocolError
+
+pub struct Box {
+  upper_right : Point
+  lower_left : Point
+}
+pub fn Box::lower_left(Self) -> Point
+pub fn Box::upper_right(Self) -> Point
+pub impl Eq for Box
+pub impl Show for Box
+
+pub struct HstoreEntries {
+  mut remaining : Int
+  mut buf : BytesView
+}
+pub fn HstoreEntries::next(Self) -> (Bytes, Bytes?)? raise @protocol.ProtocolError
+
+pub struct Inet {
+  addr : IpAddr
+  netmask : Byte
+}
+pub fn Inet::addr(Self) -> IpAddr
+pub fn Inet::netmask(Self) -> Byte
+
+pub enum IpAddr {
+  V4(Ipv4Addr)
+  V6(Ipv6Addr)
+}
+
+pub struct Ipv4Addr {
+  octets : Bytes
+}
+pub fn Ipv4Addr::from_octets(BytesView) -> Self raise @protocol.ProtocolError
+pub fn Ipv4Addr::octets(Self) -> BytesView
+
+pub struct Ipv6Addr {
+  octets : Bytes
+}
+pub fn Ipv6Addr::from_octets(BytesView) -> Self raise @protocol.ProtocolError
+pub fn Ipv6Addr::octets(Self) -> BytesView
+
+pub struct Path {
+  closed : Bool
+  points : Int
+  buf : BytesView
+}
+pub fn Path::closed(Self) -> Bool
+pub fn Path::points(Self) -> PathPoints
+
+pub struct PathPoints {
+  mut remaining : Int
+  mut buf : BytesView
+}
+pub fn PathPoints::next(Self) -> Point? raise @protocol.ProtocolError
+
+pub struct PgArray {
+  dimensions : Int
+  has_nulls : Bool
+  element_type : UInt
+  elements : Int
+  buf : Bytes
+}
+pub fn PgArray::dimensions(Self) -> ArrayDimensions
+pub fn PgArray::element_type(Self) -> UInt
+pub fn PgArray::has_nulls(Self) -> Bool
+pub fn PgArray::values(Self) -> ArrayValues
+
+pub struct Point {
+  x : Double
+  y : Double
+}
+pub fn Point::x(Self) -> Double
+pub fn Point::y(Self) -> Double
+pub impl Eq for Point
+pub impl Show for Point
+
+pub enum Range {
+  Empty
+  Nonempty(RangeBound[Bytes?], RangeBound[Bytes?])
+}
+
+pub enum RangeBound[T] {
+  Inclusive(T)
+  Exclusive(T)
+  Unbounded
+}
+
+pub struct Varbit {
+  len : Int
+  bytes : BytesView
+}
+pub fn Varbit::bytes(Self) -> BytesView
+pub fn Varbit::is_empty(Self) -> Bool
+pub fn Varbit::len(Self) -> Int
+
+// Type aliases
+
+// Traits
+

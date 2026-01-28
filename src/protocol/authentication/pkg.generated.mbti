@@ -1,0 +1,14 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/authentication"
+
+// Values
+pub fn md5_hash(BytesView, BytesView, BytesView) -> Bytes
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "deps": {
     "moonbitlang/async": "0.16.2",
-    "gmlewis/base64": "0.15.5",
-    "gmlewis/sha256": "0.17.21"
+    "gmlewis/md5": "0.19.24",
+    "gmlewis/base64": "0.16.1",
+    "gmlewis/sha256": "0.17.22"
   },
   "readme": "README.md",
   "repository": "",

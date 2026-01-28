@@ -1,0 +1,6 @@
+{
+  "import": [
+    { "path": "myfreess/postgres/protocol", "alias": "proto" },
+    "moonbitlang/core/buffer"
+  ]
+}

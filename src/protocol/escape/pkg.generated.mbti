@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/escape"
+
+import {
+  "myfreess/postgres/protocol",
+}
+
+// Values
+pub fn escape_identifier(BytesView) -> Bytes raise @protocol.ProtocolError
+
+pub fn escape_literal(BytesView) -> Bytes raise @protocol.ProtocolError
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

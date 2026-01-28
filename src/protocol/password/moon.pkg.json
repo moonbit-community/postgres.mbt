@@ -1,0 +1,10 @@
+{
+  "import": [
+    { "path": "myfreess/postgres/protocol", "alias": "proto" },
+    { "path": "myfreess/postgres/protocol/crypto", "alias": "crypto" },
+    { "path": "myfreess/postgres/protocol/authentication/sasl", "alias": "sasl" },
+    { "path": "gmlewis/base64", "alias": "base64" },
+    "moonbitlang/core/buffer",
+    "moonbitlang/core/random"
+  ]
+}

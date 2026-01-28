@@ -1,0 +1,57 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/message/frontend"
+
+import {
+  "moonbitlang/core/buffer",
+  "myfreess/postgres/protocol",
+}
+
+// Values
+pub fn[T] bind(BytesView, BytesView, Iter[Int], Iter[T], (T, @buffer.Buffer) -> @protocol.IsNull raise @protocol.ProtocolError, Iter[Int], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn cancel_request(Int, Int, @buffer.Buffer) -> Unit
+
+pub fn close(Byte, BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn copy_done(@buffer.Buffer) -> Unit
+
+pub fn copy_fail(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn describe(Byte, BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn execute(BytesView, Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn flush(@buffer.Buffer) -> Unit
+
+pub fn parse(BytesView, BytesView, Iter[UInt], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn password_message(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn query(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn sasl_initial_response(BytesView, BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn sasl_response(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn ssl_request(@buffer.Buffer) -> Unit
+
+pub fn startup_message(Iter[(BytesView, BytesView)], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+
+pub fn sync(@buffer.Buffer) -> Unit
+
+pub fn terminate(@buffer.Buffer) -> Unit
+
+// Errors
+
+// Types and methods
+pub struct CopyData {
+  buf : Bytes
+  len : Int
+}
+pub fn CopyData::new(BytesView) -> Self raise @protocol.ProtocolError
+pub fn CopyData::write(Self, @buffer.Buffer) -> Unit
+
+// Type aliases
+
+// Traits
+

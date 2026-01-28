@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/password"
+
+// Values
+pub fn md5(BytesView, BytesView) -> Bytes
+
+pub fn scram_sha_256(BytesView) -> Bytes
+
+pub fn scram_sha_256_salt(BytesView, BytesView) -> Bytes
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

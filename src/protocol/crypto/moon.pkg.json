@@ -1,0 +1,8 @@
+{
+  "import": [
+    { "path": "myfreess/postgres/protocol", "alias": "proto" },
+    { "path": "gmlewis/sha256", "alias": "sha256" },
+    "moonbitlang/core/buffer",
+    "moonbitlang/core/encoding/utf8"
+  ]
+}

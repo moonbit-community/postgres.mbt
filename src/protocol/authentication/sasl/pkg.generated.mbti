@@ -1,0 +1,44 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "myfreess/postgres/protocol/authentication/sasl"
+
+import {
+  "myfreess/postgres/protocol",
+}
+
+// Values
+pub const SCRAM_SHA_256 : Bytes = SCRAM-SHA-256
+
+pub const SCRAM_SHA_256_PLUS : Bytes = SCRAM-SHA-256-PLUS
+
+pub fn hi(BytesView, BytesView, Int) -> Bytes raise @protocol.ProtocolError
+
+pub fn normalize(BytesView) -> Bytes
+
+// Errors
+
+// Types and methods
+pub enum ChannelBinding {
+  Unrequested
+  Unsupported
+  TlsServerEndPoint(Bytes)
+}
+pub fn ChannelBinding::tls_server_end_point(Bytes) -> Self
+pub fn ChannelBinding::unrequested() -> Self
+pub fn ChannelBinding::unsupported() -> Self
+
+pub struct ScramSha256 {
+  mut message : Bytes
+  mut state : State
+}
+pub fn ScramSha256::finish(Self, BytesView) -> Unit raise @protocol.ProtocolError
+pub fn ScramSha256::message(Self) -> BytesView raise @protocol.ProtocolError
+pub fn ScramSha256::new(BytesView, ChannelBinding) -> Self
+pub fn ScramSha256::new_inner(BytesView, ChannelBinding, Bytes) -> Self
+pub fn ScramSha256::update(Self, BytesView) -> Unit raise @protocol.ProtocolError
+
+type State
+
+// Type aliases
+
+// Traits
+
