@@ -5,7 +5,10 @@ pub fn md5_hash(
   username : BytesView,
   password : BytesView,
   salt : BytesView,
-) -> Bytes {
+) -> Bytes raise @proto.ProtocolError {
+  if salt.length() != 4 {
+    raise @proto.ProtocolError::InvalidInput("invalid MD5 salt length")
+  }
   let input = @buffer.new(size_hint=password.length() + username.length())
   input.write_bytesview(password)
   input.write_bytesview(username)

@@ -513,6 +513,12 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
     if len < 0 {
       raise @proto.ProtocolError::InvalidInput("invalid dimension size")
     }
+    if len != 0 {
+      let max = 0x7fff_ffff / len
+      if elements > max {
+        raise @proto.ProtocolError::InvalidInput("too many array elements")
+      }
+    }
     elements = elements * len
   }
   if dimensions == 0 {

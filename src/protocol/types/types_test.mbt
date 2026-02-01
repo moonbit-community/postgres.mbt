@@ -156,6 +156,19 @@ test "non_null_array" {
 }
 
 ///|
+test "array_too_many_elements" {
+  let buf = @buffer.new()
+  buf.write_int_be(2)
+  buf.write_int_be(0)
+  buf.write_uint_be(0U)
+  buf.write_int_be(0x7fff_ffff)
+  buf.write_int_be(0)
+  buf.write_int_be(2)
+  buf.write_int_be(0)
+  assert_true((try? array_from_sql(buf.to_bytes()[:])) is Err(_))
+}
+
+///|
 test "ltree" {
   let buf = @buffer.new()
   ltree_to_sql(b"A.B.C", buf)

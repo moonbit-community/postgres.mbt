@@ -10,14 +10,33 @@ pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
 pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 ///|
-/// Normalize a password for SCRAM. This is a best-effort UTF-8 decode without SASLprep.
+/// Normalize a password for SCRAM.
+/// Best-effort SASLprep: only ASCII-safe normalization is applied, otherwise the raw bytes are used.
 pub fn normalize(pass : BytesView) -> Bytes {
   try {
     let s = @utf8.decode(pass)
-    @utf8.encode(s)
+    match saslprep_ascii(s) {
+      Some(out) => out
+      None => pass.to_bytes()
+    }
   } catch {
     _ => pass.to_bytes()
   }
+}
+
+///|
+/// A minimal SASLprep path for ASCII-only passwords.
+/// Returns None to indicate "skip SASLprep" and use raw bytes.
+fn saslprep_ascii(s : String) -> Bytes? {
+  for ch in s {
+    if not(ch.is_ascii()) {
+      return None
+    }
+    if ch.is_ascii_control() {
+      return None
+    }
+  }
+  Some(@utf8.encode(s))
 }
 
 ///|

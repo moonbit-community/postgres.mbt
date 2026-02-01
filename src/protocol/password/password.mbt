@@ -12,18 +12,20 @@ pub fn scram_sha_256(password : BytesView) -> Bytes {
   for i in 0..<scram_default_salt_len {
     salt[i] = rng.int(limit=256).to_byte()
   }
-  scram_sha_256_salt(password, Bytes::from_array(salt[:]))
+  try! scram_sha_256_salt(password, Bytes::from_array(salt[:]))
 }
 
 ///|
 /// Hash password using SCRAM-SHA-256 with a provided salt.
-pub fn scram_sha_256_salt(password : BytesView, salt : BytesView) -> Bytes {
+pub fn scram_sha_256_salt(
+  password : BytesView,
+  salt : BytesView,
+) -> Bytes raise @proto.ProtocolError {
+  if salt.length() != scram_default_salt_len {
+    raise @proto.ProtocolError::InvalidInput("invalid SCRAM salt length")
+  }
   let prepared = @sasl.normalize(password)
-  let salted_password = try! @sasl.hi(
-    prepared[:],
-    salt,
-    scram_default_iterations,
-  )
+  let salted_password = @sasl.hi(prepared[:], salt, scram_default_iterations)
   let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
   let stored_key = @crypto.sha256_bytes(client_key[:])
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])

@@ -346,6 +346,16 @@ pub fn SaslMechanisms::next(
 }
 
 ///|
+pub fn SaslMechanisms::next_str(
+  self : SaslMechanisms,
+) -> String? raise @proto.ProtocolError {
+  match self.next() {
+    None => None
+    Some(value) => Some(decode_utf8(value[:]))
+  }
+}
+
+///|
 pub struct AuthenticationSaslContinueBody {
   data : Bytes
 }
@@ -393,6 +403,13 @@ pub struct CommandCompleteBody {
 ///|
 pub fn CommandCompleteBody::tag_bytes(self : CommandCompleteBody) -> BytesView {
   self.tag[:]
+}
+
+///|
+pub fn CommandCompleteBody::tag_str(
+  self : CommandCompleteBody,
+) -> String raise @proto.ProtocolError {
+  decode_utf8(self.tag[:])
 }
 
 ///|
@@ -633,10 +650,24 @@ pub fn NotificationResponseBody::channel_bytes(
 }
 
 ///|
+pub fn NotificationResponseBody::channel_str(
+  self : NotificationResponseBody,
+) -> String raise @proto.ProtocolError {
+  decode_utf8(self.channel[:])
+}
+
+///|
 pub fn NotificationResponseBody::message_bytes(
   self : NotificationResponseBody,
 ) -> BytesView {
   self.message[:]
+}
+
+///|
+pub fn NotificationResponseBody::message_str(
+  self : NotificationResponseBody,
+) -> String raise @proto.ProtocolError {
+  decode_utf8(self.message[:])
 }
 
 ///|
@@ -693,6 +724,20 @@ pub fn ParameterStatusBody::value_bytes(
   self : ParameterStatusBody,
 ) -> BytesView {
   self.value[:]
+}
+
+///|
+pub fn ParameterStatusBody::name_str(
+  self : ParameterStatusBody,
+) -> String raise @proto.ProtocolError {
+  decode_utf8(self.name[:])
+}
+
+///|
+pub fn ParameterStatusBody::value_str(
+  self : ParameterStatusBody,
+) -> String raise @proto.ProtocolError {
+  decode_utf8(self.value[:])
 }
 
 ///|
@@ -772,6 +817,11 @@ pub fn Field::name_bytes(self : Field) -> BytesView {
 }
 
 ///|
+pub fn Field::name_str(self : Field) -> String raise @proto.ProtocolError {
+  decode_utf8(self.name[:])
+}
+
+///|
 pub fn Field::table_oid(self : Field) -> @proto.Oid {
   self.table_oid
 }
@@ -811,4 +861,11 @@ fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
     i = i + 1
   }
   raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+}
+
+///|
+fn decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
+  @utf8.decode(bytes) catch {
+    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
+  }
 }

@@ -100,6 +100,7 @@ pub struct CommandCompleteBody {
   tag : Bytes
 }
 pub fn CommandCompleteBody::tag_bytes(Self) -> BytesView
+pub fn CommandCompleteBody::tag_str(Self) -> String raise @protocol.ProtocolError
 
 pub struct CopyDataBody {
   storage : Bytes
@@ -169,6 +170,7 @@ pub struct Field {
 pub fn Field::column_id(Self) -> Int
 pub fn Field::format(Self) -> Int
 pub fn Field::name_bytes(Self) -> BytesView
+pub fn Field::name_str(Self) -> String raise @protocol.ProtocolError
 pub fn Field::table_oid(Self) -> UInt
 pub fn Field::type_modifier(Self) -> Int
 pub fn Field::type_oid(Self) -> UInt
@@ -235,7 +237,9 @@ pub struct NotificationResponseBody {
   message : Bytes
 }
 pub fn NotificationResponseBody::channel_bytes(Self) -> BytesView
+pub fn NotificationResponseBody::channel_str(Self) -> String raise @protocol.ProtocolError
 pub fn NotificationResponseBody::message_bytes(Self) -> BytesView
+pub fn NotificationResponseBody::message_str(Self) -> String raise @protocol.ProtocolError
 pub fn NotificationResponseBody::process_id(Self) -> Int
 
 pub struct ParameterDescriptionBody {
@@ -249,7 +253,9 @@ pub struct ParameterStatusBody {
   value : Bytes
 }
 pub fn ParameterStatusBody::name_bytes(Self) -> BytesView
+pub fn ParameterStatusBody::name_str(Self) -> String raise @protocol.ProtocolError
 pub fn ParameterStatusBody::value_bytes(Self) -> BytesView
+pub fn ParameterStatusBody::value_str(Self) -> String raise @protocol.ProtocolError
 
 pub struct Parameters {
   mut buf : BytesView
@@ -279,6 +285,7 @@ pub struct SaslMechanisms {
   mut buf : BytesView
 }
 pub fn SaslMechanisms::next(Self) -> Bytes? raise @protocol.ProtocolError
+pub fn SaslMechanisms::next_str(Self) -> String? raise @protocol.ProtocolError
 
 // Type aliases
 

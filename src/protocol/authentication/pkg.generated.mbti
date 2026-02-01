@@ -1,8 +1,12 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "myfreess/postgres/protocol/authentication"
 
+import {
+  "myfreess/postgres/protocol",
+}
+
 // Values
-pub fn md5_hash(BytesView, BytesView, BytesView) -> Bytes
+pub fn md5_hash(BytesView, BytesView, BytesView) -> Bytes raise @protocol.ProtocolError
 
 // Errors
 
