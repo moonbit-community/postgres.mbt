@@ -192,8 +192,10 @@ pub fn ScramSha256::update(
   if not(starts_with(parsed.nonce[:], client_nonce[:])) {
     raise @proto.ProtocolError::InvalidInput("invalid nonce")
   }
-  let salt_str = @base64.bytes2str(parsed.salt)
-  let salt = @base64.std_decode2bytes(salt_str) catch {
+  let salt_str = @utf8.decode(parsed.salt) catch {
+    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 salt")
+  }
+  let salt = @base64.decode(salt_str) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid base64 salt")
   }
   let salted_password = hi(password[:], salt[:], parsed.iteration_count)
@@ -205,7 +207,7 @@ pub fn ScramSha256::update(
   )
   cbind.write_bytesview(channel_binding.gs2_header())
   cbind.write_bytesview(channel_binding.cbind_data())
-  let cbind_b64 = @base64.std_encode2bytes(cbind.to_bytes().to_fixedarray())
+  let cbind_b64 = @proto.utf8_encode(@base64.encode(cbind.to_bytes()[:]))
   let client_final = @buffer.new(
     size_hint=2 + cbind_b64.length() + 3 + parsed.nonce.length(),
   )
@@ -231,7 +233,7 @@ pub fn ScramSha256::update(
   let auth_message = auth.to_bytes()
   let client_signature = @crypto.hmac_sha256(stored_key[:], auth_message[:])
   let client_proof = xor_bytes(client_key[:], client_signature[:])
-  let client_proof_b64 = @base64.std_encode2bytes(client_proof.to_fixedarray())
+  let client_proof_b64 = @proto.utf8_encode(@base64.encode(client_proof[:]))
   let final_msg = @buffer.new(
     size_hint=client_final_without_proof.length() +
       3 +
@@ -257,13 +259,15 @@ pub fn ScramSha256::finish(
   let parsed = Parser::new(message).server_final_message()
   let verifier_b64 = match parsed {
     ServerFinalMessage::Error(err) => {
-      let msg = @base64.bytes2str(err)
+      let msg = @utf8.decode(err[:]) catch { _ => "<invalid utf-8>" }
       raise @proto.ProtocolError::InvalidInput("SCRAM error: \{msg}")
     }
     ServerFinalMessage::Verifier(v) => v
   }
-  let verifier_str = @base64.bytes2str(verifier_b64)
-  let verifier = @base64.std_decode2bytes(verifier_str) catch {
+  let verifier_str = @utf8.decode(verifier_b64) catch {
+    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 verifier")
+  }
+  let verifier = @base64.decode(verifier_str) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid base64 verifier")
   }
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])

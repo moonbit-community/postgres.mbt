@@ -2,7 +2,7 @@ import {
   "myfreess/postgres/protocol" @proto,
   "myfreess/postgres/protocol/crypto" @crypto,
   "myfreess/postgres/protocol/authentication/sasl" @sasl,
-  "gmlewis/base64" @base64,
+  "moonbitlang/x/codec/base64" @base64,
   "moonbitlang/core/buffer",
   "moonbitlang/core/random",
 }

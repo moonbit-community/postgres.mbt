@@ -29,9 +29,9 @@ pub fn scram_sha_256_salt(
   let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
   let stored_key = @crypto.sha256_bytes(client_key[:])
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])
-  let salt_b64 = @base64.std_encode2bytes(salt.to_fixedarray())
-  let stored_b64 = @base64.std_encode2bytes(stored_key.to_fixedarray())
-  let server_b64 = @base64.std_encode2bytes(server_key.to_fixedarray())
+  let salt_b64 = @proto.utf8_encode(@base64.encode(salt))
+  let stored_b64 = @proto.utf8_encode(@base64.encode(stored_key[:]))
+  let server_b64 = @proto.utf8_encode(@base64.encode(server_key[:]))
   let out = @buffer.new(
     size_hint=11 +
       1 +

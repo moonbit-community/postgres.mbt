@@ -26,10 +26,6 @@
   - 现状: 未检查 `points >= 0`，也未检查 `buf.length() == 5 + points * 16`。
   - 风险: 非法输入被延迟到迭代时才报错，解析对象可处于不一致状态。
 
-- [ ] 为手写 `HMAC-SHA256` / `MD5` 增加标准测试向量覆盖，必要时评估是否替换为成熟实现。
-  - 位置: [src/protocol/crypto/crypto.mbt](/home/foo/works/postgres.mbt/src/protocol/crypto/crypto.mbt)
-  - 风险: 这类安全敏感代码当前主要靠间接 happy-path 测试，回归风险偏高。
-
 ## P2
 
 - [ ] 在 `array_to_sql` 中验证元素个数与维度乘积一致。

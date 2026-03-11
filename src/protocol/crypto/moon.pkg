@@ -1,6 +1,4 @@
 import {
   "myfreess/postgres/protocol" @proto,
-  "gmlewis/sha256" @sha256,
-  "moonbitlang/core/buffer",
-  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/x/crypto" @xcrypto,
 }
