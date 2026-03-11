@@ -1,0 +1,4 @@
+import {
+  "myfreess/postgres/protocol" @proto,
+  "moonbitlang/core/buffer",
+}

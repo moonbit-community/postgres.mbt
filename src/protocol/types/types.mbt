@@ -478,7 +478,7 @@ pub fn[T] array_to_sql(
   let mut has_nulls = false
   for element in elements {
     @proto.write_nullable(
-      fn(b) {
+      b => {
         let r = serializer(element, b)
         match r {
           @proto.IsNull::Yes => has_nulls = true

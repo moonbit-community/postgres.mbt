@@ -53,22 +53,18 @@ pub fn[T] bind(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'B')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     write_cstr(portal, b)
     write_cstr(statement, b)
-    write_counted(
-      formats,
-      fn(f, b) { b.write_int16_be(@proto.checked_i16(f)) },
-      b,
-    )
+    write_counted(formats, (f, b) => b.write_int16_be(@proto.checked_i16(f)), b)
     write_counted(
       values,
-      fn(v, b) { @proto.write_nullable(fn(b2) { serializer(v, b2) }, b) },
+      (v, b) => @proto.write_nullable(b2 => serializer(v, b2), b),
       b,
     )
     write_counted(
       result_formats,
-      fn(f, b) { b.write_int16_be(@proto.checked_i16(f)) },
+      (f, b) => b.write_int16_be(@proto.checked_i16(f)),
       b,
     )
   })
@@ -96,7 +92,7 @@ pub fn close(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'C')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     b.write_byte(variant)
     write_cstr(name, b)
   })
@@ -137,7 +133,7 @@ pub fn copy_fail(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'f')
-  write_body(buf, fn(b) { write_cstr(message, b) })
+  write_body(buf, b => write_cstr(message, b))
 }
 
 ///|
@@ -148,7 +144,7 @@ pub fn describe(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'D')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     b.write_byte(variant)
     write_cstr(name, b)
   })
@@ -162,7 +158,7 @@ pub fn execute(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'E')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     write_cstr(portal, b)
     b.write_int_be(@proto.checked_i32(max_rows))
   })
@@ -177,7 +173,7 @@ pub fn parse(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'P')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     write_cstr(name, b)
     write_cstr(query, b)
     write_counted(param_types, fn(t, b) { b.write_uint_be(t) }, b)
@@ -191,7 +187,7 @@ pub fn password_message(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'p')
-  write_body(buf, fn(b) { write_cstr(password, b) })
+  write_body(buf, b => write_cstr(password, b))
 }
 
 ///|
@@ -201,7 +197,7 @@ pub fn query(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'Q')
-  write_body(buf, fn(b) { write_cstr(query, b) })
+  write_body(buf, b => write_cstr(query, b))
 }
 
 ///|
@@ -212,7 +208,7 @@ pub fn sasl_initial_response(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'p')
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     write_cstr(mechanism, b)
     let len = @proto.i32_from_usize(data.length())
     b.write_int_be(len)
@@ -242,7 +238,7 @@ pub fn startup_message(
   parameters : Iter[(BytesView, BytesView)],
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
-  write_body(buf, fn(b) {
+  write_body(buf, b => {
     b.write_int_be(0x00_03_00_00)
     for pair in parameters {
       let (key, value) = pair
