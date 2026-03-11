@@ -5,14 +5,12 @@ let scram_default_iterations = 4096
 let scram_default_salt_len = 16
 
 ///|
-/// Hash password using SCRAM-SHA-256 with a random salt.
-pub fn scram_sha_256(password : BytesView) -> Bytes {
-  let rng = @random.Rand::new()
-  let salt = Array::make(scram_default_salt_len, b'\x00')
-  for i in 0..<scram_default_salt_len {
-    salt[i] = rng.int(limit=256).to_byte()
-  }
-  try! scram_sha_256_salt(password, Bytes::from_array(salt[:]))
+/// Hash password using SCRAM-SHA-256 with a caller-provided salt.
+pub fn scram_sha_256(
+  password : BytesView,
+  salt : BytesView,
+) -> Bytes raise @proto.ProtocolError {
+  scram_sha_256_salt(password, salt)
 }
 
 ///|

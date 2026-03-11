@@ -114,3 +114,20 @@ test "sasl_mechanisms_str" {
     _ => fail("unexpected message")
   }
 }
+
+///|
+test "datarow_rejects_invalid_negative_length" {
+  let payload = @buffer.new()
+  payload.write_uint16_be((1).to_uint16())
+  payload.write_int_be(-2)
+  let msg = build_message(DATA_ROW_TAG, payload.to_bytes()[:])
+  match (try! parse_message(msg[:])) {
+    DataRow(body) => {
+      let result = try? body.ranges().next()
+      guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+        fail("expected invalid input")
+      }
+    }
+    _ => fail("unexpected message")
+  }
+}

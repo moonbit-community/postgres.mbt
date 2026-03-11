@@ -65,6 +65,20 @@ test "hstore" {
 }
 
 ///|
+test "hstore_rejects_invalid_negative_length" {
+  let buf = @buffer.new()
+  buf.write_int_be(1)
+  buf.write_int_be(1)
+  buf.write_bytesview(b"k"[:])
+  buf.write_int_be(-2)
+  let entries = try! hstore_from_sql(buf.to_bytes()[:])
+  let result = try? entries.next()
+  guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+    fail("expected invalid input")
+  }
+}
+
+///|
 test "varbit" {
   let len = 12
   let bits : Array[Byte] = b"\x2b\x0f".to_array()
@@ -156,6 +170,31 @@ test "non_null_array" {
 }
 
 ///|
+test "array_to_sql_rejects_mismatched_element_count" {
+  let dimensions : Array[ArrayDimension] = [ArrayDimension::new(2, 1)]
+  let values : Array[Bytes?] = [Some(b"hola")]
+  let buf = @buffer.new()
+  let result = try? array_to_sql(
+    dimensions.iter(),
+    10U,
+    values.iter(),
+    fn(v, b) {
+      match v {
+        Some(val) => {
+          b.write_bytesview(val[:])
+          @proto.IsNull::No
+        }
+        None => @proto.IsNull::Yes
+      }
+    },
+    buf,
+  )
+  guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+    fail("expected invalid input")
+  }
+}
+
+///|
 test "array_too_many_elements" {
   let buf = @buffer.new()
   buf.write_int_be(2)
@@ -166,6 +205,44 @@ test "array_too_many_elements" {
   buf.write_int_be(2)
   buf.write_int_be(0)
   assert_true((try? array_from_sql(buf.to_bytes()[:])) is Err(_))
+}
+
+///|
+test "array_rejects_invalid_negative_length" {
+  let buf = @buffer.new()
+  buf.write_int_be(1)
+  buf.write_int_be(1)
+  buf.write_uint_be(0U)
+  buf.write_int_be(1)
+  buf.write_int_be(0)
+  buf.write_int_be(-2)
+  let array = try! array_from_sql(buf.to_bytes()[:])
+  let result = try? array.values().next()
+  guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+    fail("expected invalid input")
+  }
+}
+
+///|
+test "path_rejects_negative_point_count" {
+  let buf = @buffer.new()
+  buf.write_byte(1)
+  buf.write_int_be(-1)
+  let result = try? path_from_sql(buf.to_bytes()[:])
+  guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+    fail("expected invalid input")
+  }
+}
+
+///|
+test "path_rejects_length_mismatch" {
+  let buf = @buffer.new()
+  buf.write_byte(1)
+  buf.write_int_be(1)
+  let result = try? path_from_sql(buf.to_bytes()[:])
+  guard result is Err(@proto.ProtocolError::InvalidInput(_)) else {
+    fail("expected invalid input")
+  }
 }
 
 ///|

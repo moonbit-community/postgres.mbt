@@ -4,5 +4,4 @@ import {
   "myfreess/postgres/protocol/authentication/sasl" @sasl,
   "moonbitlang/x/codec/base64" @base64,
   "moonbitlang/core/buffer",
-  "moonbitlang/core/random",
 }

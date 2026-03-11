@@ -12,7 +12,7 @@ pub const SCRAM_SHA_256_PLUS : Bytes = SCRAM-SHA-256-PLUS
 
 pub fn hi(BytesView, BytesView, Int) -> Bytes raise @protocol.ProtocolError
 
-pub fn normalize(BytesView) -> Bytes
+pub fn normalize(BytesView) -> Bytes raise @protocol.ProtocolError
 
 // Errors
 
@@ -32,8 +32,8 @@ pub struct ScramSha256 {
 }
 pub fn ScramSha256::finish(Self, BytesView) -> Unit raise @protocol.ProtocolError
 pub fn ScramSha256::message(Self) -> BytesView raise @protocol.ProtocolError
-pub fn ScramSha256::new(BytesView, ChannelBinding) -> Self
-pub fn ScramSha256::new_inner(BytesView, ChannelBinding, Bytes) -> Self
+pub fn ScramSha256::new(BytesView, ChannelBinding, BytesView) -> Self raise @protocol.ProtocolError
+pub fn ScramSha256::new_inner(BytesView, ChannelBinding, Bytes) -> Self raise @protocol.ProtocolError
 pub fn ScramSha256::update(Self, BytesView) -> Unit raise @protocol.ProtocolError
 
 type State

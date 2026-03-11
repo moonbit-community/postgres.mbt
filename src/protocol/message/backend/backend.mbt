@@ -550,6 +550,9 @@ pub fn DataRowRanges::next(
   let r = @proto.ByteReader::new(self.buf)
   let len = r.read_i32_be()
   if len < 0 {
+    if len != -1 {
+      raise @proto.ProtocolError::InvalidInput("invalid value length")
+    }
     self.buf = self.buf[4:]
     return Some(None)
   }

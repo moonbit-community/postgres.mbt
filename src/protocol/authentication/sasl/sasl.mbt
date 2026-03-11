@@ -1,7 +1,4 @@
 ///|
-let nonce_length = 24
-
-///|
 /// Identifier of SCRAM-SHA-256 SASL authentication mechanism.
 pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
 
@@ -11,32 +8,115 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 ///|
 /// Normalize a password for SCRAM.
-/// Best-effort SASLprep: only ASCII-safe normalization is applied, otherwise the raw bytes are used.
-pub fn normalize(pass : BytesView) -> Bytes {
-  try {
-    let s = @utf8.decode(pass)
-    match saslprep_ascii(s) {
-      Some(out) => out
-      None => pass.to_bytes()
+/// Applies SASLprep-style mapping plus modern Unicode NFKC normalization.
+/// This uses the public normalization API from `tonyfettes/unicode`, so it is
+/// intentionally closer to modern Unicode behavior than strict RFC 4013.
+pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
+  let s = @utf8.decode(pass) catch {
+    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
+  }
+  let mapped = map_saslprep_input(s)
+  let normalized = @unicode_normalization.nfkc(mapped)
+  validate_saslprep_output(normalized)
+  @utf8.encode(normalized)
+}
+
+///|
+fn map_saslprep_input(s : String) -> String {
+  let out = StringBuilder::new(size_hint=s.length())
+  for ch in s {
+    if is_mapped_to_nothing(ch) {
+      continue
     }
-  } catch {
-    _ => pass.to_bytes()
+    out.write_char(if is_non_ascii_space(ch) { ' ' } else { ch })
+  }
+  out.to_string()
+}
+
+///|
+fn validate_saslprep_output(s : String) -> Unit raise @proto.ProtocolError {
+  for ch in s {
+    if is_prohibited_output(ch) {
+      raise @proto.ProtocolError::InvalidInput(
+        "SCRAM password contains prohibited characters",
+      )
+    }
   }
 }
 
 ///|
-/// A minimal SASLprep path for ASCII-only passwords.
-/// Returns None to indicate "skip SASLprep" and use raw bytes.
-fn saslprep_ascii(s : String) -> Bytes? {
-  for ch in s {
-    if not(ch.is_ascii()) {
-      return None
-    }
-    if ch.is_ascii_control() {
-      return None
-    }
-  }
-  Some(@utf8.encode(s))
+fn is_non_ascii_space(ch : Char) -> Bool {
+  not(ch.is_ascii()) && ch.is_whitespace()
+}
+
+///|
+fn is_mapped_to_nothing(ch : Char) -> Bool {
+  let cp = ch.to_int()
+  cp == 0x00AD ||
+  cp == 0x034F ||
+  cp == 0x1806 ||
+  (cp >= 0x180B && cp <= 0x180D) ||
+  cp == 0x200B ||
+  cp == 0x200C ||
+  cp == 0x200D ||
+  cp == 0x2060 ||
+  (cp >= 0xFE00 && cp <= 0xFE0F) ||
+  cp == 0xFEFF
+}
+
+///|
+fn is_prohibited_output(ch : Char) -> Bool {
+  let cp = ch.to_int()
+  ch.is_control() ||
+  is_private_use(cp) ||
+  is_surrogate(cp) ||
+  is_noncharacter(cp) ||
+  is_inappropriate_for_plain_text(cp) ||
+  is_inappropriate_for_canonical_representation(cp) ||
+  is_change_display_properties(cp) ||
+  is_tagging(cp)
+}
+
+///|
+fn is_private_use(cp : Int) -> Bool {
+  (cp >= 0xE000 && cp <= 0xF8FF) ||
+  (cp >= 0xF0000 && cp <= 0xFFFFD) ||
+  (cp >= 0x100000 && cp <= 0x10FFFD)
+}
+
+///|
+fn is_surrogate(cp : Int) -> Bool {
+  cp >= 0xD800 && cp <= 0xDFFF
+}
+
+///|
+fn is_noncharacter(cp : Int) -> Bool {
+  (cp >= 0xFDD0 && cp <= 0xFDEF) || (cp <= 0x10FFFF && (cp & 0xFFFE) == 0xFFFE)
+}
+
+///|
+fn is_inappropriate_for_plain_text(cp : Int) -> Bool {
+  cp >= 0xFFF9 && cp <= 0xFFFD
+}
+
+///|
+fn is_inappropriate_for_canonical_representation(cp : Int) -> Bool {
+  cp >= 0x2FF0 && cp <= 0x2FFB
+}
+
+///|
+fn is_change_display_properties(cp : Int) -> Bool {
+  cp == 0x0340 ||
+  cp == 0x0341 ||
+  cp == 0x200E ||
+  cp == 0x200F ||
+  (cp >= 0x202A && cp <= 0x202E) ||
+  (cp >= 0x206A && cp <= 0x206F)
+}
+
+///|
+fn is_tagging(cp : Int) -> Bool {
+  cp == 0xE0001 || (cp >= 0xE0020 && cp <= 0xE007F)
 }
 
 ///|
@@ -128,32 +208,28 @@ pub struct ScramSha256 {
 }
 
 ///|
-/// Construct a new SCRAM-SHA-256 exchange using a random nonce.
+/// Construct a new SCRAM-SHA-256 exchange from caller-provided random nonce bytes.
+/// The nonce bytes are base64-encoded to a SCRAM-safe ASCII nonce.
 pub fn ScramSha256::new(
   password : BytesView,
   channel_binding : ChannelBinding,
-) -> ScramSha256 {
-  let rng = @random.Rand::new()
-  let nonce_bytes = Array::make(nonce_length, b'a')
-  let span = 0x7e - 0x21 + 1
-  for i in 0..<nonce_length {
-    let mut v = rng.int(limit=span) + 0x21
-    if v == 0x2c {
-      v = 0x7e
-    }
-    nonce_bytes[i] = v.to_byte()
+  nonce_bytes : BytesView,
+) -> ScramSha256 raise @proto.ProtocolError {
+  if nonce_bytes.length() == 0 {
+    raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
   }
-  let nonce = Bytes::from_array(nonce_bytes[:])
+  let nonce = @proto.utf8_encode(@base64.encode(nonce_bytes))
   ScramSha256::new_inner(password, channel_binding, nonce)
 }
 
 ///|
-/// Construct a new SCRAM-SHA-256 exchange with a provided nonce (for tests).
+/// Construct a new SCRAM-SHA-256 exchange with a provided encoded nonce.
 pub fn ScramSha256::new_inner(
   password : BytesView,
   channel_binding : ChannelBinding,
   nonce : Bytes,
-) -> ScramSha256 {
+) -> ScramSha256 raise @proto.ProtocolError {
+  validate_nonce(nonce[:])
   let msg = @buffer.new(
     size_hint=channel_binding.gs2_header().length() + 4 + nonce.length(),
   )
@@ -163,6 +239,18 @@ pub fn ScramSha256::new_inner(
   {
     message: msg.to_bytes(),
     state: Update(nonce~, password=normalize(password), channel_binding~),
+  }
+}
+
+///|
+fn validate_nonce(nonce : BytesView) -> Unit raise @proto.ProtocolError {
+  if nonce.length() == 0 {
+    raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
+  }
+  for byte in nonce {
+    if byte == b',' || byte < 0x21 || byte > 0x7e {
+      raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
+    }
   }
 }
 

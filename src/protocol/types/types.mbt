@@ -287,6 +287,9 @@ pub fn HstoreEntries::next(
   let r2 = @proto.ByteReader::new(self.buf)
   let value_len = r2.read_i32_be()
   if value_len < 0 {
+    if value_len != -1 {
+      raise @proto.ProtocolError::InvalidInput("invalid value length")
+    }
     self.buf = self.buf[4:]
     return Some((key.to_bytes(), None))
   }
@@ -470,13 +473,29 @@ pub fn[T] array_to_sql(
 ) -> Unit raise @proto.ProtocolError {
   let payload = @buffer.new()
   let mut num_dimensions = 0
+  let mut expected_elements = 1
   for dimension in dimensions {
+    if dimension.len < 0 {
+      raise @proto.ProtocolError::InvalidInput("invalid dimension size")
+    }
     num_dimensions = num_dimensions + 1
+    if dimension.len != 0 {
+      let max = 0x7fff_ffff / dimension.len
+      if expected_elements > max {
+        raise @proto.ProtocolError::InvalidInput("too many array elements")
+      }
+    }
+    expected_elements = expected_elements * dimension.len
     payload.write_int_be(@proto.checked_i32(dimension.len))
     payload.write_int_be(@proto.checked_i32(dimension.lower_bound))
   }
+  if num_dimensions == 0 {
+    expected_elements = 0
+  }
   let mut has_nulls = false
+  let mut actual_elements = 0
   for element in elements {
+    actual_elements = actual_elements + 1
     @proto.write_nullable(
       b => {
         let r = serializer(element, b)
@@ -487,6 +506,11 @@ pub fn[T] array_to_sql(
         r
       },
       payload,
+    )
+  }
+  if actual_elements != expected_elements {
+    raise @proto.ProtocolError::InvalidInput(
+      "array element count does not match dimensions",
     )
   }
   let num_dimensions_i32 = @proto.i32_from_usize(num_dimensions)
@@ -625,6 +649,9 @@ pub fn ArrayValues::next(
   let r = @proto.ByteReader::new(self.buf)
   let len = r.read_i32_be()
   if len < 0 {
+    if len != -1 {
+      raise @proto.ProtocolError::InvalidInput("invalid value length")
+    }
     self.buf = self.buf[4:]
     return Some(None)
   }
@@ -869,6 +896,13 @@ pub fn path_from_sql(buf : BytesView) -> Path raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let closed = r.read_u8() != 0
   let points = r.read_i32_be()
+  if points < 0 {
+    raise @proto.ProtocolError::InvalidInput("invalid point count")
+  }
+  let payload_len = buf.length() - 5
+  if payload_len < 0 || payload_len % 16 != 0 || payload_len / 16 != points {
+    raise @proto.ProtocolError::InvalidInput("invalid message length")
+  }
   { closed, points, buf: buf[5:] }
 }
 
