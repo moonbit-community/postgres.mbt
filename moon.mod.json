@@ -1,5 +1,5 @@
 {
-  "name": "myfreess/postgres",
+  "name": "moonbit-community/postgres",
   "version": "0.1.0",
   "deps": {
     "moonbitlang/async": "0.16.7",

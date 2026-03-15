@@ -1,4 +1,4 @@
 import {
-  "myfreess/postgres/protocol" @proto,
+  "moonbit-community/postgres/protocol" @proto,
   "moonbitlang/x/crypto" @xcrypto,
 }

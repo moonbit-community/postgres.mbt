@@ -1,6 +1,6 @@
 import {
-  "myfreess/postgres/protocol" @proto,
-  "myfreess/postgres/protocol/crypto" @crypto,
+  "moonbit-community/postgres/protocol" @proto,
+  "moonbit-community/postgres/protocol/crypto" @crypto,
   "tonyfettes/unicode/normalization" @unicode_normalization,
   "moonbitlang/x/codec/base64" @base64,
   "moonbitlang/core/buffer",

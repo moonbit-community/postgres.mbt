@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol/crypto"
+package "moonbit-community/postgres/protocol/crypto"
 
 // Values
 pub fn hex_encode(BytesView) -> Bytes

@@ -1,8 +1,8 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol/authentication"
+package "moonbit-community/postgres/protocol/authentication"
 
 import {
-  "myfreess/postgres/protocol",
+  "moonbit-community/postgres/protocol",
 }
 
 // Values

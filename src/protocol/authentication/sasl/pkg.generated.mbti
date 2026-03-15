@@ -1,8 +1,8 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol/authentication/sasl"
+package "moonbit-community/postgres/protocol/authentication/sasl"
 
 import {
-  "myfreess/postgres/protocol",
+  "moonbit-community/postgres/protocol",
 }
 
 // Values

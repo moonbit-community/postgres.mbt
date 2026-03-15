@@ -1,9 +1,9 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol/types"
+package "moonbit-community/postgres/protocol/types"
 
 import {
+  "moonbit-community/postgres/protocol",
   "moonbitlang/core/buffer",
-  "myfreess/postgres/protocol",
 }
 
 // Values

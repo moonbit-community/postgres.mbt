@@ -1,0 +1,122 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/postgres/client"
+
+import {
+  "moonbit-community/postgres/protocol",
+}
+
+// Values
+
+// Errors
+pub suberror ClientError {
+  Database(DatabaseError)
+  Authentication(String)
+  Unsupported(String)
+  UnexpectedMessage(String)
+  Ssl(String)
+}
+pub impl Eq for ClientError
+pub impl Show for ClientError
+
+// Types and methods
+type Client
+pub fn Client::close(Self) -> Unit
+pub async fn Client::connect(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
+pub fn Client::parameter_status(Self, String) -> String?
+pub fn Client::process_id(Self) -> Int
+pub async fn Client::query(Self, String, params? : Array[QueryParam]) -> QueryResult
+pub fn Client::secret_key(Self) -> Int
+pub async fn Client::simple_query(Self, String) -> QueryResult
+pub fn Client::transaction_status(Self) -> Byte
+
+pub struct Column {
+  name : String
+  table_oid : UInt
+  column_id : Int
+  type_oid : UInt
+  type_size : Int
+  type_modifier : Int
+  format : Int
+}
+pub fn Column::column_id(Self) -> Int
+pub fn Column::format(Self) -> Int
+pub fn Column::name(Self) -> String
+pub fn Column::table_oid(Self) -> UInt
+pub fn Column::type_modifier(Self) -> Int
+pub fn Column::type_oid(Self) -> UInt
+pub fn Column::type_size(Self) -> Int
+pub impl Eq for Column
+pub impl Show for Column
+
+pub struct DatabaseError {
+  severity : String?
+  code : String?
+  message : String
+  detail : String?
+  hint : String?
+}
+pub fn DatabaseError::code(Self) -> String?
+pub fn DatabaseError::detail(Self) -> String?
+pub fn DatabaseError::hint(Self) -> String?
+pub fn DatabaseError::message(Self) -> String
+pub fn DatabaseError::severity(Self) -> String?
+pub impl Eq for DatabaseError
+pub impl Show for DatabaseError
+
+pub enum QueryParam {
+  Null
+  Text(Bytes)
+}
+pub fn QueryParam::bool(Bool) -> Self
+pub fn QueryParam::bytes(BytesView) -> Self
+pub fn QueryParam::double(Double) -> Self
+pub fn QueryParam::int(Int) -> Self
+pub fn QueryParam::int64(Int64) -> Self
+pub fn QueryParam::null() -> Self
+pub fn QueryParam::string(String) -> Self
+pub impl Eq for QueryParam
+pub impl Show for QueryParam
+
+pub struct QueryResult {
+  columns : Array[Column]
+  rows : Array[Row]
+  command_tag : String
+}
+pub fn QueryResult::column_count(Self) -> Int
+pub fn QueryResult::columns(Self) -> Array[Column]
+pub fn QueryResult::command_tag(Self) -> String
+pub fn QueryResult::row_count(Self) -> Int
+pub fn QueryResult::rows(Self) -> Array[Row]
+pub impl Eq for QueryResult
+pub impl Show for QueryResult
+
+pub struct Row {
+  columns : Array[Column]
+  values : Array[Bytes?]
+}
+pub fn Row::columns(Self) -> Array[Column]
+pub fn Row::get(Self, Int) -> Bytes?
+pub fn Row::get_named(Self, String) -> Bytes??
+pub fn Row::get_named_text(Self, String) -> String?? raise @protocol.ProtocolError
+pub fn Row::get_text(Self, Int) -> String? raise @protocol.ProtocolError
+pub fn Row::index_of(Self, String) -> Int?
+pub fn Row::len(Self) -> Int
+pub fn Row::values(Self) -> Array[Bytes?]
+pub impl Eq for Row
+pub impl Show for Row
+
+pub enum SslMode {
+  Disable
+  Prefer
+  Require
+}
+pub fn SslMode::disable() -> Self
+pub fn SslMode::prefer() -> Self
+pub fn SslMode::require() -> Self
+pub impl Eq for SslMode
+pub impl Show for SslMode
+
+// Type aliases
+
+// Traits
+

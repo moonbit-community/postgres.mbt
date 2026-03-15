@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol"
+package "moonbit-community/postgres/protocol"
 
 import {
   "moonbitlang/core/buffer",

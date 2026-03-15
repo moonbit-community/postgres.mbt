@@ -1,9 +1,9 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "myfreess/postgres/protocol/message/frontend"
+package "moonbit-community/postgres/protocol/message/frontend"
 
 import {
+  "moonbit-community/postgres/protocol",
   "moonbitlang/core/buffer",
-  "myfreess/postgres/protocol",
 }
 
 // Values
