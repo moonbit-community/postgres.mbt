@@ -1,74 +1,4 @@
 ///|
-struct IntegrationConfig {
-  host : String
-  port : Int
-  user : String
-  password : String
-  database : String
-}
-
-///|
-struct IntegrationSession {
-  config : IntegrationConfig
-  client : @client.Client
-}
-
-///|
-async fn env_var(name : String) -> String? {
-  let (code, output) = @process.collect_stdout("/usr/bin/printenv", [name])
-  if code != 0 {
-    return None
-  }
-  Some(output.text().trim().to_string())
-}
-
-///|
-async fn integration_config() -> IntegrationConfig? {
-  guard env_var("RUN_POSTGRES_INTEGRATION") == Some("1") else { return None }
-  let host = env_var("POSTGRES_HOST").unwrap_or("127.0.0.1")
-  let port = match env_var("POSTGRES_PORT") {
-    None => 5432
-    Some(port) => @strconv.parse_int(port)
-  }
-  let user = env_var("POSTGRES_USER").unwrap_or("moon")
-  let password = env_var("POSTGRES_PASSWORD").unwrap_or("moonpass")
-  let database = env_var("POSTGRES_DB").unwrap_or("moondb")
-  Some({ host, port, user, password, database })
-}
-
-///|
-async fn integration_session(
-  ssl_mode? : @client.SslMode = @client.SslMode::disable(),
-  application_name? : String = "moonbit-postgres",
-) -> IntegrationSession? {
-  match integration_config() {
-    None => None
-    Some(config) => {
-      let client = @client.Client::connect(
-        config.host,
-        user=config.user,
-        database=config.database,
-        password=config.password,
-        port=config.port,
-        ssl_mode~,
-        application_name~,
-      )
-      Some({ config, client })
-    }
-  }
-}
-
-///|
-fn[T] expect_database_error(
-  result : Result[T, Error],
-) -> @client.DatabaseError raise {
-  guard result is Err(@client.ClientError::Database(err)) else {
-    fail("expected database error")
-  }
-  err
-}
-
-///|
 struct WireDatabaseError {
   severity : String?
   code : String?
@@ -104,7 +34,7 @@ async fn WireConnection::read_message(
   self : WireConnection,
 ) -> @backend.Message {
   let header = self.socket.read_exactly(5)
-  let body_len = ByteReader::new(header[1:]).read_i32_be()
+  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = self.socket.read_exactly(body_len - 4)
   let packet = @buffer.new(size_hint=header.length() + body.length())
   packet.write_bytes(header)
@@ -158,7 +88,7 @@ async fn WireConnection::simple_query(
   sql : String,
   flush? : Bool = false,
 ) -> Array[@backend.Message] {
-  let sql_bytes = utf8_encode(sql)
+  let sql_bytes = @proto.utf8_encode(sql)
   let buf = @buffer.new()
   @frontend.query(sql_bytes[:], buf)
   if flush {
@@ -180,9 +110,9 @@ async fn wire_connect(
     parameters: {},
     transaction_status: b'I',
   }
-  let user_bytes = utf8_encode(config.user)
-  let database_bytes = utf8_encode(config.database)
-  let application_name_bytes = utf8_encode(application_name)
+  let user_bytes = @proto.utf8_encode(config.user)
+  let database_bytes = @proto.utf8_encode(config.database)
+  let application_name_bytes = @proto.utf8_encode(application_name)
   let parameters : Array[(BytesView, BytesView)] = [
     (b"user"[:], user_bytes[:]),
     (b"database"[:], database_bytes[:]),
@@ -250,7 +180,7 @@ async fn wire_send_password(
   connection : WireConnection,
   password : String,
 ) -> Unit {
-  let password_bytes = utf8_encode(password)
+  let password_bytes = @proto.utf8_encode(password)
   let buf = @buffer.new()
   @frontend.password_message(password_bytes[:], buf)
   connection.write_buffer(buf)
@@ -263,8 +193,8 @@ async fn wire_send_md5_password(
   password : String,
   salt : BytesView,
 ) -> Unit {
-  let user_bytes = utf8_encode(user)
-  let password_bytes = utf8_encode(password)
+  let user_bytes = @proto.utf8_encode(user)
+  let password_bytes = @proto.utf8_encode(password)
   let digest = @auth.md5_hash(user_bytes[:], password_bytes[:], salt)
   let buf = @buffer.new()
   @frontend.password_message(digest[:], buf)
@@ -280,7 +210,7 @@ async fn wire_begin_scram(
   guard wire_supports_scram(body) else {
     fail("server does not offer SCRAM-SHA-256 authentication")
   }
-  let password_bytes = utf8_encode(password)
+  let password_bytes = @proto.utf8_encode(password)
   let nonce = @tls.rand_bytes(18)
   let scram = @sasl.ScramSha256::new(
     password_bytes[:],
@@ -340,27 +270,27 @@ fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 fn wire_serialize_param(
   param : @client.QueryParam,
   buf : @buffer.Buffer,
-) -> IsNull {
+) -> @proto.IsNull {
   match param {
-    @client.QueryParam::Null => IsNull::Yes
+    @client.QueryParam::Null => @proto.IsNull::Yes
     @client.QueryParam::Text(value) => {
       buf.write_bytes(value)
-      IsNull::No
+      @proto.IsNull::No
     }
   }
 }
 
 ///|
-fn wire_decode_utf8(bytes : BytesView) -> String raise ProtocolError {
+fn wire_decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
-    _ => raise ProtocolError::InvalidInput("invalid UTF-8")
+    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
   }
 }
 
 ///|
 fn parse_wire_database_error(
   fields : @backend.ErrorFields,
-) -> WireDatabaseError raise ProtocolError {
+) -> WireDatabaseError raise @proto.ProtocolError {
   let mut severity = None
   let mut code = None
   let mut message = None
@@ -393,7 +323,7 @@ fn parse_wire_database_error(
 ///|
 fn data_row_texts(
   body : @backend.DataRowBody,
-) -> Array[String?] raise ProtocolError {
+) -> Array[String?] raise @proto.ProtocolError {
   let out : Array[String?] = []
   let ranges = body.ranges()
   let buffer = body.buffer()
@@ -659,7 +589,7 @@ async test "integration protocol describe close and parameter description" {
   let wire = wire_connect(config, application_name="moonbit-postgres-describe")
   defer wire.close()
 
-  let sql_bytes = utf8_encode("select $1::int4 as value")
+  let sql_bytes = @proto.utf8_encode("select $1::int4 as value")
   let buf = @buffer.new()
   @frontend.parse(b"stmt1"[:], sql_bytes[:], [23U].iter(), buf)
   @frontend.describe(b'S', b"stmt1"[:], buf)
@@ -703,7 +633,9 @@ async test "integration protocol portal suspended" {
   let wire = wire_connect(config, application_name="moonbit-postgres-portal")
   defer wire.close()
 
-  let sql_bytes = utf8_encode("select generate_series(1, 3)::int4 as value")
+  let sql_bytes = @proto.utf8_encode(
+    "select generate_series(1, 3)::int4 as value",
+  )
   let formats : Array[Int] = []
   let params : Array[@client.QueryParam] = []
   let result_formats : Array[Int] = []
