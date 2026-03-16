@@ -2,17 +2,3 @@ import {
   "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
 }
-
-import {
-  "moonbit-community/postgres/client" @client,
-  "moonbit-community/postgres/protocol/authentication" @auth,
-  "moonbit-community/postgres/protocol/authentication/sasl" @sasl,
-  "moonbit-community/postgres/protocol/message/backend" @backend,
-  "moonbit-community/postgres/protocol/message/frontend" @frontend,
-  "moonbitlang/async" @async,
-  "moonbitlang/async/socket",
-  "moonbitlang/async/tls",
-  "moonbitlang/async/process" @process,
-  "moonbitlang/core/strconv",
-  "moonbitlang/core/encoding/utf8",
-} for "test"

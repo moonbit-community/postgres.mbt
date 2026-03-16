@@ -1,74 +1,6 @@
 ///|
-struct IntegrationConfig {
-  host : String
-  port : Int
-  user : String
-  password : String
-  database : String
-}
-
-///|
-struct IntegrationSession {
-  config : IntegrationConfig
-  client : Client
-}
-
-///|
-async fn env_var(name : String) -> String? {
-  let (code, output) = @process.collect_stdout("/usr/bin/printenv", [name])
-  if code != 0 {
-    return None
-  }
-  Some(output.text().trim().to_string())
-}
-
-///|
-async fn integration_config() -> IntegrationConfig? {
-  guard env_var("RUN_POSTGRES_INTEGRATION") == Some("1") else { return None }
-  let host = env_var("POSTGRES_HOST").unwrap_or("127.0.0.1")
-  let port = match env_var("POSTGRES_PORT") {
-    None => 5432
-    Some(port) => @strconv.parse_int(port)
-  }
-  let user = env_var("POSTGRES_USER").unwrap_or("moon")
-  let password = env_var("POSTGRES_PASSWORD").unwrap_or("moonpass")
-  let database = env_var("POSTGRES_DB").unwrap_or("moondb")
-  Some({ host, port, user, password, database })
-}
-
-///|
-async fn integration_session(
-  ssl_mode? : SslMode = SslMode::disable(),
-  application_name? : String = "moonbit-postgres",
-) -> IntegrationSession? {
-  match integration_config() {
-    None => None
-    Some(config) => {
-      let client = Client::connect(
-        config.host,
-        user=config.user,
-        database=config.database,
-        password=config.password,
-        port=config.port,
-        ssl_mode~,
-        application_name~,
-      )
-      Some({ config, client })
-    }
-  }
-}
-
-///|
-fn[T] expect_database_error(result : Result[T, Error]) -> DatabaseError raise {
-  guard result is Err(ClientError::Database(err)) else {
-    fail("expected database error")
-  }
-  err
-}
-
-///|
 fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(ClientError::Authentication(message)) else {
+  guard result is Err(@client.ClientError::Authentication(message)) else {
     fail("expected authentication error")
   }
   message
@@ -76,7 +8,7 @@ fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
 
 ///|
 fn[T] expect_unsupported(result : Result[T, Error]) -> String raise {
-  guard result is Err(ClientError::Unsupported(message)) else {
+  guard result is Err(@client.ClientError::Unsupported(message)) else {
     fail("expected unsupported error")
   }
   message
@@ -84,14 +16,14 @@ fn[T] expect_unsupported(result : Result[T, Error]) -> String raise {
 
 ///|
 fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(ClientError::Ssl(message)) else {
+  guard result is Err(@client.ClientError::Ssl(message)) else {
     fail("expected ssl error")
   }
   message
 }
 
 ///|
-async fn assert_connection_still_usable(client : Client) -> Unit {
+async fn assert_connection_still_usable(client : @client.Client) -> Unit {
   let ping = client.simple_query("select 1::int4 as value")
   assert_eq(ping.command_tag(), "SELECT 1")
   assert_eq(try! ping.rows()[0].get_named_text("value"), Some(Some("1")))
@@ -218,14 +150,14 @@ async test "integration extended query roundtrip" {
 
   let insert = client.query(
     "insert into moon_driver_integration (id, name) values ($1::int4, $2::text)",
-    params=[QueryParam::int(7), QueryParam::string("hello")],
+    params=[@client.QueryParam::int(7), @client.QueryParam::string("hello")],
   )
   assert_eq(insert.command_tag(), "INSERT 0 1")
   assert_eq(insert.row_count(), 0)
 
   let result = client.query(
     "select id, name from moon_driver_integration where id = $1::int4",
-    params=[QueryParam::int(7)],
+    params=[@client.QueryParam::int(7)],
   )
   assert_eq(result.command_tag(), "SELECT 1")
   assert_eq(result.column_count(), 2)
@@ -253,24 +185,24 @@ async test "integration startup failures are surfaced" {
   guard integration_config() is Some(config) else { return }
 
   let missing_password = expect_authentication_error(
-    try? Client::connect(
+    try? @client.Client::connect(
       config.host,
       user=config.user,
       database=config.database,
       port=config.port,
-      ssl_mode=SslMode::disable(),
+      ssl_mode=@client.SslMode::disable(),
     ),
   )
   assert_true(missing_password.contains("server requires a password"))
 
   let bad_password = expect_database_error(
-    try? Client::connect(
+    try? @client.Client::connect(
       config.host,
       user=config.user,
       database=config.database,
       password="definitely-wrong-password",
       port=config.port,
-      ssl_mode=SslMode::disable(),
+      ssl_mode=@client.SslMode::disable(),
     ),
   )
   assert_eq(bad_password.code(), Some("28P01"))
@@ -280,13 +212,13 @@ async test "integration startup failures are surfaced" {
 async test "integration tls modes establish tls connections" {
   guard integration_config() is Some(config) else { return }
 
-  let preferred = Client::connect(
+  let preferred = @client.Client::connect(
     config.host,
     user=config.user,
     database=config.database,
     password=config.password,
     port=config.port,
-    ssl_mode=SslMode::prefer(),
+    ssl_mode=@client.SslMode::prefer(),
     application_name="moonbit-postgres-prefer",
   )
   defer preferred.close()
@@ -299,13 +231,13 @@ async test "integration tls modes establish tls connections" {
     Some(Some("true")),
   )
 
-  let required = Client::connect(
+  let required = @client.Client::connect(
     config.host,
     user=config.user,
     database=config.database,
     password=config.password,
     port=config.port,
-    ssl_mode=SslMode::require(),
+    ssl_mode=@client.SslMode::require(),
     application_name="moonbit-postgres-require",
   )
   defer required.close()
@@ -325,13 +257,13 @@ async test "integration tls rejects untrusted server certificate" {
   guard env_var("POSTGRES_TLS_EXPECT_FAILURE") == Some("1") else { return }
 
   let message = expect_ssl_error(
-    try? Client::connect(
+    try? @client.Client::connect(
       config.host,
       user=config.user,
       database=config.database,
       password=config.password,
       port=config.port,
-      ssl_mode=SslMode::require(),
+      ssl_mode=@client.SslMode::require(),
       application_name="moonbit-postgres-bad-ca",
     ),
   )
@@ -347,10 +279,10 @@ async test "integration scalar parameter helpers" {
   let result = client.query(
     "select ($1::boolean)::text as bool_value, ($2::int4)::text as int_value, ($3::int8)::text as int64_value, ($4::float8)::text as double_value",
     params=[
-      QueryParam::bool(true),
-      QueryParam::int(-7),
-      QueryParam::int64(1234567890123L),
-      QueryParam::double(1.25),
+      @client.QueryParam::bool(true),
+      @client.QueryParam::int(-7),
+      @client.QueryParam::int64(1234567890123L),
+      @client.QueryParam::double(1.25),
     ],
   )
   assert_eq(result.command_tag(), "SELECT 1")
@@ -369,7 +301,10 @@ async test "integration null and unicode parameters" {
 
   let result = client.query(
     "select coalesce($1::text, 'fallback') as fallback_value, $1::text as null_value, $2::text as greeting",
-    params=[QueryParam::null(), QueryParam::string("你好🌙")],
+    params=[
+      @client.QueryParam::null(),
+      @client.QueryParam::string("你好🌙"),
+    ],
   )
   assert_eq(result.command_tag(), "SELECT 1")
   let row = result.rows()[0]
@@ -387,7 +322,7 @@ async test "integration bytes parameter large payload" {
   let payload = "moonbit!".repeat(1024)
   let result = client.query(
     "select octet_length($1::text)::text as byte_len, left($1::text, 8)::text as prefix, right($1::text, 8)::text as suffix",
-    params=[QueryParam::bytes(@proto.utf8_encode(payload)[:])],
+    params=[@client.QueryParam::bytes(@proto.utf8_encode(payload)[:])],
   )
   assert_eq(result.command_tag(), "SELECT 1")
   let row = result.rows()[0]
