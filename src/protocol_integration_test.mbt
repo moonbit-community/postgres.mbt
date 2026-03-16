@@ -30,16 +30,22 @@ async fn WireConnection::write_buffer(
 }
 
 ///|
-async fn WireConnection::read_message(
-  self : WireConnection,
-) -> @backend.Message {
-  let header = self.socket.read_exactly(5)
+async fn read_socket_packet(socket : @socket.Tcp) -> Bytes {
+  let header = socket.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
-  let body = self.socket.read_exactly(body_len - 4)
+  let body = socket.read_exactly(body_len - 4)
   let packet = @buffer.new(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
-  match @backend.Message::parse(packet.to_bytes()[:]) {
+  packet.to_bytes()
+}
+
+///|
+async fn WireConnection::read_message(
+  self : WireConnection,
+) -> @backend.Message {
+  let packet = read_socket_packet(self.socket)
+  match @backend.Message::parse(packet[:]) {
     Some(parsed) => parsed.message()
     None => fail("incomplete backend message")
   }
@@ -405,6 +411,63 @@ async test "integration protocol ssl request reports tls support" {
 }
 
 ///|
+async test "integration protocol startup packet header parsing" {
+  guard integration_config() is Some(config) else { return }
+  let scram_config = {
+    host: config.host,
+    port: config.port,
+    user: "moon_scram",
+    password: config.password,
+    database: config.database,
+  }
+  let socket = @socket.Tcp::connect_to_host(
+    scram_config.host,
+    port=scram_config.port,
+  )
+  defer socket.close()
+
+  let user_bytes = @proto.utf8_encode(scram_config.user)
+  let database_bytes = @proto.utf8_encode(scram_config.database)
+  let application_name_bytes = @proto.utf8_encode("moonbit-postgres-startup")
+  let parameters : Array[(BytesView, BytesView)] = [
+    (b"user"[:], user_bytes[:]),
+    (b"database"[:], database_bytes[:]),
+    (b"client_encoding"[:], b"UTF8"[:]),
+    (b"application_name"[:], application_name_bytes[:]),
+  ]
+  let startup = @buffer.new()
+  @frontend.startup_message(parameters.iter(), startup)
+  socket.write(startup.to_bytes())
+
+  let packet = read_socket_packet(socket)
+  assert_true(@backend.Header::parse(packet[:4]) is None)
+  let header = match @backend.Header::parse(packet[:]) {
+    Some(header) => header
+    None => fail("expected startup header")
+  }
+  assert_eq(header.tag(), @backend.AUTHENTICATION_TAG)
+  assert_eq(header.len(), packet.length() - 1)
+
+  assert_true(@backend.Message::parse(packet[:4]) is None)
+  assert_true(@backend.Message::parse(packet[:packet.length() - 1]) is None)
+  let parsed = match @backend.Message::parse(packet[:]) {
+    Some(parsed) => parsed
+    None => fail("expected startup authentication message")
+  }
+  assert_eq(parsed.consumed(), packet.length())
+  match parsed.message() {
+    @backend.Message::AuthenticationSasl(body) => {
+      let mechanisms = body.mechanisms()
+      assert_eq(try! mechanisms.next_str(), Some("SCRAM-SHA-256"))
+      assert_eq(try! mechanisms.next(), None)
+      assert_eq(try! mechanisms.next(), None)
+      assert_eq(try! mechanisms.next_str(), None)
+    }
+    _ => fail("expected AuthenticationSasl")
+  }
+}
+
+///|
 async test "integration cancel request uses protocol frontend" {
   guard integration_session() is Some(session) else { return }
   let config = session.config
@@ -442,6 +505,51 @@ async test "integration cancel request uses protocol frontend" {
 }
 
 ///|
+async test "integration protocol empty query and no data" {
+  guard integration_config() is Some(config) else { return }
+  let wire = wire_connect(
+    config,
+    application_name="moonbit-postgres-empty-query",
+  )
+  defer wire.close()
+
+  let empty = wire.simple_query("")
+  assert_true(empty[0] is @backend.Message::EmptyQueryResponse)
+  assert_true(empty[1] is @backend.Message::ReadyForQuery(_))
+
+  let create = wire.simple_query(
+    "create temp table wire_no_data (value int4 not null)",
+  )
+  match create[0] {
+    @backend.Message::CommandComplete(body) =>
+      assert_eq(body.tag_bytes().to_bytes(), b"CREATE TABLE")
+    _ => fail("expected CREATE TABLE")
+  }
+
+  let sql_bytes = @proto.utf8_encode(
+    "insert into wire_no_data (value) values ($1::int4)",
+  )
+  let buf = @buffer.new()
+  @frontend.parse(b"stmt_no_data"[:], sql_bytes[:], [23U].iter(), buf)
+  @frontend.describe(b'S', b"stmt_no_data"[:], buf)
+  @frontend.sync(buf)
+
+  let messages = wire.send_and_collect(buf)
+  assert_true(messages[0] is @backend.Message::ParseComplete)
+  match messages[1] {
+    @backend.Message::ParameterDescription(body) => {
+      let parameters = body.parameters()
+      assert_eq(try! parameters.next(), Some(23U))
+      assert_eq(try! parameters.next(), None)
+      assert_eq(try! parameters.next(), None)
+    }
+    _ => fail("expected ParameterDescription")
+  }
+  assert_true(messages[2] is @backend.Message::NoData)
+  assert_true(messages[3] is @backend.Message::ReadyForQuery(_))
+}
+
+///|
 async test "integration protocol copy out flush and terminate" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-copy-out")
@@ -459,6 +567,7 @@ async test "integration protocol copy out flush and terminate" {
       let formats = body.column_formats()
       assert_eq(try! formats.next(), Some(0))
       assert_eq(try! formats.next(), None)
+      assert_eq(try! formats.next(), None)
     }
     _ => fail("expected CopyOutResponse")
   }
@@ -471,7 +580,10 @@ async test "integration protocol copy out flush and terminate" {
     match message {
       @backend.Message::CopyData(body) => {
         saw_copy_data = true
-        payload.write_bytes(body.data().to_bytes())
+        let data_len = body.data().length()
+        let bytes = body.into_bytes()
+        assert_eq(bytes.length(), data_len)
+        payload.write_bytes(bytes)
       }
       @backend.Message::CopyDone => saw_copy_done = true
       @backend.Message::CommandComplete(body) => {
@@ -518,6 +630,7 @@ async test "integration protocol copy in success" {
       assert_eq(body.format().to_int(), 0)
       let formats = body.column_formats()
       assert_eq(try! formats.next(), Some(0))
+      assert_eq(try! formats.next(), None)
       assert_eq(try! formats.next(), None)
     }
     _ => fail("expected CopyInResponse")
@@ -625,6 +738,115 @@ async test "integration protocol describe close and parameter description" {
   }
   assert_true(messages[3] is @backend.Message::CloseComplete)
   assert_true(messages[4] is @backend.Message::ReadyForQuery(_))
+}
+
+///|
+async test "integration protocol bind text formats and null row ranges" {
+  guard integration_config() is Some(config) else { return }
+  let wire = wire_connect(
+    config,
+    application_name="moonbit-postgres-bind-formats",
+  )
+  defer wire.close()
+
+  let create = wire.simple_query(
+    "create temp table wire_bind_formats (id int4 primary key, note text)",
+  )
+  match create[0] {
+    @backend.Message::CommandComplete(body) =>
+      assert_eq(body.tag_bytes().to_bytes(), b"CREATE TABLE")
+    _ => fail("expected CREATE TABLE")
+  }
+
+  let insert = wire.simple_query(
+    "insert into wire_bind_formats values (7, null)",
+  )
+  match insert[0] {
+    @backend.Message::CommandComplete(body) =>
+      assert_eq(body.tag_bytes().to_bytes(), b"INSERT 0 1")
+    _ => fail("expected INSERT command complete")
+  }
+
+  let sql_bytes = @proto.utf8_encode(
+    "select id, note from wire_bind_formats where id = $1::int4",
+  )
+  let formats : Array[Int] = [0]
+  let params : Array[@client.QueryParam] = [@client.QueryParam::int(7)]
+  let result_formats : Array[Int] = [0, 0]
+  let buf = @buffer.new()
+  @frontend.parse(b"stmt_formats"[:], sql_bytes[:], [23U].iter(), buf)
+  @frontend.bind(
+    b"portal_formats"[:],
+    b"stmt_formats"[:],
+    formats.iter(),
+    params.iter(),
+    fn(param, payload) { wire_serialize_param(param, payload) },
+    result_formats.iter(),
+    buf,
+  )
+  @frontend.describe(b'P', b"portal_formats"[:], buf)
+  @frontend.execute(b"portal_formats"[:], 0, buf)
+  @frontend.sync(buf)
+
+  let messages = wire.send_and_collect(buf)
+  assert_true(messages[0] is @backend.Message::ParseComplete)
+  assert_true(messages[1] is @backend.Message::BindComplete)
+  match messages[2] {
+    @backend.Message::RowDescription(body) => {
+      let fields = body.fields()
+      let first = try! fields.next()
+      let second = try! fields.next()
+      match first {
+        Some(field) => {
+          assert_eq(try! field.name_str(), "id")
+          assert_true(field.table_oid() > 0U)
+          assert_eq(field.column_id(), 1)
+          assert_eq(field.type_oid(), 23U)
+          assert_eq(field.type_size(), 4)
+          assert_eq(field.type_modifier(), -1)
+          assert_eq(field.format(), 0)
+        }
+        None => fail("missing first described field")
+      }
+      match second {
+        Some(field) => {
+          assert_eq(try! field.name_str(), "note")
+          assert_true(field.table_oid() > 0U)
+          assert_eq(field.column_id(), 2)
+          assert_eq(field.type_oid(), 25U)
+          assert_eq(field.type_size(), -1)
+          assert_eq(field.type_modifier(), -1)
+          assert_eq(field.format(), 0)
+        }
+        None => fail("missing second described field")
+      }
+      assert_true((try! fields.next()) is None)
+      assert_true((try! fields.next()) is None)
+    }
+    _ => fail("expected RowDescription")
+  }
+  match messages[3] {
+    @backend.Message::DataRow(body) => {
+      let ranges = body.ranges()
+      let buffer = body.buffer()
+      let first_range = try! ranges.next()
+      match first_range {
+        Some(Some(range)) =>
+          assert_eq(wire_decode_utf8(buffer[range.start():range.end()]), "7")
+        _ => fail("expected first column data")
+      }
+      assert_true((try! ranges.next()) is Some(None))
+      assert_true((try! ranges.next()) is None)
+      assert_true((try! ranges.next()) is None)
+    }
+    _ => fail("expected DataRow")
+  }
+  match messages[4] {
+    @backend.Message::CommandComplete(body) =>
+      assert_eq(body.tag_bytes().to_bytes(), b"SELECT 1")
+    _ => fail("expected SELECT command complete")
+  }
+  assert_true(messages[5] is @backend.Message::ReadyForQuery(_))
 }
 
 ///|
