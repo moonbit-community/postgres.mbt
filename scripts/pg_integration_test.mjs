@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const scriptFile = fileURLToPath(import.meta.url)
@@ -12,7 +13,7 @@ const scriptDir = path.dirname(scriptFile)
 const repoRoot = path.resolve(scriptDir, '..')
 const scriptPath = path.resolve(scriptFile)
 const setupSql = `
-create database moondb owner postgres;
+create database moondb;
 set password_encryption = 'scram-sha-256';
 create role moon_scram login password $$moonpass$$;
 set password_encryption = 'md5';
@@ -88,7 +89,8 @@ function runInsideVirtualenv() {
   const env = buildInnerEnv()
   const currentRepoRoot = env.REPO_ROOT
   const enableCoverage = hasFlag('--enable-coverage')
-  runCommand('psql', ['postgres'], { input: setupSql, env })
+  configureClusterTls(env)
+  runCommand('psql', ['-v', 'ON_ERROR_STOP=1', 'postgres'], { input: setupSql, env })
 
   const pgHba = path.join(
     requireEnv('PG_CLUSTER_CONF_ROOT'),
@@ -99,7 +101,7 @@ function runInsideVirtualenv() {
   const originalHba = fs.readFileSync(pgHba, 'utf8')
   fs.writeFileSync(pgHba, hbaPrefix + originalHba)
 
-  runCommand('psql', ['postgres', '-c', 'select pg_reload_conf()'], { env })
+  runCommand('psql', ['-v', 'ON_ERROR_STOP=1', 'postgres', '-c', 'select pg_reload_conf()'], { env })
 
   if (enableCoverage) {
     runCommand('moon', ['coverage', 'clean'], { cwd: currentRepoRoot, env })
@@ -153,8 +155,31 @@ async function buildOuterEnv(tls) {
     PGPORT: String(freePort),
     TLS_CA_CERT_FILE: tls.caCertFile,
     TLS_BAD_CA_CERT_FILE: tls.badCaCertFile,
+    TLS_SERVER_CERT_FILE: tls.serverCertFile,
+    TLS_SERVER_KEY_FILE: tls.serverKeyFile,
     TEST_FILTER: process.env.TEST_FILTER ?? 'integration*',
   }
+}
+
+function configureClusterTls(env) {
+  const version = requireEnv('PGVERSION')
+  const cluster = 'regress'
+  runCommand('pg_conftool', [version, cluster, 'set', 'ssl', 'on'], { env })
+  runCommand(
+    'pg_conftool',
+    [version, cluster, 'set', 'ssl_cert_file', requireEnv('TLS_SERVER_CERT_FILE')],
+    { env },
+  )
+  runCommand(
+    'pg_conftool',
+    [version, cluster, 'set', 'ssl_key_file', requireEnv('TLS_SERVER_KEY_FILE')],
+    { env },
+  )
+  runCommand(
+    'pg_ctlcluster',
+    ['--skip-systemctl-redirect', version, cluster, 'restart'],
+    { env },
+  )
 }
 
 function buildInnerEnv() {
@@ -182,6 +207,7 @@ function prepareTlsAssets() {
   const serverExtFile = path.join(dir, 'server.ext')
   const badCaKeyFile = path.join(dir, 'bad-ca.key')
   const badCaCertFile = path.join(dir, 'bad-ca.crt')
+  const serverCertSerial = makeCertificateSerial()
   fs.writeFileSync(
     serverExtFile,
     [
@@ -243,7 +269,8 @@ function prepareTlsAssets() {
       caCertFile,
       '-CAkey',
       caKeyFile,
-      '-CAcreateserial',
+      '-set_serial',
+      serverCertSerial,
       '-out',
       serverCertFile,
       '-days',
@@ -277,7 +304,6 @@ function prepareTlsAssets() {
     ],
     { stdio: 'pipe' },
   )
-  const serialFile = path.join(dir, 'ca.srl')
   maybeAssignToPostgres([
     dir,
     caKeyFile,
@@ -286,7 +312,6 @@ function prepareTlsAssets() {
     serverCsrFile,
     serverCertFile,
     serverExtFile,
-    serialFile,
     badCaKeyFile,
     badCaCertFile,
   ])
@@ -297,7 +322,6 @@ function prepareTlsAssets() {
   fs.chmodSync(serverCsrFile, 0o644)
   fs.chmodSync(serverCertFile, 0o644)
   fs.chmodSync(serverExtFile, 0o644)
-  fs.chmodSync(serialFile, 0o600)
   fs.chmodSync(badCaKeyFile, 0o600)
   fs.chmodSync(badCaCertFile, 0o644)
   return {
@@ -307,6 +331,11 @@ function prepareTlsAssets() {
     serverCertFile,
     serverKeyFile,
   }
+}
+
+function makeCertificateSerial() {
+  const serial = randomBytes(20).toString('hex').replace(/^0+/, '')
+  return `0x${serial === '' ? '1' : serial}`
 }
 
 function maybeAssignToPostgres(paths) {
