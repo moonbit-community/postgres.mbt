@@ -95,7 +95,7 @@ pub async fn Client::connect(
 }
 
 ///|
-pub async fn Client::simple_query(self : Client, sql : String) -> QueryResult {
+pub async fn Client::raw_query(self : Client, sql : String) -> QueryResult {
   self.lock.acquire()
   defer self.lock.release()
   let sql_bytes = @proto.utf8_encode(sql)

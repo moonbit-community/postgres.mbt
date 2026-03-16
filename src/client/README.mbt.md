@@ -5,7 +5,7 @@ An async PostgreSQL client built on `moonbitlang/async`.
 It currently provides:
 
 - Connection startup with cleartext, `md5`, and `SCRAM-SHA-256` authentication
-- `simple_query` for text SQL
+- `raw_query` for text SQL
 - `query` for parameterized extended queries
 - Text-format result decoding through `Row` and `QueryResult`
 
@@ -41,14 +41,16 @@ async fn _connect_example() -> Unit {
 
 `SslMode::disable()`, `SslMode::prefer()`, and `SslMode::require()` control TLS negotiation.
 
-## Simple Query
+## Raw Query
 
-`simple_query` is useful for plain SQL without bind parameters.
+`raw_query` sends SQL text to PostgreSQL as-is.
+Use it only for trusted SQL text; do not interpolate untrusted input.
+Prefer `query` whenever user input appears in value positions.
 
 ```mbt check
 ///|
-async fn _simple_query_example(client : @client.Client) -> Unit {
-  let result = client.simple_query(
+async fn _raw_query_example(client : @client.Client) -> Unit {
+  let result = client.raw_query(
     "select 1::text as id, 'hello'::text as name, null::text as note",
   )
 
@@ -107,7 +109,7 @@ Driver operations raise `ClientError`.
 ```mbt check
 ///|
 async fn _handle_error_example(client : @client.Client) -> Unit {
-  let result = try? client.simple_query("select 1 / 0")
+  let result = try? client.raw_query("select 1 / 0")
   match result {
     Ok(_) => ()
     Err(@client.ClientError::Database(err)) => {

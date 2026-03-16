@@ -486,7 +486,7 @@ async test "integration cancel request uses protocol frontend" {
 
   let result = @async.with_task_group(async fn(group) {
     let task = group.spawn(async fn() {
-      try? client.simple_query("select pg_sleep(5)")
+      try? client.raw_query("select pg_sleep(5)")
     })
     wait_for_backend_query(observer, client.process_id(), "select pg_sleep(5)")
     let cancel = @socket.Tcp::connect_to_host(config.host, port=config.port)
@@ -499,7 +499,7 @@ async test "integration cancel request uses protocol frontend" {
   let err = expect_database_error(result)
   assert_eq(err.code(), Some("57014"))
   assert_eq(client.transaction_status(), b'I')
-  let ping = client.simple_query("select 1::int4 as value")
+  let ping = client.raw_query("select 1::int4 as value")
   assert_eq(ping.command_tag(), "SELECT 1")
   assert_eq(try! ping.rows()[0].get_named_text("value"), Some(Some("1")))
 }

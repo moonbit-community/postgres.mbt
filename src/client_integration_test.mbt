@@ -24,14 +24,14 @@ fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
 
 ///|
 async fn assert_connection_still_usable(client : @client.Client) -> Unit {
-  let ping = client.simple_query("select 1::int4 as value")
+  let ping = client.raw_query("select 1::int4 as value")
   assert_eq(ping.command_tag(), "SELECT 1")
   assert_eq(try! ping.rows()[0].get_named_text("value"), Some(Some("1")))
   assert_eq(client.transaction_status(), b'I')
 }
 
 ///|
-async test "integration connect and simple_query" {
+async test "integration connect and raw_query" {
   guard integration_session() is Some(session) else { return }
   let config = session.config
   let client = session.client
@@ -47,7 +47,7 @@ async test "integration connect and simple_query" {
   )
   assert_true(client.parameter_status("server_version") is Some(_))
 
-  let result = client.simple_query(
+  let result = client.raw_query(
     "select current_user::text as current_user, current_database()::text as current_database",
   )
   assert_eq(result.command_tag(), "SELECT 1")
@@ -66,7 +66,7 @@ async test "integration empty query response" {
   let client = session.client
   defer client.close()
 
-  let result = client.simple_query("")
+  let result = client.raw_query("")
   assert_eq(result.command_tag(), "")
   assert_eq(result.column_count(), 0)
   assert_eq(result.row_count(), 0)
@@ -79,7 +79,7 @@ async test "integration row accessors and null handling" {
   let client = session.client
   defer client.close()
 
-  let result = client.simple_query(
+  let result = client.raw_query(
     "select 42::int4 as answer, null::text as nothing, '你好🌙'::text as greeting, 'first'::text as repeated, 'second'::text as repeated",
   )
   assert_eq(result.command_tag(), "SELECT 1")
@@ -103,7 +103,7 @@ async test "integration getters and type modifiers" {
   let client = session.client
   defer client.close()
 
-  let result = client.simple_query(
+  let result = client.raw_query(
     "select cast('abc' as varchar(5)) as short_text",
   )
   assert_eq(result.command_tag(), "SELECT 1")
@@ -124,7 +124,7 @@ async test "integration zero rows still return columns" {
   let client = session.client
   defer client.close()
 
-  let result = client.simple_query(
+  let result = client.raw_query(
     "select 1::int4 as id, 'value'::text as name where false",
   )
   assert_eq(result.command_tag(), "SELECT 0")
@@ -142,7 +142,7 @@ async test "integration extended query roundtrip" {
   let client = session.client
   defer client.close()
 
-  let create = client.simple_query(
+  let create = client.raw_query(
     "create temp table moon_driver_integration (id int primary key, name text not null)",
   )
   assert_eq(create.command_tag(), "CREATE TABLE")
@@ -222,7 +222,7 @@ async test "integration tls modes establish tls connections" {
     application_name="moonbit-postgres-prefer",
   )
   defer preferred.close()
-  let preferred_status = preferred.simple_query(
+  let preferred_status = preferred.raw_query(
     "select ssl::text as using_tls from pg_stat_ssl where pid = pg_backend_pid()",
   )
   assert_eq(preferred_status.command_tag(), "SELECT 1")
@@ -241,7 +241,7 @@ async test "integration tls modes establish tls connections" {
     application_name="moonbit-postgres-require",
   )
   defer required.close()
-  let required_status = required.simple_query(
+  let required_status = required.raw_query(
     "select ssl::text as using_tls from pg_stat_ssl where pid = pg_backend_pid()",
   )
   assert_eq(required_status.command_tag(), "SELECT 1")
@@ -332,13 +332,89 @@ async test "integration bytes parameter large payload" {
 }
 
 ///|
+async test "integration parameterized query blocks tautology injection" {
+  guard integration_session() is Some(session) else { return }
+  let client = session.client
+  defer client.close()
+
+  let create = client.raw_query(
+    "create temp table moon_driver_injection_users (name text not null)",
+  )
+  assert_eq(create.command_tag(), "CREATE TABLE")
+  let insert = client.raw_query(
+    "insert into moon_driver_injection_users (name) values ('alice'), ('bob')",
+  )
+  assert_eq(insert.command_tag(), "INSERT 0 2")
+
+  let payload = "' OR '1'='1"
+  let result = client.query(
+    "select count(*)::text as matches, $1::text as payload from moon_driver_injection_users where name = $1::text",
+    params=[@client.QueryParam::string(payload)],
+  )
+  assert_eq(result.command_tag(), "SELECT 1")
+  let row = result.rows()[0]
+  assert_eq(try! row.get_named_text("matches"), Some(Some("0")))
+  assert_eq(try! row.get_named_text("payload"), Some(Some(payload)))
+}
+
+///|
+async test "integration parameterized query blocks stacked statement injection" {
+  guard integration_session() is Some(session) else { return }
+  let client = session.client
+  defer client.close()
+
+  let create = client.raw_query(
+    "create temp table moon_driver_injection_guard (value text not null)",
+  )
+  assert_eq(create.command_tag(), "CREATE TABLE")
+
+  let payload = "safe'); drop table moon_driver_injection_guard; --"
+  let insert = client.query(
+    "insert into moon_driver_injection_guard (value) values ($1::text)",
+    params=[@client.QueryParam::string(payload)],
+  )
+  assert_eq(insert.command_tag(), "INSERT 0 1")
+
+  let verify = client.raw_query(
+    "select count(*)::text as rows, min(value)::text as stored from moon_driver_injection_guard",
+  )
+  assert_eq(verify.command_tag(), "SELECT 1")
+  let row = verify.rows()[0]
+  assert_eq(try! row.get_named_text("rows"), Some(Some("1")))
+  assert_eq(try! row.get_named_text("stored"), Some(Some(payload)))
+}
+
+///|
+async test "integration raw_query string interpolation is injectable" {
+  guard integration_session() is Some(session) else { return }
+  let client = session.client
+  defer client.close()
+
+  let create = client.raw_query(
+    "create temp table moon_driver_raw_query_injection_users (name text not null)",
+  )
+  assert_eq(create.command_tag(), "CREATE TABLE")
+  let insert = client.raw_query(
+    "insert into moon_driver_raw_query_injection_users (name) values ('alice'), ('bob')",
+  )
+  assert_eq(insert.command_tag(), "INSERT 0 2")
+
+  let payload = "' OR '1'='1"
+  let result = client.raw_query(
+    "select count(*)::text as matches from moon_driver_raw_query_injection_users where name = '\{payload}'",
+  )
+  assert_eq(result.command_tag(), "SELECT 1")
+  assert_eq(try! result.rows()[0].get_named_text("matches"), Some(Some("2")))
+}
+
+///|
 async test "integration database error fields" {
   guard integration_session() is Some(session) else { return }
   let client = session.client
   defer client.close()
 
   let err = expect_database_error(
-    try? client.simple_query(
+    try? client.raw_query(
       "do $$ begin raise exception using errcode = '22023', message = 'integration boom', detail = 'detail text', hint = 'hint text'; end $$;",
     ),
   )
@@ -356,15 +432,15 @@ async test "integration transaction status after database error" {
   let client = session.client
   defer client.close()
 
-  let begin = client.simple_query("begin")
+  let begin = client.raw_query("begin")
   assert_eq(begin.command_tag(), "BEGIN")
   assert_eq(client.transaction_status(), b'T')
 
-  let err = expect_database_error(try? client.simple_query("select 1 / 0"))
+  let err = expect_database_error(try? client.raw_query("select 1 / 0"))
   assert_eq(err.code(), Some("22012"))
   assert_eq(client.transaction_status(), b'E')
 
-  let rollback = client.simple_query("rollback")
+  let rollback = client.raw_query("rollback")
   assert_eq(rollback.command_tag(), "ROLLBACK")
   assert_eq(client.transaction_status(), b'I')
 }
@@ -375,10 +451,10 @@ async test "integration notice response is ignored" {
   let client = session.client
   defer client.close()
 
-  let set_notice = client.simple_query("set client_min_messages = notice")
+  let set_notice = client.raw_query("set client_min_messages = notice")
   assert_eq(set_notice.command_tag(), "SET")
 
-  let result = client.simple_query(
+  let result = client.raw_query(
     "do $$ begin raise notice 'integration notice'; end $$;",
   )
   assert_eq(result.command_tag(), "DO")
@@ -391,20 +467,20 @@ async test "integration notification response is ignored" {
   let client = session.client
   defer client.close()
 
-  let listen = client.simple_query("listen moon_driver_notification")
+  let listen = client.raw_query("listen moon_driver_notification")
   assert_eq(listen.command_tag(), "LISTEN")
 
-  let notify = client.simple_query("notify moon_driver_notification, 'payload'")
+  let notify = client.raw_query("notify moon_driver_notification, 'payload'")
   assert_eq(notify.command_tag(), "NOTIFY")
 
-  let result = client.simple_query("select 'still alive'::text as value")
+  let result = client.raw_query("select 'still alive'::text as value")
   assert_eq(result.command_tag(), "SELECT 1")
   assert_eq(
     try! result.rows()[0].get_named_text("value"),
     Some(Some("still alive")),
   )
 
-  let unlisten = client.simple_query("unlisten *")
+  let unlisten = client.raw_query("unlisten *")
   assert_eq(unlisten.command_tag(), "UNLISTEN")
 }
 
@@ -415,9 +491,7 @@ async test "integration parameter status updates" {
   defer client.close()
 
   let updated_name = "moonbit-postgres-it"
-  let result = client.simple_query(
-    "set application_name = 'moonbit-postgres-it'",
-  )
+  let result = client.raw_query("set application_name = 'moonbit-postgres-it'")
   assert_eq(result.command_tag(), "SET")
   assert_eq(client.parameter_status("application_name"), Some(updated_name))
 }
@@ -429,7 +503,7 @@ async test "integration multiple result sets are unsupported" {
   defer client.close()
 
   let message = expect_unsupported(
-    try? client.simple_query(
+    try? client.raw_query(
       "select 1::int4 as left_value; select 2::int4 as right_value",
     ),
   )
@@ -443,13 +517,13 @@ async test "integration multiple command tags are unsupported" {
   let client = session.client
   defer client.close()
 
-  let create = client.simple_query(
+  let create = client.raw_query(
     "create temp table moon_driver_multi_command (value int not null)",
   )
   assert_eq(create.command_tag(), "CREATE TABLE")
 
   let message = expect_unsupported(
-    try? client.simple_query(
+    try? client.raw_query(
       "insert into moon_driver_multi_command values (1); update moon_driver_multi_command set value = value + 1",
     ),
   )
@@ -464,7 +538,7 @@ async test "integration copy is unsupported" {
   defer client.close()
 
   let message = expect_unsupported(
-    try? client.simple_query("copy (select 1::int4) to stdout"),
+    try? client.raw_query("copy (select 1::int4) to stdout"),
   )
   assert_true(message.contains("COPY"))
   assert_connection_still_usable(client)
