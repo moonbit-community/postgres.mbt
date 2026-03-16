@@ -1,0 +1,303 @@
+import {
+  "moonbitlang/core/json",
+  "moonbitlang/parser@0.2.2/basic",
+  "moonbitlang/parser@0.2.2/syntax",
+  "moonbitlang/parser@0.2.2/lexer",
+  "moonbitlang/parser@0.2.2/handrolled_parser",
+  "moonbitlang/x@0.4.41/fs",
+  "moonbitlang/x@0.4.41/sys",
+}
+
+///|
+suberror AstTraverseError {
+  InvalidNode(Json)
+  InvalidChildren(Json)
+}
+
+///|
+fn traverse_ast_json_repr(
+  ast : Json,
+  callback : (Json) -> Bool raise,
+) -> Unit raise {
+  match ast {
+    Object({ "kind": _, "loc": _, "children": children, .. } as object) =>
+      if object.length() == 3 {
+        if !callback(ast) {
+          return
+        }
+        match children {
+          Object(children) =>
+            for _, subtree in children.iter2() {
+              traverse_ast_json_repr(subtree, callback)
+            }
+          Array(children) =>
+            for subtree in children {
+              traverse_ast_json_repr(subtree, callback)
+            }
+          children => raise InvalidChildren(children)
+        }
+      } else {
+        raise InvalidNode(ast)
+      }
+    _ => ()
+  }
+}
+
+///|
+fn traverse_top_impls(
+  name~ : String,
+  source : String,
+  callback : (Json) -> Bool raise,
+) -> Unit raise {
+  @basic.show_loc.val = Json
+  let (program, reports) = @lexer.tokens_from_string(
+      source,
+      comment=true,
+      name~,
+    ).tokens
+    |> @handrolled_parser.parse()
+  if reports is [err, ..] {
+    fail(err.to_json().stringify(indent=2))
+  } else {
+    for impl_ in program.iter().map(impl_ => impl_.json_repr()) {
+      traverse_ast_json_repr(impl_, callback)
+    }
+  }
+}
+
+///|
+fn is_self_field_expr(ast : Json) -> Bool {
+  match ast {
+    {
+      "kind": "Expr::Field",
+      "children": {
+        "record": {
+          "kind": "Expr::Ident",
+          "children": {
+            "id": {
+              "kind": "Var",
+              "children": {
+                "name": {
+                  "kind": "LongIdent::Ident",
+                  "children": { "value": "self", .. },
+                  ..
+                },
+                ..
+              },
+              ..
+            },
+            ..
+          },
+          ..
+        },
+        "accessor": {
+          "kind": "Accessor::Label",
+          "children": {
+            "value": {
+              "kind": "Label",
+              "children": { "name": String(field_name), .. },
+              ..
+            },
+            ..
+          },
+          ..
+        },
+        ..
+      },
+      ..
+    } => {
+      ignore(field_name)
+      true
+    }
+    _ => false
+  }
+}
+
+///|
+fn body_is_single_self_field(ast : Json) -> Bool {
+  match ast {
+    {
+      "kind": "DeclBody::DeclBody",
+      "children": {
+        "local_types": {
+          "kind": "DeclBody::DeclBody::LocalTypeList",
+          "children": [],
+          ..
+        },
+        "expr": expr,
+        ..
+      },
+      ..
+    } => is_self_field_expr(expr)
+    _ => false
+  }
+}
+
+///|
+fn format_file_line(loc : Json) -> String {
+  match loc {
+    {
+      "file": String(file),
+      "start": {
+        "line": Number(line, ..),
+        ..
+      },
+      ..
+    } => {
+      let display_file = match file.strip_prefix("./") {
+        Some(stripped) => stripped.to_string()
+        None => file
+      }
+      "\{display_file}:\{line.to_int()}"
+    }
+    _ => loc.stringify()
+  }
+}
+
+fn format_type_name(ast : Json) -> String {
+  match ast {
+    {
+      "kind": "TypeName",
+      "children": {
+        "name": {
+          "kind": "LongIdent::Ident",
+          "children": { "value": String(type_name), .. },
+          ..
+        },
+        ..
+      },
+      ..
+    } => type_name
+    {
+      "kind": "TypeName",
+      "children": {
+        "name": {
+          "kind": "LongIdent::Dot",
+          "children": {
+            "pkg": String(pkg),
+            "id": String(type_name),
+            ..
+          },
+          ..
+        },
+        ..
+      },
+      ..
+    } => "@\{pkg}.\{type_name}"
+    _ => ast.stringify()
+  }
+}
+
+///|
+fn collect_match(
+  matches : Array[(String, String)],
+  fun_name : String,
+  fun_loc : Json,
+) -> Unit {
+  matches.push((fun_name, format_file_line(fun_loc)))
+}
+
+///|
+fn identify_self_field_getters(
+  name~ : String,
+  source : String,
+  matches : Array[(String, String)],
+) -> Unit raise {
+  traverse_top_impls(name~, source, ast => {
+    match ast {
+      {
+        "kind": "Impl::TopFuncDef",
+        "children": {
+          "fun_decl": {
+            "children": {
+              "type_name": type_name_ast,
+              "name": {
+                "loc": fun_loc,
+                "children": { "name": String(fun_name), .. },
+                ..
+              },
+              ..
+            },
+            ..
+          },
+          "decl_body": body,
+          ..
+        },
+        ..
+      } => {
+        if body_is_single_self_field(body) {
+          collect_match(
+            matches,
+            "\{format_type_name(type_name_ast)}::\{fun_name}",
+            fun_loc,
+          )
+        }
+        false
+      }
+      { "kind": "Impl::TopImpl", .. } => false
+      _ => true
+    }
+  })
+}
+
+///|
+fn should_skip_dir(name : String) -> Bool {
+  name == "_build" || name == ".mooncakes" || name == "target"
+}
+
+///|
+fn join_path(dir : String, name : String) -> String {
+  if dir.has_suffix("/") {
+    "\{dir}\{name}"
+  } else {
+    "\{dir}/\{name}"
+  }
+}
+
+///|
+fn scan_path(path : String, matches : Array[(String, String)]) -> Unit raise {
+  if @fs.is_dir(path) {
+    let entries = @fs.read_dir(path)
+    entries.sort()
+    for entry in entries {
+      if should_skip_dir(entry) {
+        continue
+      }
+      scan_path(join_path(path, entry), matches)
+    }
+    return
+  }
+  if @fs.is_file(path) && path.has_suffix(".mbt") {
+    let source = @fs.read_file_to_string(path)
+    identify_self_field_getters(name=path, source, matches)
+  }
+}
+
+///|
+fn print_matches(matches : Array[(String, String)]) -> Unit {
+  let mut max_name_len = 0
+  for item in matches {
+    let (name, _) = item
+    if name.length() > max_name_len {
+      max_name_len = name.length()
+    }
+  }
+  for item in matches {
+    let (name, loc) = item
+    println("\{name.pad_end(max_name_len + 2, ' ')}\{loc}")
+  }
+}
+
+///|
+fn main {
+  let args = @sys.get_cli_args()
+  let root = if args is [_, path, ..] { path } else { "." }
+  let matches : Array[(String, String)] = []
+  scan_path(root, matches) catch {
+    err => {
+      println(err.to_string())
+      panic()
+    }
+  }
+  print_matches(matches)
+}
