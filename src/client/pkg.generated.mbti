@@ -25,8 +25,8 @@ pub async fn Client::connect(String, user~ : String, database? : String, passwor
 pub fn Client::parameter_status(Self, String) -> String?
 pub fn Client::process_id(Self) -> Int
 pub async fn Client::query(Self, String, params? : Array[QueryParam]) -> QueryResult
+pub async fn Client::raw_query(Self, String) -> QueryResult
 pub fn Client::secret_key(Self) -> Int
-pub async fn Client::simple_query(Self, String) -> QueryResult
 pub fn Client::transaction_status(Self) -> Byte
 
 pub struct Column {
