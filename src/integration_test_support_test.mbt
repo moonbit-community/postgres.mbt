@@ -8,12 +8,6 @@ struct IntegrationConfig {
 }
 
 ///|
-struct IntegrationSession {
-  config : IntegrationConfig
-  client : @client.Client
-}
-
-///|
 async fn env_var(name : String) -> String? {
   let (code, output) = @process.collect_stdout("/usr/bin/printenv", [name])
   if code != 0 {
@@ -37,24 +31,50 @@ async fn integration_config() -> IntegrationConfig? {
 }
 
 ///|
-async fn integration_session(
+fn as_client_config(
+  config : IntegrationConfig,
   ssl_mode? : @client.SslMode = @client.SslMode::disable(),
   application_name? : String = "moonbit-postgres",
-) -> IntegrationSession? {
-  match integration_config() {
-    None => None
-    Some(config) => {
-      let client = @client.Client::connect(
+) -> @client.Config {
+  @client.Config::new(
+    config.host,
+    user=config.user,
+    database=config.database,
+    password=config.password,
+    port=config.port,
+    ssl_mode~,
+    application_name~,
+  )
+}
+
+///|
+fn auth_client_config(
+  config : IntegrationConfig,
+  user : String,
+  password? : String? = Some(config.password),
+  ssl_mode? : @client.SslMode = @client.SslMode::disable(),
+  application_name? : String = "moonbit-postgres",
+) -> @client.Config {
+  match password {
+    Some(password) =>
+      @client.Config::new(
         config.host,
-        user=config.user,
+        user~,
         database=config.database,
-        password=config.password,
+        password~,
         port=config.port,
         ssl_mode~,
         application_name~,
       )
-      Some({ config, client })
-    }
+    None =>
+      @client.Config::new(
+        config.host,
+        user~,
+        database=config.database,
+        port=config.port,
+        ssl_mode~,
+        application_name~,
+      )
   }
 }
 
@@ -66,4 +86,20 @@ fn[T] expect_database_error(
     fail("expected database error")
   }
   err
+}
+
+///|
+fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
+  guard result is Err(@client.ClientError::Authentication(message)) else {
+    fail("expected authentication error")
+  }
+  message
+}
+
+///|
+fn[T] expect_row_count_error(result : Result[T, Error]) -> String raise {
+  guard result is Err(@client.ClientError::RowCount(message)) else {
+    fail("expected row count error")
+  }
+  message
 }

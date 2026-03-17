@@ -3,37 +3,74 @@ package "moonbit-community/postgres/client"
 
 import {
   "moonbit-community/postgres/protocol",
+  "moonbitlang/core/buffer",
 }
 
 // Values
+pub async fn connect(Config) -> (Client, Connection)
 
 // Errors
 pub suberror ClientError {
   Database(DatabaseError)
   Authentication(String)
-  Unsupported(String)
-  UnexpectedMessage(String)
+  Closed(String)
+  Protocol(String)
   Ssl(String)
+  Encode(String)
+  Decode(String)
+  WrongType(String)
+  ColumnNotFound(String)
+  RowCount(String)
+  UnexpectedMessage(String)
 }
 pub impl Eq for ClientError
 pub impl Show for ClientError
 
 // Types and methods
+pub enum AsyncMessage {
+  Notice(DatabaseError)
+  Notification(Notification)
+  ParameterStatus(String, String)
+}
+pub impl Eq for AsyncMessage
+pub impl Show for AsyncMessage
+
+type CancelToken
+pub async fn CancelToken::cancel(Self) -> Unit
+pub fn CancelToken::process_id(Self) -> Int
+pub fn CancelToken::secret_key(Self) -> Int
+
 type Client
+pub async fn Client::batch_execute(Self, String) -> Unit
+pub async fn Client::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
+pub fn Client::build_transaction(Self) -> TransactionBuilder
+pub fn Client::cancel_token(Self) -> CancelToken
+pub async fn Client::check_connection(Self) -> Unit
+pub fn Client::clear_type_cache(Self) -> Unit
 pub fn Client::close(Self) -> Unit
-pub async fn Client::connect(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
-pub fn Client::parameter_status(Self, String) -> String?
-pub fn Client::process_id(Self) -> Int
-pub async fn Client::query(Self, String, params? : Array[QueryParam]) -> QueryResult
-pub async fn Client::raw_query(Self, String) -> QueryResult
-pub fn Client::secret_key(Self) -> Int
-pub fn Client::transaction_status(Self) -> Byte
+pub async fn Client::copy_in(Self, String) -> CopyInSink
+pub async fn Client::copy_out(Self, String) -> CopyOutStream
+pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
+pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub fn Client::is_closed(Self) -> Bool
+pub fn Client::parameter(Self, String) -> String?
+pub async fn Client::prepare(Self, String) -> Statement
+pub async fn Client::prepare_typed(Self, String, Array[Type]) -> Statement
+pub async fn Client::query(Self, String, params? : Array[&ToSql]) -> RowStream
+pub async fn Client::query_one(Self, String, params? : Array[&ToSql]) -> Row
+pub async fn Client::query_opt(Self, String, params? : Array[&ToSql]) -> Row?
+pub async fn Client::query_portal(Self, Portal, Int) -> RowStream
+pub async fn Client::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
+pub async fn Client::query_typed(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
+pub async fn Client::query_typed_raw(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
+pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
+pub async fn Client::transaction(Self) -> Transaction
 
 pub struct Column {
   name : String
   table_oid : UInt
   column_id : Int
-  type_oid : UInt
+  type_ : Type
   type_size : Int
   type_modifier : Int
   format : Int
@@ -42,11 +79,48 @@ pub fn Column::column_id(Self) -> Int
 pub fn Column::format(Self) -> Int
 pub fn Column::name(Self) -> String
 pub fn Column::table_oid(Self) -> UInt
+pub fn Column::type_(Self) -> Type
 pub fn Column::type_modifier(Self) -> Int
 pub fn Column::type_oid(Self) -> UInt
 pub fn Column::type_size(Self) -> Int
 pub impl Eq for Column
 pub impl Show for Column
+
+pub struct Config {
+  host : String
+  port : Int
+  user : String
+  database : String
+  password : String?
+  ssl_mode : SslMode
+  application_name : String
+}
+pub fn Config::application_name(Self) -> String
+pub fn Config::database(Self) -> String
+pub fn Config::host(Self) -> String
+pub fn Config::new(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
+pub fn Config::password(Self) -> String?
+pub fn Config::port(Self) -> Int
+pub fn Config::ssl_mode(Self) -> SslMode
+pub fn Config::user(Self) -> String
+pub impl Eq for Config
+pub impl Show for Config
+
+type Connection
+pub async fn Connection::next_message(Self) -> AsyncMessage?
+pub fn Connection::parameter(Self, String) -> String?
+pub async fn Connection::run(Self, on_async? : (AsyncMessage) -> Unit) -> Unit
+
+type CopyInSink
+pub async fn CopyInSink::abort(Self, message? : String) -> Unit
+pub async fn CopyInSink::finish(Self) -> Int
+pub async fn CopyInSink::send(Self, BytesView) -> Unit
+
+type CopyOutStream
+pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
+pub fn CopyOutStream::column_formats(Self) -> Array[Int]
+pub async fn CopyOutStream::finish(Self) -> Unit
+pub async fn CopyOutStream::next(Self) -> Bytes?
 
 pub struct DatabaseError {
   severity : String?
@@ -63,47 +137,98 @@ pub fn DatabaseError::severity(Self) -> String?
 pub impl Eq for DatabaseError
 pub impl Show for DatabaseError
 
-pub enum QueryParam {
-  Null
-  Text(Bytes)
+pub struct Field {
+  name : String
+  type_oid : UInt
 }
-pub fn QueryParam::bool(Bool) -> Self
-pub fn QueryParam::bytes(BytesView) -> Self
-pub fn QueryParam::double(Double) -> Self
-pub fn QueryParam::int(Int) -> Self
-pub fn QueryParam::int64(Int64) -> Self
-pub fn QueryParam::null() -> Self
-pub fn QueryParam::string(String) -> Self
-pub impl Eq for QueryParam
-pub impl Show for QueryParam
+pub fn Field::name(Self) -> String
+pub fn Field::type_oid(Self) -> UInt
+pub impl Eq for Field
+pub impl Show for Field
 
-pub struct QueryResult {
-  columns : Array[Column]
-  rows : Array[Row]
-  command_tag : String
+pub enum Kind {
+  Simple
+  Array(UInt)
+  Enum(Array[String])
+  Composite(Array[Field])
+  Domain(UInt)
+  Range(UInt)
+  Pseudo
+  Unknown
 }
-pub fn QueryResult::column_count(Self) -> Int
-pub fn QueryResult::columns(Self) -> Array[Column]
-pub fn QueryResult::command_tag(Self) -> String
-pub fn QueryResult::row_count(Self) -> Int
-pub fn QueryResult::rows(Self) -> Array[Row]
-pub impl Eq for QueryResult
-pub impl Show for QueryResult
+pub impl Eq for Kind
+pub impl Show for Kind
+
+pub struct Notification {
+  process_id : Int
+  channel : String
+  payload : String
+}
+pub fn Notification::channel(Self) -> String
+pub fn Notification::payload(Self) -> String
+pub fn Notification::process_id(Self) -> Int
+pub impl Eq for Notification
+pub impl Show for Notification
+
+type Portal
+pub async fn Portal::close(Self) -> Unit
+pub fn Portal::columns(Self) -> Array[Column]
+
+type QuerySummary
+pub fn QuerySummary::command_tag(Self) -> String
+pub fn QuerySummary::row_count(Self) -> Int
+pub fn QuerySummary::suspended(Self) -> Bool
+pub impl Eq for QuerySummary
+pub impl Show for QuerySummary
 
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
 }
 pub fn Row::columns(Self) -> Array[Column]
-pub fn Row::get(Self, Int) -> Bytes?
-pub fn Row::get_named(Self, String) -> Bytes??
-pub fn Row::get_named_text(Self, String) -> String?? raise @protocol.ProtocolError
-pub fn Row::get_text(Self, Int) -> String? raise @protocol.ProtocolError
+pub fn[T : FromSql] Row::get(Self, Int) -> T raise
+pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
+pub fn Row::get_raw(Self, Int) -> Bytes?
+pub fn Row::get_raw_name(Self, String) -> Bytes? raise
+pub fn Row::get_text(Self, Int) -> String? raise
+pub fn Row::get_text_name(Self, String) -> String? raise
 pub fn Row::index_of(Self, String) -> Int?
 pub fn Row::len(Self) -> Int
-pub fn Row::values(Self) -> Array[Bytes?]
+pub fn[T : FromSql] Row::try_get(Self, Int) -> T? raise
+pub fn[T : FromSql] Row::try_get_name(Self, String) -> T? raise
 pub impl Eq for Row
 pub impl Show for Row
+
+type RowStream
+pub async fn RowStream::collect(Self) -> Array[Row]
+pub fn RowStream::columns(Self) -> Array[Column]
+pub async fn RowStream::finish(Self) -> QuerySummary
+pub async fn RowStream::next(Self) -> Row?
+
+pub enum SimpleQueryMessage {
+  RowDescription(Array[String])
+  Row(SimpleQueryRow)
+  CommandComplete(String)
+}
+pub impl Eq for SimpleQueryMessage
+pub impl Show for SimpleQueryMessage
+
+pub struct SimpleQueryRow {
+  columns : Array[String]
+  values : Array[String?]
+}
+pub fn SimpleQueryRow::columns(Self) -> Array[String]
+pub fn SimpleQueryRow::get(Self, Int) -> String?
+pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
+pub fn SimpleQueryRow::index_of(Self, String) -> Int?
+pub fn SimpleQueryRow::len(Self) -> Int
+pub impl Eq for SimpleQueryRow
+pub impl Show for SimpleQueryRow
+
+type SimpleQueryStream
+pub async fn SimpleQueryStream::collect(Self) -> Array[SimpleQueryMessage]
+pub async fn SimpleQueryStream::finish(Self) -> Unit
+pub async fn SimpleQueryStream::next(Self) -> SimpleQueryMessage?
 
 pub enum SslMode {
   Disable
@@ -116,7 +241,99 @@ pub fn SslMode::require() -> Self
 pub impl Eq for SslMode
 pub impl Show for SslMode
 
+type Statement
+pub async fn Statement::close(Self) -> Unit
+pub fn Statement::columns(Self) -> Array[Column]
+pub fn Statement::params(Self) -> Array[Type]
+
+type Transaction
+pub async fn Transaction::batch_execute(Self, String) -> Unit
+pub async fn Transaction::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
+pub async fn Transaction::commit(Self) -> Unit
+pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
+pub async fn Transaction::prepare(Self, String) -> Statement
+pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
+pub async fn Transaction::query_portal(Self, Portal, Int) -> RowStream
+pub async fn Transaction::rollback(Self) -> Unit
+pub async fn Transaction::transaction(Self) -> Self
+
+type TransactionBuilder
+pub fn TransactionBuilder::deferrable(Self, enabled? : Bool) -> Self
+pub fn TransactionBuilder::isolation_level(Self, String) -> Self
+pub fn TransactionBuilder::read_only(Self, enabled? : Bool) -> Self
+pub async fn TransactionBuilder::start(Self) -> Transaction
+
+pub struct Type {
+  oid : UInt
+  name : String
+  kind : Kind
+}
+pub fn Type::bool() -> Self
+pub fn Type::bool_array() -> Self
+pub fn Type::bytea() -> Self
+pub fn Type::bytea_array() -> Self
+pub fn Type::char() -> Self
+pub fn Type::date() -> Self
+pub fn Type::date_array() -> Self
+pub fn Type::float4() -> Self
+pub fn Type::float4_array() -> Self
+pub fn Type::float8() -> Self
+pub fn Type::float8_array() -> Self
+pub fn Type::int2() -> Self
+pub fn Type::int2_array() -> Self
+pub fn Type::int4() -> Self
+pub fn Type::int4_array() -> Self
+pub fn Type::int8() -> Self
+pub fn Type::int8_array() -> Self
+pub fn Type::json() -> Self
+pub fn Type::jsonb() -> Self
+pub fn Type::kind(Self) -> Kind
+pub fn Type::name(Self) -> String
+pub fn Type::name_type() -> Self
+pub fn Type::oid(Self) -> UInt
+pub fn Type::oid_type() -> Self
+pub fn Type::text() -> Self
+pub fn Type::text_array() -> Self
+pub fn Type::time() -> Self
+pub fn Type::timestamp() -> Self
+pub fn Type::timestamp_array() -> Self
+pub fn Type::timestamptz() -> Self
+pub fn Type::unknown(UInt, name? : String) -> Self
+pub fn Type::uuid() -> Self
+pub fn Type::uuid_array() -> Self
+pub fn Type::varchar() -> Self
+pub fn Type::varchar_array() -> Self
+pub impl Eq for Type
+pub impl Show for Type
+
 // Type aliases
 
 // Traits
+pub(open) trait FromSql {
+  from_sql(Type, Int, BytesView) -> Self raise
+  from_sql_null(Type, Int) -> Self raise = _
+}
+pub impl FromSql for Bool
+pub impl FromSql for Int
+pub impl FromSql for Int64
+pub impl FromSql for UInt
+pub impl FromSql for Float
+pub impl FromSql for Double
+pub impl FromSql for String
+pub impl[T : FromSql] FromSql for T?
+pub impl FromSql for Bytes
+
+pub(open) trait ToSql {
+  format(Self, Type) -> Int = _
+  to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
+}
+pub impl ToSql for Bool
+pub impl ToSql for Int
+pub impl ToSql for Int64
+pub impl ToSql for UInt
+pub impl ToSql for Float
+pub impl ToSql for Double
+pub impl ToSql for String
+pub impl[T : ToSql] ToSql for T?
+pub impl ToSql for Bytes
 
