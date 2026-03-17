@@ -273,14 +273,11 @@ fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 }
 
 ///|
-fn wire_serialize_param(
-  param : @client.QueryParam,
-  buf : @buffer.Buffer,
-) -> @proto.IsNull {
+fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull {
   match param {
-    @client.QueryParam::Null => @proto.IsNull::Yes
-    @client.QueryParam::Text(value) => {
-      buf.write_bytes(value)
+    None => @proto.IsNull::Yes
+    Some(value) => {
+      buf.write_bytes(@proto.utf8_encode(value))
       @proto.IsNull::No
     }
   }
@@ -377,18 +374,19 @@ async fn wait_for_backend_query(
   sql : String,
 ) -> Unit {
   for _ in 0..<100 {
-    let result = client.query(
-      "select state::text as state, coalesce(wait_event::text, '') as wait_event, query::text as query from pg_stat_activity where pid = $1::int4",
-      params=[@client.QueryParam::int(backend_pid)],
-    )
-    if result.row_count() == 1 {
-      let row = result.rows()[0]
-      let state = try! row.get_named_text("state")
-      let wait_event = try! row.get_named_text("wait_event")
-      let running_query = try! row.get_named_text("query")
-      if state == Some(Some("active")) &&
-        wait_event == Some(Some("PgSleep")) &&
-        running_query == Some(Some(sql)) {
+    let params : Array[&@client.ToSql] = [backend_pid as &@client.ToSql]
+    let rows = client
+      .query(
+        "select state::text as state, coalesce(wait_event::text, '') as wait_event, query::text as query from pg_stat_activity where pid = $1::int4",
+        params~,
+      )
+      .collect()
+    if rows.length() == 1 {
+      let row = rows[0]
+      let state : String = row.get_name("state")
+      let wait_event : String = row.get_name("wait_event")
+      let running_query : String = row.get_name("query")
+      if state == "active" && wait_event == "PgSleep" && running_query == sql {
         return
       }
     }
@@ -469,39 +467,44 @@ async test "integration protocol startup packet header parsing" {
 
 ///|
 async test "integration cancel request uses protocol frontend" {
-  guard integration_session() is Some(session) else { return }
-  let config = session.config
-  let client = session.client
-  defer client.close()
-  let observer = @client.Client::connect(
-    config.host,
-    user=config.user,
-    database=config.database,
-    password=config.password,
-    port=config.port,
-    ssl_mode=@client.SslMode::disable(),
-    application_name="moonbit-postgres-cancel-observer",
-  )
-  defer observer.close()
+  guard integration_config() is Some(config) else { return }
 
-  let result = @async.with_task_group(async fn(group) {
-    let task = group.spawn(async fn() {
-      try? client.raw_query("select pg_sleep(5)")
-    })
-    wait_for_backend_query(observer, client.process_id(), "select pg_sleep(5)")
+  let result = @async.with_task_group(group => {
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres-cancel-main"),
+    )
+    group.spawn_bg(() => connection.run())
+
+    let (observer, observer_connection) = @client.connect(
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-cancel-observer",
+      ),
+    )
+    group.spawn_bg(() => observer_connection.run())
+
+    let token = client.cancel_token()
+    let backend_pid : Int = client
+      .query_one("select pg_backend_pid()::int4 as pid")
+      .get_name("pid")
+
+    let task = group.spawn(() => try? client.query_one("select pg_sleep(5)"))
+    wait_for_backend_query(observer, backend_pid, "select pg_sleep(5)")
     let cancel = @socket.Tcp::connect_to_host(config.host, port=config.port)
     defer cancel.close()
     let buf = @buffer.new()
-    @frontend.cancel_request(client.process_id(), client.secret_key(), buf)
+    @frontend.cancel_request(token.process_id(), token.secret_key(), buf)
     cancel.write(buf.to_bytes())
-    task.wait()
+    let err = expect_database_error(task.wait())
+    assert_eq(err.code(), Some("57014"))
+    let ping : Int = client
+      .query_one("select 1::int4 as value")
+      .get_name("value")
+    assert_eq(ping, 1)
+    client.close()
+    observer.close()
   })
-  let err = expect_database_error(result)
-  assert_eq(err.code(), Some("57014"))
-  assert_eq(client.transaction_status(), b'I')
-  let ping = client.raw_query("select 1::int4 as value")
-  assert_eq(ping.command_tag(), "SELECT 1")
-  assert_eq(try! ping.rows()[0].get_named_text("value"), Some(Some("1")))
+  ignore(result)
 }
 
 ///|
@@ -771,7 +774,7 @@ async test "integration protocol bind text formats and null row ranges" {
     "select id, note from wire_bind_formats where id = $1::int4",
   )
   let formats : Array[Int] = [0]
-  let params : Array[@client.QueryParam] = [@client.QueryParam::int(7)]
+  let params : Array[String?] = [Some("7")]
   let result_formats : Array[Int] = [0, 0]
   let buf = @buffer.new()
   @frontend.parse(b"stmt_formats"[:], sql_bytes[:], [23U].iter(), buf)
@@ -859,7 +862,7 @@ async test "integration protocol portal suspended" {
     "select generate_series(1, 3)::int4 as value",
   )
   let formats : Array[Int] = []
-  let params : Array[@client.QueryParam] = []
+  let params : Array[String?] = []
   let result_formats : Array[Int] = []
   let buf = @buffer.new()
   @frontend.parse(b"stmt_portal"[:], sql_bytes[:], [].iter(), buf)

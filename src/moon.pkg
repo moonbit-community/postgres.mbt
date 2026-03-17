@@ -10,6 +10,8 @@ import {
   "moonbitlang/async/socket",
   "moonbitlang/async/tls",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/double" @double,
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/float" @float,
   "moonbitlang/core/strconv",
 } for "test"

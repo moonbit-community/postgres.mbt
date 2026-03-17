@@ -37,354 +37,1048 @@ impl @io.Writer for Stream with write_once(self, buf, offset~, len~) {
 }
 
 ///|
-struct Client {
-  stream : Stream
-  mut process_id : Int
-  mut secret_key : Int
+priv enum RequestKind {
+  Messages
+  CopyIn
+  Terminate
+}
+
+///|
+priv enum CopyInAction {
+  Data(Bytes)
+  Finish
+  Fail(String)
+}
+
+///|
+/// A small bounded per-request buffer keeps lightweight pipelining working
+/// while preventing unread streams from accumulating responses without bound.
+let request_response_queue_kind : @aqueue.Kind = Blocking(8)
+
+///|
+priv struct Request {
+  kind : RequestKind
+  bytes : Bytes
+  responses : @async.Queue[@backend.Message]
+  copy_input : @async.Queue[CopyInAction]?
+}
+
+///|
+priv struct Shared {
+  config : Config
+  requests : @async.Queue[Request]
+  async_messages : @async.Queue[AsyncMessage]
   parameters : Map[String, String]
-  mut transaction_status : Byte
-  lock : @async.Semaphore
+  types : Map[@proto.Oid, Type]
+  process_id : @ref.Ref[Int]
+  secret_key : @ref.Ref[Int]
+  transaction_status : @ref.Ref[Byte]
+  closed : @ref.Ref[Bool]
+  closing : @ref.Ref[Bool]
+  next_id : @ref.Ref[Int]
+}
+
+///|
+struct Client {
+  shared : Shared
+}
+
+///|
+priv struct StreamCleanup {
+  client : Client
+  bytes : Bytes
+  mut done : Bool
+}
+
+///|
+struct Connection {
+  shared : Shared
+  stream : Stream
+}
+
+///|
+struct Statement {
+  client : Client
+  name : Bytes
+  params : Array[Type]
+  columns : Array[Column]
+  closed : @ref.Ref[Bool]
+}
+
+///|
+struct Portal {
+  client : Client
+  name : Bytes
+  columns : Array[Column]
+  closed : @ref.Ref[Bool]
+}
+
+///|
+struct CancelToken {
+  config : Config
+  process_id : @ref.Ref[Int]
+  secret_key : @ref.Ref[Int]
+  closed : @ref.Ref[Bool]
+}
+
+///|
+struct CopyInSink {
+  input : @async.Queue[CopyInAction]
+  responses : @async.Queue[@backend.Message]
+  finished : @ref.Ref[Bool]
+}
+
+///|
+struct Transaction {
+  client : Client
+  savepoint : String?
+  finished : @ref.Ref[Bool]
+}
+
+///|
+struct TransactionBuilder {
+  client : Client
+  isolation_level : String?
+  read_only : Bool?
+  deferrable : Bool?
+}
+
+///|
+pub async fn connect(config : Config) -> (Client, Connection) {
+  let stream = connect_stream(config)
+  let startup = startup(stream, config)
+  let types : Map[@proto.Oid, Type] = {}
+  seed_builtin_types(types)
+  let shared = {
+    config,
+    requests: @async.Queue::new(kind=Unbounded),
+    async_messages: @async.Queue::new(kind=Unbounded),
+    parameters: startup.parameters,
+    types,
+    process_id: @ref.new(startup.process_id),
+    secret_key: @ref.new(startup.secret_key),
+    transaction_status: @ref.new(startup.transaction_status),
+    closed: @ref.new(false),
+    closing: @ref.new(false),
+    next_id: @ref.new(0),
+  }
+  ({ shared, }, { shared, stream })
+}
+
+///|
+pub fn Client::is_closed(self : Client) -> Bool {
+  self.shared.closed.val
 }
 
 ///|
 pub fn Client::close(self : Client) -> Unit {
-  self.stream.close()
-}
-
-///|
-pub fn Client::process_id(self : Client) -> Int {
-  self.process_id
-}
-
-///|
-pub fn Client::secret_key(self : Client) -> Int {
-  self.secret_key
-}
-
-///|
-pub fn Client::parameter_status(self : Client, name : String) -> String? {
-  self.parameters.get(name)
-}
-
-///|
-pub fn Client::transaction_status(self : Client) -> Byte {
-  self.transaction_status
-}
-
-///|
-pub async fn Client::connect(
-  host : String,
-  user~ : String,
-  database? : String = user,
-  password? : String,
-  port? : Int = 5432,
-  ssl_mode? : SslMode = Disable,
-  application_name? : String = "moonbit-postgres",
-) -> Client {
-  let stream = connect_stream(host, port, ssl_mode)
-  let client = {
-    stream,
-    process_id: 0,
-    secret_key: 0,
-    parameters: {},
-    transaction_status: b'I',
-    lock: @async.Semaphore::new(1),
+  if self.shared.closed.val || self.shared.closing.val {
+    return
   }
-  client.startup(user, database, password, application_name)
-  client
+  self.shared.closing.val = true
+  let responses = @async.Queue::new(kind=Unbounded)
+  try
+    self.shared.requests.try_put({
+      kind: RequestKind::Terminate,
+      bytes: terminate_bytes(),
+      responses,
+      copy_input: None,
+    })
+  catch {
+    _ => {
+      self.shared.closed.val = true
+      responses.close()
+    }
+  } noraise {
+    _ => ()
+  }
 }
 
 ///|
-pub async fn Client::raw_query(self : Client, sql : String) -> QueryResult {
-  self.lock.acquire()
-  defer self.lock.release()
-  let sql_bytes = @proto.utf8_encode(sql)
-  let buf = @buffer.new()
-  @frontend.query(sql_bytes[:], buf)
-  self.stream.write(buf.to_bytes())
-  self.read_query_result(expect_parse_messages=false)
+pub fn Client::cancel_token(self : Client) -> CancelToken {
+  {
+    config: self.shared.config,
+    process_id: self.shared.process_id,
+    secret_key: self.shared.secret_key,
+    closed: self.shared.closed,
+  }
+}
+
+///|
+pub fn CancelToken::process_id(self : CancelToken) -> Int {
+  self.process_id.val
+}
+
+///|
+pub fn CancelToken::secret_key(self : CancelToken) -> Int {
+  self.secret_key.val
+}
+
+///|
+pub fn Client::clear_type_cache(self : Client) -> Unit {
+  self.shared.types.clear()
+  seed_builtin_types(self.shared.types)
+}
+
+///|
+pub fn Client::parameter(self : Client, name : String) -> String? {
+  self.shared.parameters.get(name)
+}
+
+///|
+pub async fn Client::check_connection(self : Client) -> Unit {
+  ensure_open(self.shared)
+  let responses = self.send_request(RequestKind::Messages, sync_bytes())
+  drain_sync_response(responses)
+}
+
+///|
+pub async fn Client::simple_query(
+  self : Client,
+  sql : String,
+) -> SimpleQueryStream {
+  ensure_open(self.shared)
+  let responses = self.send_request(
+    RequestKind::Messages,
+    simple_query_bytes(sql),
+  )
+  new_simple_query_stream(responses)
+}
+
+///|
+pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
+  ensure_open(self.shared)
+  let responses = self.send_request(
+    RequestKind::Messages,
+    simple_query_bytes(sql),
+  )
+  drain_simple_query(responses)
+}
+
+///|
+pub async fn Client::prepare(self : Client, sql : String) -> Statement {
+  self.prepare_typed(sql, [])
+}
+
+///|
+pub async fn Client::prepare_typed(
+  self : Client,
+  sql : String,
+  types : Array[Type],
+) -> Statement {
+  ensure_open(self.shared)
+  let name = next_name(self.shared, "s")
+  let bytes = prepare_bytes(name[:], sql, types)
+  let responses = self.send_request(RequestKind::Messages, bytes)
+  let (params, columns) = read_prepare_response(self.shared, responses)
+  { client: self, name, params, columns, closed: @ref.new(false) }
+}
+
+///|
+pub fn Statement::params(self : Statement) -> Array[Type] {
+  self.params
+}
+
+///|
+pub fn Statement::columns(self : Statement) -> Array[Column] {
+  self.columns
+}
+
+///|
+pub async fn Statement::close(self : Statement) -> Unit {
+  if self.closed.val {
+    return
+  }
+  let responses = self.client.send_request(
+    RequestKind::Messages,
+    close_bytes(b'S', self.name[:]),
+  )
+  drain_close_response(responses)
+  self.closed.val = true
 }
 
 ///|
 pub async fn Client::query(
   self : Client,
   sql : String,
-  params? : Array[QueryParam] = [],
-) -> QueryResult {
-  self.lock.acquire()
-  defer self.lock.release()
-  let sql_bytes = @proto.utf8_encode(sql)
-  let param_types : Array[@proto.Oid] = []
-  let formats : Array[Int] = []
-  let result_formats : Array[Int] = []
-  let buf = @buffer.new()
-  @frontend.parse(b""[:], sql_bytes[:], param_types.iter(), buf)
-  @frontend.bind(
-    b""[:],
-    b""[:],
-    formats.iter(),
-    params.iter(),
-    (param, payload) => serialize_param(param, payload),
-    result_formats.iter(),
-    buf,
+  params? : Array[&ToSql] = [],
+) -> RowStream {
+  ensure_open(self.shared)
+  let name = next_name(self.shared, "q")
+  let prepare_responses = self.send_request(
+    RequestKind::Messages,
+    prepare_bytes(name[:], sql, []),
   )
-  @frontend.describe(b'P', b""[:], buf)
-  @frontend.execute(b""[:], 0, buf)
-  @frontend.sync(buf)
-  self.stream.write(buf.to_bytes())
-  self.read_query_result(expect_parse_messages=true)
+  let (param_types, columns) = read_prepare_response(
+    self.shared,
+    prepare_responses,
+  )
+  guard param_types.length() == params.length() else {
+    let _ = close_temporary_statement(self, name) catch { _ => () }
+    raise ClientError::Encode(
+      "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
+    )
+  }
+  let responses = self.send_request(
+    RequestKind::Messages,
+    execute_statement_bytes(name[:], param_types, params),
+  )
+  new_row_stream(
+    responses,
+    initial_columns=columns,
+    cleanup=Some(make_statement_cleanup(self, name)),
+  )
 }
 
 ///|
-async fn Client::startup(
+pub async fn Client::query_one(
   self : Client,
-  user : String,
-  database : String,
-  password : String?,
-  application_name : String,
+  sql : String,
+  params? : Array[&ToSql] = [],
+) -> Row {
+  let stream = self.query(sql, params~)
+  let first = stream.next()
+  let summary = stream.finish()
+  match first {
+    Some(row) =>
+      if summary.row_count() == 1 {
+        row
+      } else {
+        raise ClientError::RowCount(
+          "expected exactly one row, got \{summary.row_count().to_string()}",
+        )
+      }
+    None =>
+      raise ClientError::RowCount(
+        "expected exactly one row, got \{summary.row_count().to_string()}",
+      )
+  }
+}
+
+///|
+pub async fn Client::query_opt(
+  self : Client,
+  sql : String,
+  params? : Array[&ToSql] = [],
+) -> Row? {
+  let stream = self.query(sql, params~)
+  let first = stream.next()
+  let summary = stream.finish()
+  guard summary.row_count() <= 1 else {
+    raise ClientError::RowCount(
+      "expected zero or one row, got \{summary.row_count().to_string()}",
+    )
+  }
+  first
+}
+
+///|
+pub async fn Client::query_typed(
+  self : Client,
+  sql : String,
+  param_types : Array[Type],
+  params? : Array[&ToSql] = [],
+) -> RowStream {
+  ensure_open(self.shared)
+  guard param_types.length() == params.length() else {
+    raise ClientError::Encode(
+      "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
+    )
+  }
+  let name = next_name(self.shared, "q")
+  let prepare_responses = self.send_request(
+    RequestKind::Messages,
+    prepare_bytes(name[:], sql, param_types),
+  )
+  let (_, columns) = read_prepare_response(self.shared, prepare_responses)
+  let responses = self.send_request(
+    RequestKind::Messages,
+    execute_statement_bytes(name[:], param_types, params),
+  )
+  new_row_stream(
+    responses,
+    initial_columns=columns,
+    cleanup=Some(make_statement_cleanup(self, name)),
+  )
+}
+
+///|
+pub async fn Client::query_typed_raw(
+  self : Client,
+  sql : String,
+  param_types : Array[Type],
+  params? : Array[&ToSql] = [],
+) -> RowStream {
+  self.query_typed(sql, param_types, params~)
+}
+
+///|
+pub async fn Client::query_statement(
+  self : Client,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> RowStream {
+  ensure_open(self.shared)
+  guard not(statement.closed.val) else {
+    raise ClientError::Closed("statement already closed")
+  }
+  guard statement.params.length() == params.length() else {
+    raise ClientError::Encode(
+      "parameter count mismatch: expected \{statement.params.length().to_string()}, got \{params.length().to_string()}",
+    )
+  }
+  let responses = self.send_request(
+    RequestKind::Messages,
+    execute_statement_bytes(statement.name[:], statement.params, params),
+  )
+  new_row_stream(responses, initial_columns=statement.columns)
+}
+
+///|
+pub async fn Client::execute(
+  self : Client,
+  sql : String,
+  params? : Array[&ToSql] = [],
+) -> Int {
+  let statement = self.prepare(sql)
+  let rows = self.execute_raw(statement, params~) catch {
+    err => {
+      let _ = statement.close() catch { _ => () }
+      raise err
+    }
+  }
+  statement.close()
+  rows
+}
+
+///|
+pub async fn Client::execute_raw(
+  self : Client,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> Int {
+  let stream = self.query_statement(statement, params~)
+  let summary = stream.finish()
+  rows_affected(summary.command_tag())
+}
+
+///|
+pub async fn Client::bind(
+  self : Client,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> Portal {
+  ensure_open(self.shared)
+  guard not(statement.closed.val) else {
+    raise ClientError::Closed("statement already closed")
+  }
+  guard statement.params.length() == params.length() else {
+    raise ClientError::Encode(
+      "parameter count mismatch: expected \{statement.params.length().to_string()}, got \{params.length().to_string()}",
+    )
+  }
+  let name = next_name(self.shared, "p")
+  let responses = self.send_request(
+    RequestKind::Messages,
+    bind_portal_bytes(name[:], statement.name[:], statement.params, params),
+  )
+  let mut columns = statement.columns
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::BindComplete => continue responses.get()
+    @backend.Message::RowDescription(body) => {
+      columns = parse_columns(body)
+      continue responses.get()
+    }
+    @backend.Message::NoData => continue responses.get()
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None =>
+          {
+            client: self,
+            name,
+            columns: resolve_columns(self.shared, columns),
+            closed: @ref.new(false),
+          }
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected bind response")
+  }
+}
+
+///|
+pub fn Portal::columns(self : Portal) -> Array[Column] {
+  self.columns
+}
+
+///|
+pub async fn Portal::close(self : Portal) -> Unit {
+  if self.closed.val {
+    return
+  }
+  let responses = self.client.send_request(
+    RequestKind::Messages,
+    close_bytes(b'P', self.name[:]),
+  )
+  drain_close_response(responses)
+  self.closed.val = true
+}
+
+///|
+pub async fn Client::query_portal(
+  self : Client,
+  portal : Portal,
+  max_rows : Int,
+) -> RowStream {
+  ensure_open(self.shared)
+  guard not(portal.closed.val) else {
+    raise ClientError::Closed("portal already closed")
+  }
+  let responses = self.send_request(
+    RequestKind::Messages,
+    execute_portal_bytes(portal.name[:], max_rows),
+  )
+  new_row_stream(responses, initial_columns=portal.columns)
+}
+
+///|
+pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
+  ensure_open(self.shared)
+  let responses = self.send_request(
+    RequestKind::Messages,
+    simple_query_bytes(sql),
+  )
+  start_copy_out(responses)
+}
+
+///|
+pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
+  ensure_open(self.shared)
+  let input = @async.Queue::new(kind=Unbounded)
+  let responses = self.send_request_with_copy(simple_query_bytes(sql), input)
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::CopyInResponse(_) =>
+      return { input, responses, finished: @ref.new(false) }
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None => raise ClientError::UnexpectedMessage("expected CopyInResponse")
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected copy-in response")
+  }
+}
+
+///|
+pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
+  guard not(self.finished.val) else {
+    raise ClientError::Closed("copy sink already finished")
+  }
+  self.input.put(CopyInAction::Data(data.to_bytes()))
+}
+
+///|
+pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
+  guard not(self.finished.val) else {
+    raise ClientError::Closed("copy sink already finished")
+  }
+  self.finished.val = true
+  self.input.put(CopyInAction::Finish)
+  collect_copy_in_completion(self.responses)
+}
+
+///|
+pub async fn CopyInSink::abort(
+  self : CopyInSink,
+  message? : String = "COPY aborted",
 ) -> Unit {
-  let user_bytes = @proto.utf8_encode(user)
-  let database_bytes = @proto.utf8_encode(database)
-  let application_name_bytes = @proto.utf8_encode(application_name)
-  let parameters : Array[(BytesView, BytesView)] = [
-    (b"user"[:], user_bytes[:]),
-    (b"database"[:], database_bytes[:]),
-    (b"client_encoding"[:], b"UTF8"[:]),
-    (b"application_name"[:], application_name_bytes[:]),
-  ]
+  guard not(self.finished.val) else { return }
+  self.finished.val = true
+  self.input.put(CopyInAction::Fail(message))
+  let _ = collect_copy_in_completion(self.responses) catch { _ => 0 }
+}
+
+///|
+pub async fn Client::transaction(self : Client) -> Transaction {
+  self.batch_execute("BEGIN")
+  { client: self, savepoint: None, finished: @ref.new(false) }
+}
+
+///|
+pub fn Client::build_transaction(self : Client) -> TransactionBuilder {
+  { client: self, isolation_level: None, read_only: None, deferrable: None }
+}
+
+///|
+pub fn TransactionBuilder::isolation_level(
+  self : TransactionBuilder,
+  level : String,
+) -> TransactionBuilder {
+  { ..self, isolation_level: Some(level) }
+}
+
+///|
+pub fn TransactionBuilder::read_only(
+  self : TransactionBuilder,
+  enabled? : Bool = true,
+) -> TransactionBuilder {
+  { ..self, read_only: Some(enabled) }
+}
+
+///|
+pub fn TransactionBuilder::deferrable(
+  self : TransactionBuilder,
+  enabled? : Bool = true,
+) -> TransactionBuilder {
+  { ..self, deferrable: Some(enabled) }
+}
+
+///|
+pub async fn TransactionBuilder::start(
+  self : TransactionBuilder,
+) -> Transaction {
+  let clauses : Array[String] = []
+  match self.isolation_level {
+    Some(level) => clauses.push("ISOLATION LEVEL \{level}")
+    None => ()
+  }
+  match self.read_only {
+    Some(true) => clauses.push("READ ONLY")
+    Some(false) => clauses.push("READ WRITE")
+    None => ()
+  }
+  match self.deferrable {
+    Some(true) => clauses.push("DEFERRABLE")
+    Some(false) => clauses.push("NOT DEFERRABLE")
+    None => ()
+  }
+  let sql = if clauses.is_empty() {
+    "BEGIN"
+  } else {
+    "BEGIN " + join_clauses(clauses)
+  }
+  self.client.batch_execute(sql)
+  { client: self.client, savepoint: None, finished: @ref.new(false) }
+}
+
+///|
+pub async fn Transaction::transaction(self : Transaction) -> Transaction {
+  self.assert_open()
+  let name = "moon_tx_\{next_id(self.client.shared).to_string()}"
+  self.client.batch_execute("SAVEPOINT \{name}")
+  { client: self.client, savepoint: Some(name), finished: @ref.new(false) }
+}
+
+///|
+pub async fn Transaction::query(
+  self : Transaction,
+  sql : String,
+  params? : Array[&ToSql] = [],
+) -> RowStream {
+  self.assert_open()
+  self.client.query(sql, params~)
+}
+
+///|
+pub async fn Transaction::execute(
+  self : Transaction,
+  sql : String,
+  params? : Array[&ToSql] = [],
+) -> Int {
+  self.assert_open()
+  self.client.execute(sql, params~)
+}
+
+///|
+pub async fn Transaction::batch_execute(
+  self : Transaction,
+  sql : String,
+) -> Unit {
+  self.assert_open()
+  self.client.batch_execute(sql)
+}
+
+///|
+pub async fn Transaction::prepare(
+  self : Transaction,
+  sql : String,
+) -> Statement {
+  self.assert_open()
+  self.client.prepare(sql)
+}
+
+///|
+pub async fn Transaction::bind(
+  self : Transaction,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> Portal {
+  self.assert_open()
+  self.client.bind(statement, params~)
+}
+
+///|
+pub async fn Transaction::query_portal(
+  self : Transaction,
+  portal : Portal,
+  max_rows : Int,
+) -> RowStream {
+  self.assert_open()
+  self.client.query_portal(portal, max_rows)
+}
+
+///|
+pub async fn Transaction::commit(self : Transaction) -> Unit {
+  self.assert_open()
+  match self.savepoint {
+    None => self.client.batch_execute("COMMIT")
+    Some(name) => self.client.batch_execute("RELEASE SAVEPOINT \{name}")
+  }
+  self.finished.val = true
+}
+
+///|
+pub async fn Transaction::rollback(self : Transaction) -> Unit {
+  self.assert_open()
+  match self.savepoint {
+    None => self.client.batch_execute("ROLLBACK")
+    Some(name) =>
+      self.client.batch_execute(
+        "ROLLBACK TO SAVEPOINT \{name}; RELEASE SAVEPOINT \{name}",
+      )
+  }
+  self.finished.val = true
+}
+
+///|
+pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
+  if self.closed.val {
+    return
+  }
+  let conn = @socket.Tcp::connect_to_host(
+    self.config.host(),
+    port=self.config.port(),
+  )
+  defer conn.close()
   let buf = @buffer.new()
-  @frontend.startup_message(parameters.iter(), buf)
-  self.stream.write(buf.to_bytes())
-  let mut scram : @sasl.ScramSha256? = None
-  loop self.read_message() {
-    @backend.Message::AuthenticationOk => continue self.read_message()
-    @backend.Message::AuthenticationCleartextPassword => {
-      send_password_message(self, password)
-      continue self.read_message()
+  @frontend.cancel_request(self.process_id.val, self.secret_key.val, buf)
+  conn.write(buf.to_bytes())
+}
+
+///|
+pub async fn Connection::run(
+  self : Connection,
+  on_async? : (AsyncMessage) -> Unit = _ => (),
+) -> Unit {
+  let pending : Array[Request] = []
+  let mut sent_terminate = false
+  try {
+    while true {
+      if pending.is_empty() && not(sent_terminate) {
+        let request = self.shared.requests.get()
+        sent_terminate = self.send_outbound_request(request, pending)
+      }
+      if self.can_pipeline_requests(pending) && not(sent_terminate) {
+        sent_terminate = self.pipeline_pending_requests(pending)
+      }
+      if pending.is_empty() {
+        if sent_terminate {
+          self.drain_queued_requests(None)
+          close_runtime(self.shared)
+          self.stream.close()
+          return
+        }
+        continue
+      }
+      let message = self.read_message()
+      self.forward_pending_message(pending, message, on_async)
     }
-    @backend.Message::AuthenticationMd5Password(body) => {
-      send_md5_password_message(self, user, password, body.salt())
-      continue self.read_message()
+  } catch {
+    err => {
+      self.close_pending_requests(pending, Some(err))
+      self.drain_queued_requests(Some(err))
+      close_runtime(self.shared, error=err)
+      self.stream.close()
     }
-    @backend.Message::AuthenticationSasl(body) => {
-      scram = Some(begin_scram(self, body, password))
-      continue self.read_message()
+  }
+}
+
+///|
+pub async fn Connection::next_message(self : Connection) -> AsyncMessage? {
+  Some(self.shared.async_messages.get()) catch {
+    _ => None
+  }
+}
+
+///|
+pub fn Connection::parameter(self : Connection, name : String) -> String? {
+  self.shared.parameters.get(name)
+}
+
+///|
+async fn Connection::send_outbound_request(
+  self : Connection,
+  request : Request,
+  pending : Array[Request],
+) -> Bool {
+  self.stream.write(request.bytes)
+  match request.kind {
+    RequestKind::Terminate => {
+      request.responses.close()
+      true
     }
-    @backend.Message::AuthenticationSaslContinue(body) => {
-      continue_scram(self, scram, body.data())
-      continue self.read_message()
+    RequestKind::Messages | RequestKind::CopyIn => {
+      pending.push(request)
+      false
     }
-    @backend.Message::AuthenticationSaslFinal(body) => {
-      finish_scram(scram, body.data())
-      continue self.read_message()
+  }
+}
+
+///|
+fn Connection::can_pipeline_requests(
+  self : Connection,
+  pending : Array[Request],
+) -> Bool {
+  ignore(self)
+  for request in pending {
+    match request.kind {
+      RequestKind::Messages => ()
+      _ => return false
     }
+  }
+  true
+}
+
+///|
+async fn Connection::pipeline_pending_requests(
+  self : Connection,
+  pending : Array[Request],
+) -> Bool {
+  while true {
+    let request = self.shared.requests.try_get() catch { _ => None }
+    match request {
+      None => return false
+      Some(request) => {
+        let sent_terminate = self.send_outbound_request(request, pending)
+        let is_barrier = match request.kind {
+          RequestKind::Messages => false
+          _ => true
+        }
+        if sent_terminate || is_barrier {
+          return sent_terminate
+        }
+        continue
+      }
+    }
+  }
+  false
+}
+
+///|
+async fn Connection::forward_pending_message(
+  self : Connection,
+  pending : Array[Request],
+  message : @backend.Message,
+  on_async : (AsyncMessage) -> Unit,
+) -> Unit {
+  if self.handle_async_message(message, on_async) {
+    return
+  }
+  guard not(pending.is_empty()) else {
+    raise ClientError::UnexpectedMessage("unexpected backend message")
+  }
+  let request = pending[0]
+  match request.kind {
+    RequestKind::Messages => {
+      self.forward_message_to_request(request, message)
+      if message is @backend.Message::ReadyForQuery(_) {
+        ignore(pending.remove(0))
+      }
+    }
+    RequestKind::CopyIn => {
+      self.forward_copy_in_message(request, message)
+      if message is @backend.Message::ReadyForQuery(_) {
+        ignore(pending.remove(0))
+      }
+    }
+    RequestKind::Terminate =>
+      raise ClientError::UnexpectedMessage("unexpected terminate request")
+  }
+}
+
+///|
+async fn Connection::forward_message_to_request(
+  self : Connection,
+  request : Request,
+  message : @backend.Message,
+) -> Unit {
+  match message {
+    @backend.Message::ReadyForQuery(body) => {
+      self.shared.transaction_status.val = body.status()
+      request.responses.put(message)
+    }
+    _ => request.responses.put(message)
+  }
+}
+
+///|
+async fn Connection::forward_copy_in_message(
+  self : Connection,
+  request : Request,
+  message : @backend.Message,
+) -> Unit {
+  let copy_input = request.copy_input.unwrap()
+  match message {
+    @backend.Message::CopyInResponse(_) => {
+      request.responses.put(message)
+      self.drain_copy_input(copy_input)
+    }
+    @backend.Message::ReadyForQuery(body) => {
+      self.shared.transaction_status.val = body.status()
+      request.responses.put(message)
+    }
+    _ => request.responses.put(message)
+  }
+}
+
+///|
+async fn Connection::drain_copy_input(
+  self : Connection,
+  input : @async.Queue[CopyInAction],
+) -> Unit {
+  loop input.get() {
+    CopyInAction::Data(data) => {
+      let payload = @buffer.new()
+      @frontend.CopyData::new(data[:]).write(payload)
+      self.stream.write(payload.to_bytes())
+      continue input.get()
+    }
+    CopyInAction::Finish => {
+      let payload = @buffer.new()
+      @frontend.copy_done(payload)
+      self.stream.write(payload.to_bytes())
+      return
+    }
+    CopyInAction::Fail(message) => {
+      let payload = @buffer.new()
+      @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
+      self.stream.write(payload.to_bytes())
+      return
+    }
+  }
+}
+
+///|
+fn Connection::close_request(
+  self : Connection,
+  request : Request,
+  error : Error?,
+) -> Unit {
+  ignore(self)
+  match error {
+    None => request.responses.close()
+    Some(err) => request.responses.close(error=err, clear=true)
+  }
+  match request.copy_input {
+    Some(input) =>
+      match error {
+        None => input.close()
+        Some(err) => input.close(error=err, clear=true)
+      }
+    None => ()
+  }
+}
+
+///|
+fn Connection::close_pending_requests(
+  self : Connection,
+  pending : Array[Request],
+  error : Error?,
+) -> Unit {
+  for request in pending {
+    self.close_request(request, error)
+  }
+}
+
+///|
+fn Connection::drain_queued_requests(self : Connection, error : Error?) -> Unit {
+  let close_error = match error {
+    Some(err) => Some(err)
+    None => Some(ClientError::Closed("connection is closed"))
+  }
+  while true {
+    let request = self.shared.requests.try_get() catch { _ => None }
+    match request {
+      None => return
+      Some(request) => {
+        self.close_request(request, close_error)
+        continue
+      }
+    }
+  }
+}
+
+///|
+fn Connection::handle_async_message(
+  self : Connection,
+  message : @backend.Message,
+  on_async : (AsyncMessage) -> Unit,
+) -> Bool raise {
+  match message {
     @backend.Message::ParameterStatus(body) => {
       let name = body.name_str()
       let value = body.value_str()
-      self.parameters[name] = value
-      continue self.read_message()
-    }
-    @backend.Message::BackendKeyData(body) => {
-      self.process_id = body.process_id()
-      self.secret_key = body.secret_key()
-      continue self.read_message()
-    }
-    @backend.Message::NoticeResponse(_) => continue self.read_message()
-    @backend.Message::ReadyForQuery(body) =>
-      self.transaction_status = body.status()
-    @backend.Message::ErrorResponse(body) =>
-      raise ClientError::Database(parse_database_error(body.fields()))
-    @backend.Message::AuthenticationKerberosV5
-    | @backend.Message::AuthenticationScmCredential
-    | @backend.Message::AuthenticationGss
-    | @backend.Message::AuthenticationGssContinue(_)
-    | @backend.Message::AuthenticationSspi =>
-      raise ClientError::Unsupported(
-        "server requested an unsupported authentication method",
+      self.shared.parameters[name] = value
+      self.push_async_message(
+        AsyncMessage::ParameterStatus(name, value),
+        on_async,
       )
-    _ => raise ClientError::UnexpectedMessage("unexpected startup message")
-  }
-}
-
-///|
-async fn Client::read_query_result(
-  self : Client,
-  expect_parse_messages~ : Bool,
-) -> QueryResult {
-  let mut columns : Array[Column] = []
-  let rows : Array[Row] = []
-  let mut command_tag = ""
-  let mut row_description_seen = false
-  let mut no_data_seen = false
-  let mut empty_query_seen = false
-  let mut command_complete_seen = false
-  let mut database_error : DatabaseError? = None
-  let mut client_error : ClientError? = None
-  loop self.read_message() {
-    message => {
-      if client_error is Some(_) {
-        match message {
-          @backend.Message::ParameterStatus(body) => {
-            let name = body.name_str()
-            let value = body.value_str()
-            self.parameters[name] = value
-            continue self.read_message()
-          }
-          @backend.Message::NoticeResponse(_)
-          | @backend.Message::NotificationResponse(_) =>
-            continue self.read_message()
-          @backend.Message::ErrorResponse(body) => {
-            database_error = Some(parse_database_error(body.fields()))
-            continue self.read_message()
-          }
-          @backend.Message::ReadyForQuery(body) => {
-            self.transaction_status = body.status()
-            match database_error {
-              Some(err) => raise ClientError::Database(err)
-              None =>
-                match client_error {
-                  Some(err) => raise err
-                  None => panic()
-                }
-            }
-          }
-          _ => continue self.read_message()
-        }
-      }
-      match message {
-        @backend.Message::ParseComplete => {
-          guard expect_parse_messages else {
-            client_error = Some(
-              ClientError::UnexpectedMessage("unexpected ParseComplete"),
-            )
-            continue self.read_message()
-          }
-          continue self.read_message()
-        }
-        @backend.Message::BindComplete => {
-          guard expect_parse_messages else {
-            client_error = Some(
-              ClientError::UnexpectedMessage("unexpected BindComplete"),
-            )
-            continue self.read_message()
-          }
-          continue self.read_message()
-        }
-        @backend.Message::ParameterStatus(body) => {
-          let name = body.name_str()
-          let value = body.value_str()
-          self.parameters[name] = value
-          continue self.read_message()
-        }
-        @backend.Message::NoticeResponse(_)
-        | @backend.Message::NotificationResponse(_) =>
-          continue self.read_message()
-        @backend.Message::NoData => {
-          guard not(row_description_seen) &&
-            not(no_data_seen) &&
-            not(empty_query_seen) else {
-            client_error = Some(
-              ClientError::Unsupported(
-                "multiple result sets are not supported yet",
-              ),
-            )
-            continue self.read_message()
-          }
-          no_data_seen = true
-          continue self.read_message()
-        }
-        @backend.Message::EmptyQueryResponse => {
-          guard not(row_description_seen) &&
-            not(no_data_seen) &&
-            not(empty_query_seen) &&
-            not(command_complete_seen) else {
-            client_error = Some(
-              ClientError::Unsupported(
-                "multiple result sets are not supported yet",
-              ),
-            )
-            continue self.read_message()
-          }
-          empty_query_seen = true
-          continue self.read_message()
-        }
-        @backend.Message::RowDescription(body) => {
-          guard not(row_description_seen) &&
-            not(no_data_seen) &&
-            not(empty_query_seen) else {
-            client_error = Some(
-              ClientError::Unsupported(
-                "multiple result sets are not supported yet",
-              ),
-            )
-            continue self.read_message()
-          }
-          row_description_seen = true
-          columns = parse_columns(body)
-          continue self.read_message()
-        }
-        @backend.Message::DataRow(body) => {
-          guard row_description_seen else {
-            client_error = Some(
-              ClientError::UnexpectedMessage(
-                "received DataRow before RowDescription",
-              ),
-            )
-            continue self.read_message()
-          }
-          rows.push(parse_row(body, columns))
-          continue self.read_message()
-        }
-        @backend.Message::CommandComplete(body) => {
-          guard not(command_complete_seen) && not(empty_query_seen) else {
-            client_error = Some(
-              ClientError::Unsupported(
-                "multiple result sets are not supported yet",
-              ),
-            )
-            continue self.read_message()
-          }
-          command_complete_seen = true
-          command_tag = body.tag_str()
-          continue self.read_message()
-        }
-        @backend.Message::ErrorResponse(body) => {
-          database_error = Some(parse_database_error(body.fields()))
-          continue self.read_message()
-        }
-        @backend.Message::ReadyForQuery(body) => {
-          self.transaction_status = body.status()
-          match database_error {
-            Some(err) => raise ClientError::Database(err)
-            None => return { columns, rows, command_tag }
-          }
-        }
-        @backend.Message::PortalSuspended => {
-          client_error = Some(
-            ClientError::Unsupported("portal suspension is not supported"),
-          )
-          continue self.read_message()
-        }
-        @backend.Message::CopyInResponse(_)
-        | @backend.Message::CopyOutResponse(_)
-        | @backend.Message::CopyData(_)
-        | @backend.Message::CopyDone => {
-          client_error = Some(ClientError::Unsupported("COPY is not supported"))
-          continue self.read_message()
-        }
-        _ => {
-          client_error = Some(
-            ClientError::UnexpectedMessage("unexpected query message"),
-          )
-          continue self.read_message()
-        }
-      }
+      true
     }
+    @backend.Message::NoticeResponse(body) => {
+      self.push_async_message(
+        AsyncMessage::Notice(parse_database_error(body.fields())),
+        on_async,
+      )
+      true
+    }
+    @backend.Message::NotificationResponse(body) => {
+      self.push_async_message(
+        AsyncMessage::Notification({
+          process_id: body.process_id(),
+          channel: body.channel_str(),
+          payload: body.message_str(),
+        }),
+        on_async,
+      )
+      true
+    }
+    _ => false
   }
 }
 
 ///|
-async fn Client::read_message(self : Client) -> @backend.Message {
+fn Connection::push_async_message(
+  self : Connection,
+  message : AsyncMessage,
+  on_async : (AsyncMessage) -> Unit,
+) -> Unit {
+  on_async(message)
+  ignore(self.shared.async_messages.try_put(message)) catch {
+    _ => ()
+  }
+}
+
+///|
+async fn Connection::read_message(self : Connection) -> @backend.Message {
   let header = self.stream.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = self.stream.read_exactly(body_len - 4)
@@ -398,13 +1092,586 @@ async fn Client::read_message(self : Client) -> @backend.Message {
 }
 
 ///|
-async fn connect_stream(
-  host : String,
-  port : Int,
-  ssl_mode : SslMode,
-) -> Stream {
-  let conn = @socket.Tcp::connect_to_host(host, port~)
-  match ssl_mode {
+fn Client::send_request(
+  self : Client,
+  kind : RequestKind,
+  bytes : Bytes,
+  response_kind? : @aqueue.Kind = request_response_queue_kind,
+) -> @async.Queue[@backend.Message] raise {
+  let responses = @async.Queue::new(kind=response_kind)
+  ignore(
+    self.shared.requests.try_put({ kind, bytes, responses, copy_input: None }),
+  )
+  responses
+}
+
+///|
+fn Client::send_request_with_copy(
+  self : Client,
+  bytes : Bytes,
+  input : @async.Queue[CopyInAction],
+) -> @async.Queue[@backend.Message] raise {
+  let responses = @async.Queue::new(kind=request_response_queue_kind)
+  ignore(
+    self.shared.requests.try_put({
+      kind: RequestKind::CopyIn,
+      bytes,
+      responses,
+      copy_input: Some(input),
+    }),
+  )
+  responses
+}
+
+///|
+fn ensure_open(shared : Shared) -> Unit raise {
+  if shared.closed.val || shared.closing.val {
+    raise ClientError::Closed("connection is closed")
+  }
+}
+
+///|
+fn Transaction::assert_open(self : Transaction) -> Unit raise {
+  if self.finished.val {
+    raise ClientError::Closed("transaction is already finished")
+  }
+}
+
+///|
+fn close_runtime(shared : Shared, error? : Error) -> Unit {
+  if shared.closed.val {
+    return
+  }
+  shared.closed.val = true
+  shared.closing.val = true
+  match error {
+    None => {
+      shared.requests.close()
+      shared.async_messages.close()
+    }
+    Some(err) => {
+      shared.requests.close(error=err, clear=true)
+      shared.async_messages.close()
+    }
+  }
+}
+
+///|
+fn next_id(shared : Shared) -> Int {
+  shared.next_id.val += 1
+  shared.next_id.val
+}
+
+///|
+fn next_name(shared : Shared, prefix : String) -> Bytes {
+  @proto.utf8_encode("\{prefix}\{next_id(shared).to_string()}")
+}
+
+///|
+fn seed_builtin_types(types : Map[@proto.Oid, Type]) -> Unit {
+  for
+    type_ in [
+      Type::bool(),
+      Type::bytea(),
+      Type::char(),
+      Type::name_type(),
+      Type::int8(),
+      Type::int2(),
+      Type::int4(),
+      Type::text(),
+      Type::oid_type(),
+      Type::json(),
+      Type::float4(),
+      Type::float8(),
+      Type::varchar(),
+      Type::date(),
+      Type::time(),
+      Type::timestamp(),
+      Type::timestamptz(),
+      Type::uuid(),
+      Type::jsonb(),
+      Type::bool_array(),
+      Type::bytea_array(),
+      Type::int2_array(),
+      Type::int4_array(),
+      Type::text_array(),
+      Type::varchar_array(),
+      Type::int8_array(),
+      Type::float4_array(),
+      Type::float8_array(),
+      Type::timestamp_array(),
+      Type::date_array(),
+      Type::uuid_array(),
+    ] {
+    types[type_.oid()] = type_
+  }
+}
+
+///|
+let typeinfo_query = "select t.typname::text, t.typtype::text, t.typelem::oid, r.rngsubtype::oid, t.typbasetype::oid, n.nspname::text, t.typrelid::oid from pg_catalog.pg_type t left join pg_catalog.pg_range r on r.rngtypid = t.oid inner join pg_catalog.pg_namespace n on t.typnamespace = n.oid where t.oid = $1"
+
+///|
+let typeinfo_enum_query = "select enumlabel::text from pg_catalog.pg_enum where enumtypid = $1 order by enumsortorder"
+
+///|
+let typeinfo_composite_query = "select attname::text, atttypid::oid from pg_catalog.pg_attribute where attrelid = $1 and not attisdropped and attnum > 0 order by attnum"
+
+///|
+async fn cached_type(shared : Shared, oid : @proto.Oid) -> Type {
+  match shared.types.get(oid) {
+    Some(type_) => type_
+    None => {
+      let type_ = lookup_type(shared, oid)
+      shared.types[oid] = type_
+      type_
+    }
+  }
+}
+
+///|
+async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
+  match builtin_type(oid) {
+    Some(type_) => type_
+    None => {
+      let rows = query_oid_catalog(shared, typeinfo_query, oid) catch {
+        _ => []
+      }
+      if rows.is_empty() {
+        return Type::unknown(oid, name="oid_\{oid.to_string()}")
+      }
+      let row = rows[0]
+      let name : String = row.get(0)
+      let typtype : String = row.get(1)
+      let elem_oid : @proto.Oid = row.get(2)
+      let range_subtype : @proto.Oid? = row.get(3)
+      let base_oid : @proto.Oid = row.get(4)
+      let relid : @proto.Oid = row.get(6)
+      let kind = if typtype == "e" {
+        Kind::Enum(query_enum_labels(shared, oid))
+      } else if typtype == "p" {
+        Kind::Pseudo
+      } else if base_oid != 0U {
+        Kind::Domain(base_oid)
+      } else if elem_oid != 0U {
+        Kind::Array(elem_oid)
+      } else if relid != 0U {
+        Kind::Composite(query_composite_fields(shared, relid))
+      } else {
+        match range_subtype {
+          Some(subtype) => Kind::Range(subtype)
+          None => Kind::Simple
+        }
+      }
+      { oid, name, kind }
+    }
+  }
+}
+
+///|
+async fn query_oid_catalog(
+  shared : Shared,
+  sql : String,
+  oid : @proto.Oid,
+) -> Array[Row] {
+  let client : Client = { shared, }
+  let params : Array[&ToSql] = [oid as &ToSql]
+  let stream = client.query_typed(sql, [Type::oid_type()], params~)
+  stream.collect()
+}
+
+///|
+async fn query_enum_labels(shared : Shared, oid : @proto.Oid) -> Array[String] {
+  let rows = query_oid_catalog(shared, typeinfo_enum_query, oid) catch {
+    _ => []
+  }
+  rows.map(row => row.get(0))
+}
+
+///|
+async fn query_composite_fields(
+  shared : Shared,
+  oid : @proto.Oid,
+) -> Array[Field] {
+  let rows = query_oid_catalog(shared, typeinfo_composite_query, oid) catch {
+    _ => []
+  }
+  rows.map(row => { name: row.get(0), type_oid: row.get(1) })
+}
+
+///|
+fn parse_parameter_oids(
+  body : @backend.ParameterDescriptionBody,
+) -> Array[@proto.Oid] raise {
+  let types : Array[@proto.Oid] = []
+  let params = body.parameters()
+  loop params.next() {
+    None => types
+    Some(oid) => {
+      types.push(oid)
+      continue params.next()
+    }
+  }
+}
+
+///|
+async fn resolve_parameter_types(
+  shared : Shared,
+  oids : Array[@proto.Oid],
+) -> Array[Type] {
+  let out : Array[Type] = []
+  for oid in oids {
+    out.push(cached_type(shared, oid))
+  }
+  out
+}
+
+///|
+async fn resolve_columns(
+  shared : Shared,
+  columns : Array[Column],
+) -> Array[Column] {
+  let out : Array[Column] = []
+  for column in columns {
+    out.push({ ..column, type_: cached_type(shared, column.type_oid()) })
+  }
+  out
+}
+
+///|
+fn simple_query_bytes(sql : String) -> Bytes raise {
+  let buf = @buffer.new()
+  @frontend.query(@proto.utf8_encode(sql)[:], buf)
+  buf.to_bytes()
+}
+
+///|
+fn sync_bytes() -> Bytes {
+  let buf = @buffer.new()
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn terminate_bytes() -> Bytes {
+  let buf = @buffer.new()
+  @frontend.terminate(buf)
+  buf.to_bytes()
+}
+
+///|
+fn close_bytes(kind : Byte, name : BytesView) -> Bytes raise {
+  let buf = @buffer.new()
+  @frontend.close(kind, name, buf)
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn prepare_bytes(
+  name : BytesView,
+  sql : String,
+  types : Array[Type],
+) -> Bytes raise {
+  let buf = @buffer.new()
+  @frontend.parse(
+    name,
+    @proto.utf8_encode(sql)[:],
+    types.map(t => t.oid()).iter(),
+    buf,
+  )
+  @frontend.describe(b'S', name, buf)
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn execute_statement_bytes(
+  statement_name : BytesView,
+  param_types : Array[Type],
+  params : Array[&ToSql],
+) -> Bytes raise {
+  let buf = @buffer.new()
+  write_bind(buf, b""[:], statement_name, param_types, params, true)
+  @frontend.execute(b""[:], 0, buf)
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn bind_portal_bytes(
+  portal_name : BytesView,
+  statement_name : BytesView,
+  param_types : Array[Type],
+  params : Array[&ToSql],
+) -> Bytes raise {
+  let buf = @buffer.new()
+  write_bind(buf, portal_name, statement_name, param_types, params, true)
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn execute_portal_bytes(portal_name : BytesView, max_rows : Int) -> Bytes raise {
+  let buf = @buffer.new()
+  @frontend.execute(portal_name, max_rows, buf)
+  @frontend.sync(buf)
+  buf.to_bytes()
+}
+
+///|
+fn write_bind(
+  buf : @buffer.Buffer,
+  portal : BytesView,
+  statement : BytesView,
+  param_types : Array[Type],
+  params : Array[&ToSql],
+  describe_portal : Bool,
+) -> Unit raise {
+  let formats = params.mapi((index, param) => param.format(param_types[index]))
+  let values = params.mapi((index, param) => (param, param_types[index]))
+  @frontend.bind(
+    portal,
+    statement,
+    formats.iter(),
+    values.iter(),
+    (pair, payload) => serialize_param(pair.0, pair.1, payload),
+    [1].iter(),
+    buf,
+  )
+  if describe_portal {
+    @frontend.describe(b'P', portal, buf)
+  }
+}
+
+///|
+fn new_row_stream(
+  responses : @async.Queue[@backend.Message],
+  initial_columns? : Array[Column] = [],
+  cleanup? : StreamCleanup? = None,
+) -> RowStream {
+  {
+    columns: initial_columns,
+    responses,
+    cleanup,
+    command_tag: "",
+    row_count: 0,
+    suspended: false,
+    database_error: None,
+    summary: None,
+  }
+}
+
+///|
+fn new_simple_query_stream(
+  responses : @async.Queue[@backend.Message],
+) -> SimpleQueryStream {
+  { responses, columns: [], database_error: None, finished: false }
+}
+
+///|
+fn make_statement_cleanup(client : Client, name : Bytes) -> StreamCleanup raise {
+  { client, bytes: close_bytes(b'S', name[:]), done: false }
+}
+
+///|
+async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
+  let responses = client.send_request(
+    RequestKind::Messages,
+    close_bytes(b'S', name[:]),
+  )
+  drain_close_response(responses)
+}
+
+///|
+async fn RowStream::run_cleanup(self : RowStream) -> Unit {
+  match self.cleanup {
+    Some(cleanup) =>
+      if not(cleanup.done) {
+        cleanup.done = true
+        let responses = cleanup.client.send_request(
+          RequestKind::Messages,
+          cleanup.bytes,
+        )
+        drain_close_response(responses)
+      }
+    None => ()
+  }
+}
+
+///|
+async fn start_copy_out(
+  responses : @async.Queue[@backend.Message],
+) -> CopyOutStream {
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::CopyOutResponse(body) =>
+      return {
+        responses,
+        formats: parse_copy_formats(body.column_formats()),
+        database_error,
+        finished: false,
+      }
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None => raise ClientError::UnexpectedMessage("expected CopyOutResponse")
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected copy out response")
+  }
+}
+
+///|
+async fn read_prepare_response(
+  shared : Shared,
+  responses : @async.Queue[@backend.Message],
+) -> (Array[Type], Array[Column]) {
+  let mut param_oids : Array[@proto.Oid] = []
+  let mut columns : Array[Column] = []
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::ParseComplete => continue responses.get()
+    @backend.Message::ParameterDescription(body) => {
+      param_oids = parse_parameter_oids(body)
+      continue responses.get()
+    }
+    @backend.Message::RowDescription(body) => {
+      columns = parse_columns(body)
+      continue responses.get()
+    }
+    @backend.Message::NoData => continue responses.get()
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None =>
+          (
+            resolve_parameter_types(shared, param_oids),
+            resolve_columns(shared, columns),
+          )
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected prepare response")
+  }
+}
+
+///|
+async fn collect_copy_in_completion(
+  responses : @async.Queue[@backend.Message],
+) -> Int {
+  let mut command_tag = ""
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::CommandComplete(body) => {
+      command_tag = body.tag_str()
+      continue responses.get()
+    }
+    @backend.Message::CopyDone => continue responses.get()
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None => rows_affected(command_tag)
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected copy in completion")
+  }
+}
+
+///|
+async fn drain_close_response(
+  responses : @async.Queue[@backend.Message],
+) -> Unit {
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::CloseComplete => continue responses.get()
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None => ()
+      }
+    _ => raise ClientError::UnexpectedMessage("unexpected close response")
+  }
+}
+
+///|
+async fn drain_sync_response(
+  responses : @async.Queue[@backend.Message],
+) -> Unit {
+  match responses.get() {
+    @backend.Message::ReadyForQuery(_) => ()
+    _ => raise ClientError::UnexpectedMessage("unexpected sync response")
+  }
+}
+
+///|
+async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit {
+  let mut database_error : DatabaseError? = None
+  loop responses.get() {
+    @backend.Message::CommandComplete(_)
+    | @backend.Message::EmptyQueryResponse
+    | @backend.Message::RowDescription(_)
+    | @backend.Message::DataRow(_) => continue responses.get()
+    @backend.Message::ErrorResponse(body) => {
+      database_error = Some(parse_database_error(body.fields()))
+      continue responses.get()
+    }
+    @backend.Message::ReadyForQuery(_) =>
+      match database_error {
+        Some(err) => raise ClientError::Database(err)
+        None => ()
+      }
+    _ =>
+      raise ClientError::UnexpectedMessage("unexpected batch execute response")
+  }
+}
+
+///|
+fn rows_affected(command_tag : String) -> Int {
+  match command_tag.split(" ").last() {
+    None => 0
+    Some(last) => (try? @strconv.parse_int(last)).unwrap_or(0)
+  }
+}
+
+///|
+fn join_clauses(clauses : Array[String]) -> String {
+  let mut out = ""
+  for index, clause in clauses {
+    if index != 0 {
+      out += " "
+    }
+    out += clause
+  }
+  out
+}
+
+///|
+fn serialize_param(
+  param : &ToSql,
+  type_ : Type,
+  payload : @buffer.Buffer,
+) -> @proto.IsNull raise @proto.ProtocolError {
+  param.to_sql(type_, payload) catch {
+    err => raise @proto.ProtocolError::InvalidInput(err.to_string())
+  }
+}
+
+///|
+async fn connect_stream(config : Config) -> Stream {
+  let conn = @socket.Tcp::connect_to_host(config.host(), port=config.port())
+  match config.ssl_mode() {
     Disable => Plain(conn)
     Prefer | Require => {
       let request = @buffer.new()
@@ -413,7 +1680,7 @@ async fn connect_stream(
       let response = conn.read_exactly(1)
       match response[0] {
         b'S' => {
-          let tls = @tls.Tls::client(conn, host~) catch {
+          let tls = @tls.Tls::client(conn, host=config.host()) catch {
             err => {
               conn.close()
               raise ClientError::Ssl(err.to_string())
@@ -422,7 +1689,7 @@ async fn connect_stream(
           Secure(tls)
         }
         b'N' =>
-          if ssl_mode is Require {
+          if config.ssl_mode() is Require {
             conn.close()
             raise ClientError::Ssl("server does not support TLS")
           } else {
@@ -438,58 +1705,151 @@ async fn connect_stream(
 }
 
 ///|
-async fn send_password_message(client : Client, password : String?) -> Unit {
-  let password = require_password(password)
-  let password_bytes = @proto.utf8_encode(password)
+priv struct StartupState {
+  process_id : Int
+  secret_key : Int
+  parameters : Map[String, String]
+  transaction_status : Byte
+}
+
+///|
+async fn startup(stream : Stream, config : Config) -> StartupState {
+  let parameters : Array[(BytesView, BytesView)] = [
+    (b"user"[:], @proto.utf8_encode(config.user())[:]),
+    (b"database"[:], @proto.utf8_encode(config.database())[:]),
+    (b"client_encoding"[:], b"UTF8"[:]),
+    (b"application_name"[:], @proto.utf8_encode(config.application_name())[:]),
+  ]
   let buf = @buffer.new()
-  @frontend.password_message(password_bytes[:], buf)
-  client.stream.write(buf.to_bytes())
+  @frontend.startup_message(parameters.iter(), buf)
+  stream.write(buf.to_bytes())
+  let status : Map[String, String] = {}
+  let mut process_id = 0
+  let mut secret_key = 0
+  let mut transaction_status = b'I'
+  let mut scram : @sasl.ScramSha256? = None
+  loop read_message(stream) {
+    @backend.Message::AuthenticationOk => continue read_message(stream)
+    @backend.Message::AuthenticationCleartextPassword => {
+      send_password_message(stream, config.password())
+      continue read_message(stream)
+    }
+    @backend.Message::AuthenticationMd5Password(body) => {
+      send_md5_password_message(
+        stream,
+        config.user(),
+        config.password(),
+        body.salt(),
+      )
+      continue read_message(stream)
+    }
+    @backend.Message::AuthenticationSasl(body) => {
+      scram = Some(begin_scram(stream, body, config.password()))
+      continue read_message(stream)
+    }
+    @backend.Message::AuthenticationSaslContinue(body) => {
+      continue_scram(stream, scram, body.data())
+      continue read_message(stream)
+    }
+    @backend.Message::AuthenticationSaslFinal(body) => {
+      finish_scram(scram, body.data())
+      continue read_message(stream)
+    }
+    @backend.Message::ParameterStatus(body) => {
+      status[body.name_str()] = body.value_str()
+      continue read_message(stream)
+    }
+    @backend.Message::BackendKeyData(body) => {
+      process_id = body.process_id()
+      secret_key = body.secret_key()
+      continue read_message(stream)
+    }
+    @backend.Message::NoticeResponse(_) => continue read_message(stream)
+    @backend.Message::ReadyForQuery(body) => {
+      transaction_status = body.status()
+      return { process_id, secret_key, parameters: status, transaction_status }
+    }
+    @backend.Message::ErrorResponse(body) =>
+      raise ClientError::Database(parse_database_error(body.fields()))
+    @backend.Message::AuthenticationKerberosV5
+    | @backend.Message::AuthenticationScmCredential
+    | @backend.Message::AuthenticationGss
+    | @backend.Message::AuthenticationGssContinue(_)
+    | @backend.Message::AuthenticationSspi =>
+      raise ClientError::Authentication(
+        "server requested an unsupported authentication method",
+      )
+    _ => raise ClientError::UnexpectedMessage("unexpected startup message")
+  }
+}
+
+///|
+async fn read_message(stream : Stream) -> @backend.Message {
+  let header = stream.read_exactly(5)
+  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
+  let body = stream.read_exactly(body_len - 4)
+  let packet = @buffer.new(size_hint=header.length() + body.length())
+  packet.write_bytes(header)
+  packet.write_bytes(body)
+  match @backend.Message::parse(packet.to_bytes()[:]) {
+    Some(parsed) => parsed.message()
+    None => raise ClientError::UnexpectedMessage("incomplete backend message")
+  }
+}
+
+///|
+async fn send_password_message(stream : Stream, password : String?) -> Unit {
+  let password = require_password(password)
+  let buf = @buffer.new()
+  @frontend.password_message(@proto.utf8_encode(password)[:], buf)
+  stream.write(buf.to_bytes())
 }
 
 ///|
 async fn send_md5_password_message(
-  client : Client,
+  stream : Stream,
   user : String,
   password : String?,
   salt : BytesView,
 ) -> Unit {
   let password = require_password(password)
-  let user_bytes = @proto.utf8_encode(user)
-  let password_bytes = @proto.utf8_encode(password)
-  let digest = @auth.md5_hash(user_bytes[:], password_bytes[:], salt)
+  let digest = @auth.md5_hash(
+    @proto.utf8_encode(user)[:],
+    @proto.utf8_encode(password)[:],
+    salt,
+  )
   let buf = @buffer.new()
   @frontend.password_message(digest[:], buf)
-  client.stream.write(buf.to_bytes())
+  stream.write(buf.to_bytes())
 }
 
 ///|
 async fn begin_scram(
-  client : Client,
+  stream : Stream,
   body : @backend.AuthenticationSaslBody,
   password : String?,
 ) -> @sasl.ScramSha256 {
   guard supports_scram(body) else {
-    raise ClientError::Unsupported(
+    raise ClientError::Authentication(
       "server does not offer SCRAM-SHA-256 authentication",
     )
   }
   let password = require_password(password)
-  let password_bytes = @proto.utf8_encode(password)
   let nonce = @tls.rand_bytes(18)
   let scram = @sasl.ScramSha256::new(
-    password_bytes[:],
+    @proto.utf8_encode(password)[:],
     @sasl.ChannelBinding::unsupported(),
     nonce[:],
   )
   let buf = @buffer.new()
   @frontend.sasl_initial_response(@sasl.SCRAM_SHA_256[:], scram.message(), buf)
-  client.stream.write(buf.to_bytes())
+  stream.write(buf.to_bytes())
   scram
 }
 
 ///|
 async fn continue_scram(
-  client : Client,
+  stream : Stream,
   scram : @sasl.ScramSha256?,
   data : BytesView,
 ) -> Unit {
@@ -497,7 +1857,7 @@ async fn continue_scram(
   scram.update(data)
   let buf = @buffer.new()
   @frontend.sasl_response(scram.message(), buf)
-  client.stream.write(buf.to_bytes())
+  stream.write(buf.to_bytes())
 }
 
 ///|
@@ -535,93 +1895,5 @@ fn supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
       } else {
         continue mechanisms.next()
       }
-  }
-}
-
-///|
-fn serialize_param(param : QueryParam, buf : @buffer.Buffer) -> @proto.IsNull {
-  match param.value() {
-    None => @proto.IsNull::Yes
-    Some(value) => {
-      buf.write_bytes(value)
-      @proto.IsNull::No
-    }
-  }
-}
-
-///|
-fn parse_columns(
-  body : @backend.RowDescriptionBody,
-) -> Array[Column] raise @proto.ProtocolError {
-  let columns : Array[Column] = []
-  let fields = body.fields()
-  loop fields.next() {
-    None => columns
-    Some(field) => {
-      columns.push({
-        name: field.name_str(),
-        table_oid: field.table_oid(),
-        column_id: field.column_id(),
-        type_oid: field.type_oid(),
-        type_size: field.type_size(),
-        type_modifier: field.type_modifier(),
-        format: field.format(),
-      })
-      continue fields.next()
-    }
-  }
-}
-
-///|
-fn parse_row(
-  body : @backend.DataRowBody,
-  columns : Array[Column],
-) -> Row raise @proto.ProtocolError {
-  let values : Array[Bytes?] = []
-  let ranges = body.ranges()
-  let buffer = body.buffer()
-  loop ranges.next() {
-    None => { columns, values }
-    Some(None) => {
-      values.push(None)
-      continue ranges.next()
-    }
-    Some(Some(range)) => {
-      values.push(Some(buffer[range.start():range.end()].to_bytes()))
-      continue ranges.next()
-    }
-  }
-}
-
-///|
-fn parse_database_error(
-  fields : @backend.ErrorFields,
-) -> DatabaseError raise @proto.ProtocolError {
-  let mut severity = None
-  let mut code = None
-  let mut message = None
-  let mut detail = None
-  let mut hint = None
-  loop fields.next() {
-    None =>
-      {
-        severity,
-        code,
-        message: message.unwrap_or("database error"),
-        detail,
-        hint,
-      }
-    Some(field) => {
-      let value = decode_utf8(field.value_bytes())
-      match field.type_() {
-        b'S' | b'V' => severity = Some(value)
-        b'C' => code = Some(value)
-        b'M' => message = Some(value)
-        b'D' => detail = Some(value)
-        b'H' => hint = Some(value)
-        _ => ()
-      }
-      continue fields.next()
-    }
   }
 }
