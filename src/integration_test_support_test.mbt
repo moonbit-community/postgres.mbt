@@ -31,6 +31,11 @@ async fn integration_config() -> IntegrationConfig? {
 }
 
 ///|
+async fn integration_tls_failure_expected() -> Bool {
+  env_var("POSTGRES_TLS_EXPECT_FAILURE") == Some("1")
+}
+
+///|
 fn as_client_config(
   config : IntegrationConfig,
   ssl_mode? : @client.SslMode = @client.SslMode::disable(),
@@ -100,6 +105,14 @@ fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
 fn[T] expect_row_count_error(result : Result[T, Error]) -> String raise {
   guard result is Err(@client.ClientError::RowCount(message)) else {
     fail("expected row count error")
+  }
+  message
+}
+
+///|
+fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
+  guard result is Err(@client.ClientError::Ssl(message)) else {
+    fail("expected SSL error")
   }
   message
 }
