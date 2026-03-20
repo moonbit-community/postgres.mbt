@@ -106,6 +106,7 @@ pub struct CopyData {
 }
 
 ///|
+/// Construct a `CopyData` message body from raw payload bytes.
 pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
   let len = buf.length() + 4
   let _ = @proto.checked_i32(len)
@@ -113,6 +114,7 @@ pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
 }
 
 ///|
+/// Write this `CopyData` message to `out`.
 pub fn CopyData::write(self : CopyData, out : @buffer.Buffer) -> Unit {
   out.write_byte(b'd')
   out.write_int_be(self.len)

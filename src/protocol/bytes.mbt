@@ -55,16 +55,19 @@ pub struct ByteReader {
 }
 
 ///|
+/// Create a byte reader over `buf`.
 pub fn ByteReader::new(buf : BytesView) -> ByteReader {
   { buf, idx: 0 }
 }
 
 ///|
+/// Return the number of unread bytes.
 pub fn ByteReader::remaining(self : ByteReader) -> Int {
   self.buf.length() - self.idx
 }
 
 ///|
+/// Return whether all bytes have been consumed.
 pub fn ByteReader::is_empty(self : ByteReader) -> Bool {
   self.remaining() <= 0
 }
@@ -77,6 +80,7 @@ fn ByteReader::ensure(self : ByteReader, n : Int) -> Unit raise ProtocolError {
 }
 
 ///|
+/// Read the next byte.
 pub fn ByteReader::read_u8(self : ByteReader) -> Byte raise ProtocolError {
   self.ensure(1)
   let b = self.buf[self.idx]
@@ -85,6 +89,7 @@ pub fn ByteReader::read_u8(self : ByteReader) -> Byte raise ProtocolError {
 }
 
 ///|
+/// Read the next big-endian unsigned 16-bit integer.
 pub fn ByteReader::read_u16_be(self : ByteReader) -> UInt16 raise ProtocolError {
   self.ensure(2)
   let b0 = self.buf[self.idx].to_uint16()
@@ -94,6 +99,7 @@ pub fn ByteReader::read_u16_be(self : ByteReader) -> UInt16 raise ProtocolError 
 }
 
 ///|
+/// Read the next big-endian signed 16-bit integer.
 pub fn ByteReader::read_i16_be(self : ByteReader) -> Int raise ProtocolError {
   let u = self.read_u16_be()
   let v = Int16::reinterpret_from_uint16(u)
@@ -101,6 +107,7 @@ pub fn ByteReader::read_i16_be(self : ByteReader) -> Int raise ProtocolError {
 }
 
 ///|
+/// Read the next big-endian unsigned 32-bit integer.
 pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt raise ProtocolError {
   self.ensure(4)
   let b0 = self.buf[self.idx].to_uint()
@@ -112,12 +119,14 @@ pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt raise ProtocolError {
 }
 
 ///|
+/// Read the next big-endian signed 32-bit integer.
 pub fn ByteReader::read_i32_be(self : ByteReader) -> Int raise ProtocolError {
   let u = self.read_u32_be()
   i32_from_u32(u)
 }
 
 ///|
+/// Read the next big-endian unsigned 64-bit integer.
 pub fn ByteReader::read_u64_be(self : ByteReader) -> UInt64 raise ProtocolError {
   self.ensure(8)
   let b0 = self.buf[self.idx].to_uint64()
@@ -140,24 +149,28 @@ pub fn ByteReader::read_u64_be(self : ByteReader) -> UInt64 raise ProtocolError 
 }
 
 ///|
+/// Read the next big-endian signed 64-bit integer.
 pub fn ByteReader::read_i64_be(self : ByteReader) -> Int64 raise ProtocolError {
   let u = self.read_u64_be()
   u.reinterpret_as_int64()
 }
 
 ///|
+/// Read the next big-endian IEEE-754 `Float`.
 pub fn ByteReader::read_f32_be(self : ByteReader) -> Float raise ProtocolError {
   let u = self.read_u32_be()
   Float::reinterpret_from_uint(u)
 }
 
 ///|
+/// Read the next big-endian IEEE-754 `Double`.
 pub fn ByteReader::read_f64_be(self : ByteReader) -> Double raise ProtocolError {
   let u = self.read_u64_be()
   u.reinterpret_as_double()
 }
 
 ///|
+/// Read the next `len` bytes.
 pub fn ByteReader::read_bytes(
   self : ByteReader,
   len : Int,
@@ -173,6 +186,7 @@ pub fn ByteReader::read_bytes(
 }
 
 ///|
+/// Consume and return all remaining bytes.
 pub fn ByteReader::read_all(self : ByteReader) -> BytesView {
   let start = self.idx
   self.idx = self.buf.length()
