@@ -6,16 +6,19 @@ pub enum SslMode {
 } derive(Show, Eq)
 
 ///|
+/// Return the `Disable` SSL mode.
 pub fn SslMode::disable() -> SslMode {
   Disable
 }
 
 ///|
+/// Return the `Prefer` SSL mode.
 pub fn SslMode::prefer() -> SslMode {
   Prefer
 }
 
 ///|
+/// Return the `Require` SSL mode.
 pub fn SslMode::require() -> SslMode {
   Require
 }
@@ -32,6 +35,7 @@ pub struct Config {
 } derive(Show, Eq)
 
 ///|
+/// Create a client configuration.
 pub fn Config::new(
   host : String,
   user~ : String,
@@ -45,36 +49,43 @@ pub fn Config::new(
 }
 
 ///|
+/// Return the configured server host.
 pub fn Config::host(self : Config) -> String {
   self.host
 }
 
 ///|
+/// Return the configured server port.
 pub fn Config::port(self : Config) -> Int {
   self.port
 }
 
 ///|
+/// Return the configured database user.
 pub fn Config::user(self : Config) -> String {
   self.user
 }
 
 ///|
+/// Return the configured database name.
 pub fn Config::database(self : Config) -> String {
   self.database
 }
 
 ///|
+/// Return the configured password, if any.
 pub fn Config::password(self : Config) -> String? {
   self.password
 }
 
 ///|
+/// Return the configured SSL mode.
 pub fn Config::ssl_mode(self : Config) -> SslMode {
   self.ssl_mode
 }
 
 ///|
+/// Return the configured application name.
 pub fn Config::application_name(self : Config) -> String {
   self.application_name
 }
@@ -89,26 +100,31 @@ pub struct DatabaseError {
 } derive(Show, Eq)
 
 ///|
+/// Return the server-reported error severity.
 pub fn DatabaseError::severity(self : DatabaseError) -> String? {
   self.severity
 }
 
 ///|
+/// Return the SQLSTATE error code.
 pub fn DatabaseError::code(self : DatabaseError) -> String? {
   self.code
 }
 
 ///|
+/// Return the primary error message.
 pub fn DatabaseError::message(self : DatabaseError) -> String {
   self.message
 }
 
 ///|
+/// Return the optional error detail text.
 pub fn DatabaseError::detail(self : DatabaseError) -> String? {
   self.detail
 }
 
 ///|
+/// Return the optional error hint text.
 pub fn DatabaseError::hint(self : DatabaseError) -> String? {
   self.hint
 }
@@ -147,11 +163,13 @@ pub struct Field {
 } derive(Show, Eq)
 
 ///|
+/// Return the composite field name.
 pub fn Field::name(self : Field) -> String {
   self.name
 }
 
 ///|
+/// Return the composite field type OID.
 pub fn Field::type_oid(self : Field) -> @proto.Oid {
   self.type_oid
 }
@@ -164,176 +182,211 @@ pub struct Type {
 } derive(Show, Eq)
 
 ///|
+/// Return the PostgreSQL type OID.
 pub fn Type::oid(self : Type) -> @proto.Oid {
   self.oid
 }
 
 ///|
+/// Return the PostgreSQL type name.
 pub fn Type::name(self : Type) -> String {
   self.name
 }
 
 ///|
+/// Return the kind of this PostgreSQL type.
 pub fn Type::kind(self : Type) -> Kind {
   self.kind
 }
 
 ///|
+/// Return the built-in PostgreSQL `bool` type descriptor.
 pub fn Type::bool() -> Type {
   { oid: 16U, name: "bool", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `bytea` type descriptor.
 pub fn Type::bytea() -> Type {
   { oid: 17U, name: "bytea", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `char` type descriptor.
 pub fn Type::char() -> Type {
   { oid: 18U, name: "char", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `name` type descriptor.
 pub fn Type::name_type() -> Type {
   { oid: 19U, name: "name", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int8` type descriptor.
 pub fn Type::int8() -> Type {
   { oid: 20U, name: "int8", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int2` type descriptor.
 pub fn Type::int2() -> Type {
   { oid: 21U, name: "int2", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int4` type descriptor.
 pub fn Type::int4() -> Type {
   { oid: 23U, name: "int4", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `text` type descriptor.
 pub fn Type::text() -> Type {
   { oid: 25U, name: "text", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `oid` type descriptor.
 pub fn Type::oid_type() -> Type {
   { oid: 26U, name: "oid", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `float4` type descriptor.
 pub fn Type::float4() -> Type {
   { oid: 700U, name: "float4", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `float8` type descriptor.
 pub fn Type::float8() -> Type {
   { oid: 701U, name: "float8", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `varchar` type descriptor.
 pub fn Type::varchar() -> Type {
   { oid: 1043U, name: "varchar", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `date` type descriptor.
 pub fn Type::date() -> Type {
   { oid: 1082U, name: "date", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `time` type descriptor.
 pub fn Type::time() -> Type {
   { oid: 1083U, name: "time", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `timestamp` type descriptor.
 pub fn Type::timestamp() -> Type {
   { oid: 1114U, name: "timestamp", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `timestamptz` type descriptor.
 pub fn Type::timestamptz() -> Type {
   { oid: 1184U, name: "timestamptz", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `uuid` type descriptor.
 pub fn Type::uuid() -> Type {
   { oid: 2950U, name: "uuid", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `json` type descriptor.
 pub fn Type::json() -> Type {
   { oid: 114U, name: "json", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `jsonb` type descriptor.
 pub fn Type::jsonb() -> Type {
   { oid: 3802U, name: "jsonb", kind: Kind::Simple }
 }
 
 ///|
+/// Return the built-in PostgreSQL `bool[]` type descriptor.
 pub fn Type::bool_array() -> Type {
   { oid: 1000U, name: "_bool", kind: Kind::Array(16U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `bytea[]` type descriptor.
 pub fn Type::bytea_array() -> Type {
   { oid: 1001U, name: "_bytea", kind: Kind::Array(17U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int2[]` type descriptor.
 pub fn Type::int2_array() -> Type {
   { oid: 1005U, name: "_int2", kind: Kind::Array(21U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int4[]` type descriptor.
 pub fn Type::int4_array() -> Type {
   { oid: 1007U, name: "_int4", kind: Kind::Array(23U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `text[]` type descriptor.
 pub fn Type::text_array() -> Type {
   { oid: 1009U, name: "_text", kind: Kind::Array(25U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `varchar[]` type descriptor.
 pub fn Type::varchar_array() -> Type {
   { oid: 1015U, name: "_varchar", kind: Kind::Array(1043U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `int8[]` type descriptor.
 pub fn Type::int8_array() -> Type {
   { oid: 1016U, name: "_int8", kind: Kind::Array(20U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `float4[]` type descriptor.
 pub fn Type::float4_array() -> Type {
   { oid: 1021U, name: "_float4", kind: Kind::Array(700U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `float8[]` type descriptor.
 pub fn Type::float8_array() -> Type {
   { oid: 1022U, name: "_float8", kind: Kind::Array(701U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `timestamp[]` type descriptor.
 pub fn Type::timestamp_array() -> Type {
   { oid: 1115U, name: "_timestamp", kind: Kind::Array(1114U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `date[]` type descriptor.
 pub fn Type::date_array() -> Type {
   { oid: 1182U, name: "_date", kind: Kind::Array(1082U) }
 }
 
 ///|
+/// Return the built-in PostgreSQL `uuid[]` type descriptor.
 pub fn Type::uuid_array() -> Type {
   { oid: 2951U, name: "_uuid", kind: Kind::Array(2950U) }
 }
 
 ///|
+/// Construct a placeholder descriptor for an unknown PostgreSQL type.
 pub fn Type::unknown(oid : @proto.Oid, name? : String = "unknown") -> Type {
   { oid, name, kind: Kind::Unknown }
 }
@@ -587,41 +640,49 @@ pub struct Column {
 } derive(Show, Eq)
 
 ///|
+/// Return the column name.
 pub fn Column::name(self : Column) -> String {
   self.name
 }
 
 ///|
+/// Return the source table OID, if known.
 pub fn Column::table_oid(self : Column) -> @proto.Oid {
   self.table_oid
 }
 
 ///|
+/// Return the source column number, if known.
 pub fn Column::column_id(self : Column) -> Int {
   self.column_id
 }
 
 ///|
+/// Return the resolved type descriptor for this column.
 pub fn Column::type_(self : Column) -> Type {
   self.type_
 }
 
 ///|
+/// Return the column type OID.
 pub fn Column::type_oid(self : Column) -> @proto.Oid {
   self.type_.oid()
 }
 
 ///|
+/// Return the column type size.
 pub fn Column::type_size(self : Column) -> Int {
   self.type_size
 }
 
 ///|
+/// Return the column type modifier.
 pub fn Column::type_modifier(self : Column) -> Int {
   self.type_modifier
 }
 
 ///|
+/// Return the wire format code for this column.
 pub fn Column::format(self : Column) -> Int {
   self.format
 }
@@ -633,16 +694,19 @@ pub struct Row {
 } derive(Show, Eq)
 
 ///|
+/// Return the columns that describe this row.
 pub fn Row::columns(self : Row) -> Array[Column] {
   self.columns
 }
 
 ///|
+/// Return the number of values in this row.
 pub fn Row::len(self : Row) -> Int {
   self.values.length()
 }
 
 ///|
+/// Return the index of the named column, if present.
 pub fn Row::index_of(self : Row, name : String) -> Int? {
   for index, column in self.columns {
     if column.name() == name {
@@ -653,11 +717,13 @@ pub fn Row::index_of(self : Row, name : String) -> Int? {
 }
 
 ///|
+/// Return the raw value bytes at `index`.
 pub fn Row::get_raw(self : Row, index : Int) -> Bytes? {
   self.values[index]
 }
 
 ///|
+/// Return the raw value bytes for the named column.
 pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
   match self.index_of(name) {
     None => raise ClientError::ColumnNotFound(name)
@@ -666,6 +732,7 @@ pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
 }
 
 ///|
+/// Decode the value at `index` as `T`.
 pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
   let column = self.columns[index]
   match self.values[index] {
@@ -675,6 +742,7 @@ pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
 }
 
 ///|
+/// Decode the named column as `T`.
 pub fn[T : FromSql] Row::get_name(self : Row, name : String) -> T raise {
   match self.index_of(name) {
     None => raise ClientError::ColumnNotFound(name)
@@ -683,6 +751,7 @@ pub fn[T : FromSql] Row::get_name(self : Row, name : String) -> T raise {
 }
 
 ///|
+/// Decode the value at `index` as `T`, or return `None` if out of range.
 pub fn[T : FromSql] Row::try_get(self : Row, index : Int) -> T? raise {
   if index < 0 || index >= self.len() {
     return None
@@ -691,6 +760,7 @@ pub fn[T : FromSql] Row::try_get(self : Row, index : Int) -> T? raise {
 }
 
 ///|
+/// Decode the named column as `T`, or return `None` if it does not exist.
 pub fn[T : FromSql] Row::try_get_name(self : Row, name : String) -> T? raise {
   match self.index_of(name) {
     None => None
@@ -699,11 +769,13 @@ pub fn[T : FromSql] Row::try_get_name(self : Row, name : String) -> T? raise {
 }
 
 ///|
+/// Decode the value at `index` as text.
 pub fn Row::get_text(self : Row, index : Int) -> String? raise {
   self.get(index)
 }
 
 ///|
+/// Decode the named column as text.
 pub fn Row::get_text_name(self : Row, name : String) -> String? raise {
   self.get_name(name)
 }
@@ -716,16 +788,19 @@ struct QuerySummary {
 } derive(Show, Eq)
 
 ///|
+/// Return the server command tag.
 pub fn QuerySummary::command_tag(self : QuerySummary) -> String {
   self.command_tag
 }
 
 ///|
+/// Return the number of rows produced or affected.
 pub fn QuerySummary::row_count(self : QuerySummary) -> Int {
   self.row_count
 }
 
 ///|
+/// Return whether the portal suspended before completion.
 pub fn QuerySummary::suspended(self : QuerySummary) -> Bool {
   self.suspended
 }
@@ -743,11 +818,13 @@ struct RowStream {
 }
 
 ///|
+/// Return the current column description for this stream.
 pub fn RowStream::columns(self : RowStream) -> Array[Column] {
   self.columns
 }
 
 ///|
+/// Read the next row from the stream.
 pub async fn RowStream::next(self : RowStream) -> Row? {
   match self.summary {
     Some(_) => return self.raise_terminal_error_or_none()
@@ -797,6 +874,7 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
 }
 
 ///|
+/// Collect all remaining rows into an array.
 pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
   let rows : Array[Row] = []
   loop self.next() {
@@ -809,6 +887,7 @@ pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
 }
 
 ///|
+/// Drain the stream and return its final query summary.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
   loop self.next() {
     Some(_) => continue self.next()
@@ -823,16 +902,19 @@ pub struct SimpleQueryRow {
 } derive(Show, Eq)
 
 ///|
+/// Return the column names for this row.
 pub fn SimpleQueryRow::columns(self : SimpleQueryRow) -> Array[String] {
   self.columns
 }
 
 ///|
+/// Return the number of values in this row.
 pub fn SimpleQueryRow::len(self : SimpleQueryRow) -> Int {
   self.values.length()
 }
 
 ///|
+/// Return the index of the named column, if present.
 pub fn SimpleQueryRow::index_of(self : SimpleQueryRow, name : String) -> Int? {
   for index, column in self.columns {
     if column == name {
@@ -843,11 +925,13 @@ pub fn SimpleQueryRow::index_of(self : SimpleQueryRow, name : String) -> Int? {
 }
 
 ///|
+/// Return the text value at `index`.
 pub fn SimpleQueryRow::get(self : SimpleQueryRow, index : Int) -> String? {
   self.values[index]
 }
 
 ///|
+/// Return the text value for the named column.
 pub fn SimpleQueryRow::get_name(
   self : SimpleQueryRow,
   name : String,
@@ -874,6 +958,7 @@ struct SimpleQueryStream {
 }
 
 ///|
+/// Read the next message from a simple-query stream.
 pub async fn SimpleQueryStream::next(
   self : SimpleQueryStream,
 ) -> SimpleQueryMessage? {
@@ -912,6 +997,7 @@ pub async fn SimpleQueryStream::next(
 }
 
 ///|
+/// Collect all remaining simple-query messages.
 pub async fn SimpleQueryStream::collect(
   self : SimpleQueryStream,
 ) -> Array[SimpleQueryMessage] {
@@ -926,6 +1012,7 @@ pub async fn SimpleQueryStream::collect(
 }
 
 ///|
+/// Drain the simple-query stream.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
   loop self.next() {
     Some(_) => continue self.next()
@@ -941,16 +1028,19 @@ pub struct Notification {
 } derive(Show, Eq)
 
 ///|
+/// Return the notifying backend process ID.
 pub fn Notification::process_id(self : Notification) -> Int {
   self.process_id
 }
 
 ///|
+/// Return the notification channel.
 pub fn Notification::channel(self : Notification) -> String {
   self.channel
 }
 
 ///|
+/// Return the notification payload.
 pub fn Notification::payload(self : Notification) -> String {
   self.payload
 }
@@ -971,11 +1061,13 @@ struct CopyOutStream {
 }
 
 ///|
+/// Return the COPY OUT column format codes.
 pub fn CopyOutStream::column_formats(self : CopyOutStream) -> Array[Int] {
   self.formats
 }
 
 ///|
+/// Read the next COPY OUT data chunk.
 pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
   if self.finished {
     return self.raise_terminal_error_or_none()
@@ -1001,6 +1093,7 @@ pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
 }
 
 ///|
+/// Collect all remaining COPY OUT data chunks.
 pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
   let chunks : Array[Bytes] = []
   loop self.next() {
@@ -1013,6 +1106,7 @@ pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
 }
 
 ///|
+/// Drain the COPY OUT stream.
 pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
   loop self.next() {
     Some(_) => continue self.next()

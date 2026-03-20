@@ -264,6 +264,7 @@ pub struct HstoreEntries {
 }
 
 ///|
+/// Read the next HSTORE key/value pair.
 pub fn HstoreEntries::next(
   self : HstoreEntries,
 ) -> (Bytes, Bytes?)? raise @proto.ProtocolError {
@@ -342,16 +343,19 @@ pub struct Varbit {
 }
 
 ///|
+/// Return the number of bits in this value.
 pub fn Varbit::len(self : Varbit) -> Int {
   self.len
 }
 
 ///|
+/// Return whether this value contains no bits.
 pub fn Varbit::is_empty(self : Varbit) -> Bool {
   self.len == 0
 }
 
 ///|
+/// Return the raw packed bytes of this value.
 pub fn Varbit::bytes(self : Varbit) -> BytesView {
   self.bytes
 }
@@ -562,16 +566,19 @@ pub struct PgArray {
 }
 
 ///|
+/// Return whether this array contains NULL elements.
 pub fn PgArray::has_nulls(self : PgArray) -> Bool {
   self.has_nulls
 }
 
 ///|
+/// Return the PostgreSQL element type OID.
 pub fn PgArray::element_type(self : PgArray) -> @proto.Oid {
   self.element_type
 }
 
 ///|
+/// Return an iterator over the array dimensions.
 pub fn PgArray::dimensions(self : PgArray) -> ArrayDimensions {
   let start = 12
   let end = start + self.dimensions * 8
@@ -579,6 +586,7 @@ pub fn PgArray::dimensions(self : PgArray) -> ArrayDimensions {
 }
 
 ///|
+/// Return an iterator over the raw array elements.
 pub fn PgArray::values(self : PgArray) -> ArrayValues {
   let start = 12 + self.dimensions * 8
   { remaining: self.elements, buf: self.buf[start:] }
@@ -591,6 +599,7 @@ pub struct ArrayDimensions {
 }
 
 ///|
+/// Read the next array dimension descriptor.
 pub fn ArrayDimensions::next(
   self : ArrayDimensions,
 ) -> ArrayDimension? raise @proto.ProtocolError {
@@ -612,16 +621,19 @@ pub struct ArrayDimension {
 } derive(Show, Eq)
 
 ///|
+/// Construct an array dimension descriptor.
 pub fn ArrayDimension::new(len : Int, lower_bound : Int) -> ArrayDimension {
   { len, lower_bound }
 }
 
 ///|
+/// Return the length of this dimension.
 pub fn ArrayDimension::len(self : ArrayDimension) -> Int {
   self.len
 }
 
 ///|
+/// Return the lower bound of this dimension.
 pub fn ArrayDimension::lower_bound(self : ArrayDimension) -> Int {
   self.lower_bound
 }
@@ -634,6 +646,7 @@ pub struct ArrayValues {
 }
 
 ///|
+/// Read the next raw array element.
 pub fn ArrayValues::next(
   self : ArrayValues,
 ) -> Bytes?? raise @proto.ProtocolError {
@@ -815,11 +828,13 @@ pub struct Point {
 } derive(Show, Eq)
 
 ///|
+/// Return the x-coordinate.
 pub fn Point::x(self : Point) -> Double {
   self.x
 }
 
 ///|
+/// Return the y-coordinate.
 pub fn Point::y(self : Point) -> Double {
   self.y
 }
@@ -860,11 +875,13 @@ pub struct Box {
 } derive(Show, Eq)
 
 ///|
+/// Return the upper-right corner.
 pub fn Box::upper_right(self : Box) -> Point {
   self.upper_right
 }
 
 ///|
+/// Return the lower-left corner.
 pub fn Box::lower_left(self : Box) -> Point {
   self.lower_left
 }
@@ -915,11 +932,13 @@ pub struct Path {
 }
 
 ///|
+/// Return whether this path is closed.
 pub fn Path::closed(self : Path) -> Bool {
   self.closed
 }
 
 ///|
+/// Return an iterator over the path points.
 pub fn Path::points(self : Path) -> PathPoints {
   { remaining: self.points, buf: self.buf }
 }
@@ -932,6 +951,7 @@ pub struct PathPoints {
 }
 
 ///|
+/// Read the next point in the path.
 pub fn PathPoints::next(self : PathPoints) -> Point? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() != 0 {
@@ -967,6 +987,7 @@ pub struct Ipv6Addr {
 }
 
 ///|
+/// Construct an IPv4 address from four octets.
 pub fn Ipv4Addr::from_octets(
   octets : BytesView,
 ) -> Ipv4Addr raise @proto.ProtocolError {
@@ -977,6 +998,7 @@ pub fn Ipv4Addr::from_octets(
 }
 
 ///|
+/// Construct an IPv6 address from sixteen octets.
 pub fn Ipv6Addr::from_octets(
   octets : BytesView,
 ) -> Ipv6Addr raise @proto.ProtocolError {
@@ -987,11 +1009,13 @@ pub fn Ipv6Addr::from_octets(
 }
 
 ///|
+/// Return the raw IPv4 octets.
 pub fn Ipv4Addr::octets(self : Ipv4Addr) -> BytesView {
   self.octets[:]
 }
 
 ///|
+/// Return the raw IPv6 octets.
 pub fn Ipv6Addr::octets(self : Ipv6Addr) -> BytesView {
   self.octets[:]
 }
@@ -1062,11 +1086,13 @@ pub struct Inet {
 }
 
 ///|
+/// Return the decoded IP address.
 pub fn Inet::addr(self : Inet) -> IpAddr {
   self.addr
 }
 
 ///|
+/// Return the network prefix length.
 pub fn Inet::netmask(self : Inet) -> Byte {
   self.netmask
 }

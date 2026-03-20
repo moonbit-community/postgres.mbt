@@ -68,6 +68,7 @@ pub struct Header {
 } derive(Show)
 
 ///|
+/// Parse a backend message header if enough bytes are available.
 pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
   if buf.length() < 5 {
     return None
@@ -84,11 +85,13 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
 }
 
 ///|
+/// Return the message tag byte.
 pub fn Header::tag(self : Header) -> Byte {
   self.tag
 }
 
 ///|
+/// Return the message body length reported by the header.
 pub fn Header::len(self : Header) -> Int {
   self.len
 }
@@ -101,11 +104,13 @@ pub struct ParsedMessage {
 }
 
 ///|
+/// Return the parsed backend message.
 pub fn ParsedMessage::message(self : ParsedMessage) -> Message {
   self.message
 }
 
 ///|
+/// Return the number of bytes consumed from the input buffer.
 pub fn ParsedMessage::consumed(self : ParsedMessage) -> Int {
   self.consumed
 }
@@ -147,6 +152,7 @@ pub enum Message {
 }
 
 ///|
+/// Parse one backend message from the front of `buf`.
 pub fn Message::parse(
   buf : BytesView,
 ) -> ParsedMessage? raise @proto.ProtocolError {
@@ -287,6 +293,7 @@ pub struct AuthenticationMd5PasswordBody {
 }
 
 ///|
+/// Return the MD5 salt bytes.
 pub fn AuthenticationMd5PasswordBody::salt(
   self : AuthenticationMd5PasswordBody,
 ) -> Bytes {
@@ -299,6 +306,7 @@ pub struct AuthenticationGssContinueBody {
 }
 
 ///|
+/// Return the opaque GSS continuation payload.
 pub fn AuthenticationGssContinueBody::data(
   self : AuthenticationGssContinueBody,
 ) -> BytesView {
@@ -311,6 +319,7 @@ pub struct AuthenticationSaslBody {
 }
 
 ///|
+/// Return an iterator over the advertised SASL mechanisms.
 pub fn AuthenticationSaslBody::mechanisms(
   self : AuthenticationSaslBody,
 ) -> SaslMechanisms {
@@ -323,6 +332,7 @@ pub struct SaslMechanisms {
 }
 
 ///|
+/// Read the next advertised SASL mechanism as raw bytes.
 pub fn SaslMechanisms::next(
   self : SaslMechanisms,
 ) -> Bytes? raise @proto.ProtocolError {
@@ -346,6 +356,7 @@ pub fn SaslMechanisms::next(
 }
 
 ///|
+/// Read the next advertised SASL mechanism as UTF-8 text.
 pub fn SaslMechanisms::next_str(
   self : SaslMechanisms,
 ) -> String? raise @proto.ProtocolError {
@@ -361,6 +372,7 @@ pub struct AuthenticationSaslContinueBody {
 }
 
 ///|
+/// Return the server-first SCRAM payload.
 pub fn AuthenticationSaslContinueBody::data(
   self : AuthenticationSaslContinueBody,
 ) -> BytesView {
@@ -373,6 +385,7 @@ pub struct AuthenticationSaslFinalBody {
 }
 
 ///|
+/// Return the server-final SCRAM payload.
 pub fn AuthenticationSaslFinalBody::data(
   self : AuthenticationSaslFinalBody,
 ) -> BytesView {
@@ -386,11 +399,13 @@ pub struct BackendKeyDataBody {
 }
 
 ///|
+/// Return the backend process ID for cancellation.
 pub fn BackendKeyDataBody::process_id(self : BackendKeyDataBody) -> Int {
   self.process_id
 }
 
 ///|
+/// Return the backend secret key for cancellation.
 pub fn BackendKeyDataBody::secret_key(self : BackendKeyDataBody) -> Int {
   self.secret_key
 }
@@ -401,11 +416,13 @@ pub struct CommandCompleteBody {
 }
 
 ///|
+/// Return the raw command tag bytes.
 pub fn CommandCompleteBody::tag_bytes(self : CommandCompleteBody) -> BytesView {
   self.tag[:]
 }
 
 ///|
+/// Decode the command tag as UTF-8 text.
 pub fn CommandCompleteBody::tag_str(
   self : CommandCompleteBody,
 ) -> String raise @proto.ProtocolError {
@@ -418,11 +435,13 @@ pub struct CopyDataBody {
 }
 
 ///|
+/// Return the raw COPY data payload.
 pub fn CopyDataBody::data(self : CopyDataBody) -> BytesView {
   self.storage[:]
 }
 
 ///|
+/// Consume and return the raw COPY data payload.
 pub fn CopyDataBody::into_bytes(self : CopyDataBody) -> Bytes {
   self.storage
 }
@@ -435,11 +454,13 @@ pub struct CopyInResponseBody {
 }
 
 ///|
+/// Return the overall COPY format code.
 pub fn CopyInResponseBody::format(self : CopyInResponseBody) -> Byte {
   self.format
 }
 
 ///|
+/// Return an iterator over the COPY IN column format codes.
 pub fn CopyInResponseBody::column_formats(
   self : CopyInResponseBody,
 ) -> ColumnFormats {
@@ -453,6 +474,7 @@ pub struct ColumnFormats {
 }
 
 ///|
+/// Read the next COPY column format code.
 pub fn ColumnFormats::next(
   self : ColumnFormats,
 ) -> Int? raise @proto.ProtocolError {
@@ -479,11 +501,13 @@ pub struct CopyOutResponseBody {
 }
 
 ///|
+/// Return the overall COPY format code.
 pub fn CopyOutResponseBody::format(self : CopyOutResponseBody) -> Byte {
   self.format
 }
 
 ///|
+/// Return an iterator over the COPY OUT column format codes.
 pub fn CopyOutResponseBody::column_formats(
   self : CopyOutResponseBody,
 ) -> ColumnFormats {
@@ -497,16 +521,19 @@ pub struct DataRowBody {
 } derive(Show, Eq)
 
 ///|
+/// Return an iterator over the raw value ranges in this row.
 pub fn DataRowBody::ranges(self : DataRowBody) -> DataRowRanges {
   { buf: self.storage[:], len: self.storage.length(), remaining: self.len }
 }
 
 ///|
+/// Return the raw row payload buffer.
 pub fn DataRowBody::buffer(self : DataRowBody) -> BytesView {
   self.storage[:]
 }
 
 ///|
+/// Consume and return the raw row payload buffer.
 pub fn DataRowBody::buffer_bytes(self : DataRowBody) -> Bytes {
   self.storage
 }
@@ -518,11 +545,13 @@ pub struct ByteRange {
 }
 
 ///|
+/// Return the inclusive start offset of this field payload.
 pub fn ByteRange::start(self : ByteRange) -> Int {
   self.start
 }
 
 ///|
+/// Return the exclusive end offset of this field payload.
 pub fn ByteRange::end(self : ByteRange) -> Int {
   self.end
 }
@@ -535,6 +564,7 @@ pub struct DataRowRanges {
 }
 
 ///|
+/// Read the next field range from a data row.
 pub fn DataRowRanges::next(
   self : DataRowRanges,
 ) -> ByteRange?? raise @proto.ProtocolError {
@@ -573,6 +603,7 @@ pub struct ErrorResponseBody {
 }
 
 ///|
+/// Return an iterator over error fields.
 pub fn ErrorResponseBody::fields(self : ErrorResponseBody) -> ErrorFields {
   { buf: self.storage[:] }
 }
@@ -583,6 +614,7 @@ pub struct ErrorFields {
 }
 
 ///|
+/// Read the next error field.
 pub fn ErrorFields::next(
   self : ErrorFields,
 ) -> ErrorField? raise @proto.ProtocolError {
@@ -612,11 +644,13 @@ pub struct ErrorField {
 }
 
 ///|
+/// Return the field type code.
 pub fn ErrorField::type_(self : ErrorField) -> Byte {
   self.type_
 }
 
 ///|
+/// Return the raw field value bytes.
 pub fn ErrorField::value_bytes(self : ErrorField) -> BytesView {
   self.value[:]
 }
@@ -627,6 +661,7 @@ pub struct NoticeResponseBody {
 }
 
 ///|
+/// Return an iterator over notice fields.
 pub fn NoticeResponseBody::fields(self : NoticeResponseBody) -> ErrorFields {
   { buf: self.storage[:] }
 }
@@ -639,6 +674,7 @@ pub struct NotificationResponseBody {
 }
 
 ///|
+/// Return the notifying backend process ID.
 pub fn NotificationResponseBody::process_id(
   self : NotificationResponseBody,
 ) -> Int {
@@ -646,6 +682,7 @@ pub fn NotificationResponseBody::process_id(
 }
 
 ///|
+/// Return the notification channel as raw bytes.
 pub fn NotificationResponseBody::channel_bytes(
   self : NotificationResponseBody,
 ) -> BytesView {
@@ -653,6 +690,7 @@ pub fn NotificationResponseBody::channel_bytes(
 }
 
 ///|
+/// Decode the notification channel as UTF-8 text.
 pub fn NotificationResponseBody::channel_str(
   self : NotificationResponseBody,
 ) -> String raise @proto.ProtocolError {
@@ -660,6 +698,7 @@ pub fn NotificationResponseBody::channel_str(
 }
 
 ///|
+/// Return the notification payload as raw bytes.
 pub fn NotificationResponseBody::message_bytes(
   self : NotificationResponseBody,
 ) -> BytesView {
@@ -667,6 +706,7 @@ pub fn NotificationResponseBody::message_bytes(
 }
 
 ///|
+/// Decode the notification payload as UTF-8 text.
 pub fn NotificationResponseBody::message_str(
   self : NotificationResponseBody,
 ) -> String raise @proto.ProtocolError {
@@ -680,6 +720,7 @@ pub struct ParameterDescriptionBody {
 }
 
 ///|
+/// Return an iterator over described parameter type OIDs.
 pub fn ParameterDescriptionBody::parameters(
   self : ParameterDescriptionBody,
 ) -> Parameters {
@@ -693,6 +734,7 @@ pub struct Parameters {
 }
 
 ///|
+/// Read the next described parameter type OID.
 pub fn Parameters::next(
   self : Parameters,
 ) -> @proto.Oid? raise @proto.ProtocolError {
@@ -718,11 +760,13 @@ pub struct ParameterStatusBody {
 }
 
 ///|
+/// Return the parameter name as raw bytes.
 pub fn ParameterStatusBody::name_bytes(self : ParameterStatusBody) -> BytesView {
   self.name[:]
 }
 
 ///|
+/// Return the parameter value as raw bytes.
 pub fn ParameterStatusBody::value_bytes(
   self : ParameterStatusBody,
 ) -> BytesView {
@@ -730,6 +774,7 @@ pub fn ParameterStatusBody::value_bytes(
 }
 
 ///|
+/// Decode the parameter name as UTF-8 text.
 pub fn ParameterStatusBody::name_str(
   self : ParameterStatusBody,
 ) -> String raise @proto.ProtocolError {
@@ -737,6 +782,7 @@ pub fn ParameterStatusBody::name_str(
 }
 
 ///|
+/// Decode the parameter value as UTF-8 text.
 pub fn ParameterStatusBody::value_str(
   self : ParameterStatusBody,
 ) -> String raise @proto.ProtocolError {
@@ -749,6 +795,7 @@ pub struct ReadyForQueryBody {
 }
 
 ///|
+/// Return the backend transaction status byte.
 pub fn ReadyForQueryBody::status(self : ReadyForQueryBody) -> Byte {
   self.status
 }
@@ -760,6 +807,7 @@ pub struct RowDescriptionBody {
 }
 
 ///|
+/// Return an iterator over described result fields.
 pub fn RowDescriptionBody::fields(self : RowDescriptionBody) -> Fields {
   { buf: self.storage[:], remaining: self.len }
 }
@@ -771,6 +819,7 @@ pub struct Fields {
 }
 
 ///|
+/// Read the next described result field.
 pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() == 0 {
@@ -815,41 +864,49 @@ pub struct Field {
 }
 
 ///|
+/// Return the field name as raw bytes.
 pub fn Field::name_bytes(self : Field) -> BytesView {
   self.name[:]
 }
 
 ///|
+/// Decode the field name as UTF-8 text.
 pub fn Field::name_str(self : Field) -> String raise @proto.ProtocolError {
   decode_utf8(self.name[:])
 }
 
 ///|
+/// Return the source table OID.
 pub fn Field::table_oid(self : Field) -> @proto.Oid {
   self.table_oid
 }
 
 ///|
+/// Return the source column number.
 pub fn Field::column_id(self : Field) -> Int {
   self.column_id
 }
 
 ///|
+/// Return the field type OID.
 pub fn Field::type_oid(self : Field) -> @proto.Oid {
   self.type_oid
 }
 
 ///|
+/// Return the field type size.
 pub fn Field::type_size(self : Field) -> Int {
   self.type_size
 }
 
 ///|
+/// Return the field type modifier.
 pub fn Field::type_modifier(self : Field) -> Int {
   self.type_modifier
 }
 
 ///|
+/// Return the field format code.
 pub fn Field::format(self : Field) -> Int {
   self.format
 }

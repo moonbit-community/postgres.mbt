@@ -160,16 +160,19 @@ pub enum ChannelBinding {
 }
 
 ///|
+/// Construct a channel binding mode that was offered but not requested.
 pub fn ChannelBinding::unrequested() -> ChannelBinding {
   Unrequested
 }
 
 ///|
+/// Construct a channel binding mode for servers without channel binding support.
 pub fn ChannelBinding::unsupported() -> ChannelBinding {
   Unsupported
 }
 
 ///|
+/// Construct a `tls-server-end-point` channel binding with the given signature.
 pub fn ChannelBinding::tls_server_end_point(
   signature : Bytes,
 ) -> ChannelBinding {

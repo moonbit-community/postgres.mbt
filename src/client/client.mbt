@@ -144,6 +144,7 @@ struct TransactionBuilder {
 }
 
 ///|
+/// Open a PostgreSQL connection and return the client handle plus its connection task.
 pub async fn connect(config : Config) -> (Client, Connection) {
   let stream = connect_stream(config)
   let startup = startup(stream, config)
@@ -166,11 +167,13 @@ pub async fn connect(config : Config) -> (Client, Connection) {
 }
 
 ///|
+/// Return whether the client runtime has already closed.
 pub fn Client::is_closed(self : Client) -> Bool {
   self.shared.closed.val
 }
 
 ///|
+/// Request a graceful shutdown of the client and connection loop.
 pub fn Client::close(self : Client) -> Unit {
   if self.shared.closed.val || self.shared.closing.val {
     return
@@ -195,6 +198,7 @@ pub fn Client::close(self : Client) -> Unit {
 }
 
 ///|
+/// Create a token that can cancel the current backend operation.
 pub fn Client::cancel_token(self : Client) -> CancelToken {
   {
     config: self.shared.config,
@@ -205,27 +209,32 @@ pub fn Client::cancel_token(self : Client) -> CancelToken {
 }
 
 ///|
+/// Return the backend process ID used for cancellation.
 pub fn CancelToken::process_id(self : CancelToken) -> Int {
   self.process_id.val
 }
 
 ///|
+/// Return the backend secret key used for cancellation.
 pub fn CancelToken::secret_key(self : CancelToken) -> Int {
   self.secret_key.val
 }
 
 ///|
+/// Reset the cached type metadata to the built-in PostgreSQL types.
 pub fn Client::clear_type_cache(self : Client) -> Unit {
   self.shared.types.clear()
   seed_builtin_types(self.shared.types)
 }
 
 ///|
+/// Look up a server parameter by name.
 pub fn Client::parameter(self : Client, name : String) -> String? {
   self.shared.parameters.get(name)
 }
 
 ///|
+/// Perform a round trip to verify that the connection is still usable.
 pub async fn Client::check_connection(self : Client) -> Unit {
   ensure_open(self.shared)
   let responses = self.send_request(RequestKind::Messages, sync_bytes())
@@ -233,6 +242,7 @@ pub async fn Client::check_connection(self : Client) -> Unit {
 }
 
 ///|
+/// Execute a SQL string with the simple query protocol.
 pub async fn Client::simple_query(
   self : Client,
   sql : String,
@@ -246,6 +256,7 @@ pub async fn Client::simple_query(
 }
 
 ///|
+/// Execute one or more SQL commands and discard any returned rows.
 pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
   ensure_open(self.shared)
   let responses = self.send_request(
@@ -256,11 +267,13 @@ pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
 }
 
 ///|
+/// Prepare a statement and let the server infer its parameter types.
 pub async fn Client::prepare(self : Client, sql : String) -> Statement {
   self.prepare_typed(sql, [])
 }
 
 ///|
+/// Prepare a statement with explicit parameter types.
 pub async fn Client::prepare_typed(
   self : Client,
   sql : String,
@@ -275,16 +288,19 @@ pub async fn Client::prepare_typed(
 }
 
 ///|
+/// Return the parameter types expected by this statement.
 pub fn Statement::params(self : Statement) -> Array[Type] {
   self.params
 }
 
 ///|
+/// Return the result columns described for this statement.
 pub fn Statement::columns(self : Statement) -> Array[Column] {
   self.columns
 }
 
 ///|
+/// Close the prepared statement on the server.
 pub async fn Statement::close(self : Statement) -> Unit {
   if self.closed.val {
     return
@@ -298,6 +314,7 @@ pub async fn Statement::close(self : Statement) -> Unit {
 }
 
 ///|
+/// Prepare and execute a query, returning its rows as a stream.
 pub async fn Client::query(
   self : Client,
   sql : String,
@@ -331,6 +348,7 @@ pub async fn Client::query(
 }
 
 ///|
+/// Execute a query and require exactly one row.
 pub async fn Client::query_one(
   self : Client,
   sql : String,
@@ -356,6 +374,7 @@ pub async fn Client::query_one(
 }
 
 ///|
+/// Execute a query and require at most one row.
 pub async fn Client::query_opt(
   self : Client,
   sql : String,
@@ -373,6 +392,7 @@ pub async fn Client::query_opt(
 }
 
 ///|
+/// Execute a query with explicit parameter types.
 pub async fn Client::query_typed(
   self : Client,
   sql : String,
@@ -403,6 +423,7 @@ pub async fn Client::query_typed(
 }
 
 ///|
+/// Execute a typed query and return its raw row stream.
 pub async fn Client::query_typed_raw(
   self : Client,
   sql : String,
@@ -413,6 +434,7 @@ pub async fn Client::query_typed_raw(
 }
 
 ///|
+/// Execute a previously prepared statement and stream its rows.
 pub async fn Client::query_statement(
   self : Client,
   statement : Statement,
@@ -435,6 +457,7 @@ pub async fn Client::query_statement(
 }
 
 ///|
+/// Execute SQL and return the affected row count.
 pub async fn Client::execute(
   self : Client,
   sql : String,
@@ -452,6 +475,7 @@ pub async fn Client::execute(
 }
 
 ///|
+/// Execute a prepared statement and return the affected row count.
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
@@ -463,6 +487,7 @@ pub async fn Client::execute_raw(
 }
 
 ///|
+/// Bind parameters to a prepared statement and create a portal.
 pub async fn Client::bind(
   self : Client,
   statement : Statement,
@@ -511,11 +536,13 @@ pub async fn Client::bind(
 }
 
 ///|
+/// Return the result columns associated with this portal.
 pub fn Portal::columns(self : Portal) -> Array[Column] {
   self.columns
 }
 
 ///|
+/// Close the portal on the server.
 pub async fn Portal::close(self : Portal) -> Unit {
   if self.closed.val {
     return
@@ -529,6 +556,7 @@ pub async fn Portal::close(self : Portal) -> Unit {
 }
 
 ///|
+/// Execute a portal and stream up to `max_rows` rows.
 pub async fn Client::query_portal(
   self : Client,
   portal : Portal,
@@ -546,6 +574,7 @@ pub async fn Client::query_portal(
 }
 
 ///|
+/// Start a `COPY ... TO STDOUT` operation.
 pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   ensure_open(self.shared)
   let responses = self.send_request(
@@ -556,6 +585,7 @@ pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
 }
 
 ///|
+/// Start a `COPY ... FROM STDIN` operation.
 pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
   ensure_open(self.shared)
   let input = @async.Queue::new(kind=Unbounded)
@@ -578,6 +608,7 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
 }
 
 ///|
+/// Send one COPY data chunk to the server.
 pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
   guard not(self.finished.val) else {
     raise ClientError::Closed("copy sink already finished")
@@ -586,6 +617,7 @@ pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
 }
 
 ///|
+/// Finish the COPY IN operation and return the affected row count.
 pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
   guard not(self.finished.val) else {
     raise ClientError::Closed("copy sink already finished")
@@ -596,6 +628,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
 }
 
 ///|
+/// Abort the COPY IN operation with an error message.
 pub async fn CopyInSink::abort(
   self : CopyInSink,
   message? : String = "COPY aborted",
@@ -607,17 +640,20 @@ pub async fn CopyInSink::abort(
 }
 
 ///|
+/// Begin a transaction with default options.
 pub async fn Client::transaction(self : Client) -> Transaction {
   self.batch_execute("BEGIN")
   { client: self, savepoint: None, finished: @ref.new(false) }
 }
 
 ///|
+/// Build a transaction with custom `BEGIN` clauses.
 pub fn Client::build_transaction(self : Client) -> TransactionBuilder {
   { client: self, isolation_level: None, read_only: None, deferrable: None }
 }
 
 ///|
+/// Set the transaction isolation level clause.
 pub fn TransactionBuilder::isolation_level(
   self : TransactionBuilder,
   level : String,
@@ -626,6 +662,7 @@ pub fn TransactionBuilder::isolation_level(
 }
 
 ///|
+/// Set whether the transaction should be read only.
 pub fn TransactionBuilder::read_only(
   self : TransactionBuilder,
   enabled? : Bool = true,
@@ -634,6 +671,7 @@ pub fn TransactionBuilder::read_only(
 }
 
 ///|
+/// Set whether the transaction should be deferrable.
 pub fn TransactionBuilder::deferrable(
   self : TransactionBuilder,
   enabled? : Bool = true,
@@ -642,6 +680,7 @@ pub fn TransactionBuilder::deferrable(
 }
 
 ///|
+/// Start the transaction configured by this builder.
 pub async fn TransactionBuilder::start(
   self : TransactionBuilder,
 ) -> Transaction {
@@ -670,6 +709,7 @@ pub async fn TransactionBuilder::start(
 }
 
 ///|
+/// Start a nested transaction backed by a savepoint.
 pub async fn Transaction::transaction(self : Transaction) -> Transaction {
   self.assert_open()
   let name = "moon_tx_\{next_id(self.client.shared).to_string()}"
@@ -678,6 +718,7 @@ pub async fn Transaction::transaction(self : Transaction) -> Transaction {
 }
 
 ///|
+/// Execute a query within this transaction.
 pub async fn Transaction::query(
   self : Transaction,
   sql : String,
@@ -688,6 +729,7 @@ pub async fn Transaction::query(
 }
 
 ///|
+/// Execute SQL within this transaction and return the affected row count.
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
@@ -698,6 +740,7 @@ pub async fn Transaction::execute(
 }
 
 ///|
+/// Execute one or more SQL commands within this transaction.
 pub async fn Transaction::batch_execute(
   self : Transaction,
   sql : String,
@@ -707,6 +750,7 @@ pub async fn Transaction::batch_execute(
 }
 
 ///|
+/// Prepare a statement within this transaction.
 pub async fn Transaction::prepare(
   self : Transaction,
   sql : String,
@@ -716,6 +760,7 @@ pub async fn Transaction::prepare(
 }
 
 ///|
+/// Bind parameters to a statement within this transaction.
 pub async fn Transaction::bind(
   self : Transaction,
   statement : Statement,
@@ -726,6 +771,7 @@ pub async fn Transaction::bind(
 }
 
 ///|
+/// Execute a portal within this transaction.
 pub async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,
@@ -736,6 +782,7 @@ pub async fn Transaction::query_portal(
 }
 
 ///|
+/// Commit this transaction or release its savepoint.
 pub async fn Transaction::commit(self : Transaction) -> Unit {
   self.assert_open()
   match self.savepoint {
@@ -746,6 +793,7 @@ pub async fn Transaction::commit(self : Transaction) -> Unit {
 }
 
 ///|
+/// Roll back this transaction or roll back to its savepoint.
 pub async fn Transaction::rollback(self : Transaction) -> Unit {
   self.assert_open()
   match self.savepoint {
@@ -759,6 +807,7 @@ pub async fn Transaction::rollback(self : Transaction) -> Unit {
 }
 
 ///|
+/// Send a PostgreSQL cancel request for this token.
 pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
   if self.closed.val {
     return
@@ -774,6 +823,7 @@ pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
 }
 
 ///|
+/// Drive the connection loop until shutdown or failure.
 pub async fn Connection::run(
   self : Connection,
   on_async? : (AsyncMessage) -> Unit = _ => (),
@@ -812,6 +862,7 @@ pub async fn Connection::run(
 }
 
 ///|
+/// Receive the next asynchronous message from the connection loop.
 pub async fn Connection::next_message(self : Connection) -> AsyncMessage? {
   Some(self.shared.async_messages.get()) catch {
     _ => None
@@ -819,6 +870,7 @@ pub async fn Connection::next_message(self : Connection) -> AsyncMessage? {
 }
 
 ///|
+/// Look up the latest value of a server parameter.
 pub fn Connection::parameter(self : Connection, name : String) -> String? {
   self.shared.parameters.get(name)
 }
