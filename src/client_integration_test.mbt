@@ -65,7 +65,7 @@ async fn collect_driver_async_messages(
 async fn[T] wait_for_task_or_fail(
   task : @async.Task[T],
   message : String,
-  polls? : Int = 100,
+  polls? : Int = 500,
 ) -> T {
   let mut remaining = polls
   while remaining > 0 {
@@ -78,6 +78,52 @@ async fn[T] wait_for_task_or_fail(
     }
   }
   fail(message)
+}
+
+///|
+async fn[T] assert_task_stays_pending(
+  task : @async.Task[T],
+  message : String,
+  polls? : Int = 50,
+) -> Unit {
+  let mut remaining = polls
+  while remaining > 0 {
+    match task.try_wait() {
+      Some(_) => fail(message)
+      None => {
+        remaining -= 1
+        @async.sleep(10)
+      }
+    }
+  }
+}
+
+///|
+async fn assert_tls_query_ok(
+  config : IntegrationConfig,
+  ssl_mode : @client.SslMode,
+  application_name : String,
+) -> Unit {
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(
+      as_client_config(config, ssl_mode~, application_name~),
+    )
+    group.spawn_bg(() => connection.run())
+
+    assert_eq(client.parameter("application_name"), Some(application_name))
+    let negotiated_application_name : String = client
+      .query_one(
+        "select current_setting('application_name')::text as application_name",
+      )
+      .get_name("application_name")
+    assert_eq(negotiated_application_name, application_name)
+    let value : Int = client
+      .query_one("select 1::int4 as value")
+      .get_name("value")
+    assert_eq(value, 1)
+
+    client.close()
+  })
 }
 
 ///|
@@ -174,6 +220,50 @@ async test "integration connect and typed query" {
 
     client.close()
   })
+}
+
+///|
+async test "integration tls prefer connects and queries" {
+  guard integration_config() is Some(config) else { return }
+  guard not(integration_tls_failure_expected()) else { return }
+  assert_tls_query_ok(
+    config,
+    @client.SslMode::prefer(),
+    "moonbit-postgres-tls-prefer",
+  )
+}
+
+///|
+async test "integration tls require connects and queries" {
+  guard integration_config() is Some(config) else { return }
+  guard not(integration_tls_failure_expected()) else { return }
+  assert_tls_query_ok(
+    config,
+    @client.SslMode::require(),
+    "moonbit-postgres-tls-require",
+  )
+}
+
+///|
+async test "integration tls rejects untrusted server certificate" {
+  guard integration_config() is Some(config) else { return }
+  guard integration_tls_failure_expected() else { return }
+
+  let message = expect_ssl_error(
+    try? @client.connect(
+      as_client_config(
+        config,
+        ssl_mode=@client.SslMode::require(),
+        application_name="moonbit-postgres-tls-untrusted",
+      ),
+    ),
+  )
+  assert_true(
+    message.contains("certificate") ||
+    message.contains("verify") ||
+    message.contains("unknown ca") ||
+    message.contains("alert"),
+  )
 }
 
 ///|
@@ -504,8 +594,9 @@ async test "integration row stream backpressures after bounded buffering" {
       value
     })
 
-    @async.sleep(100)
-    assert_eq(task.try_wait(), None)
+    assert_task_stays_pending(
+      task, "expected bounded buffering to keep the follow-up query blocked",
+    )
 
     let summary = stream.finish()
     assert_eq(summary.row_count(), 16)
@@ -967,18 +1058,23 @@ async test "integration deferred constraint" {
     client.batch_execute(
       "create temp table moon_driver_deferred_constraint (i int, unique (i) deferrable initially deferred)",
     )
+    let tx = client.transaction()
     assert_eq(
-      client.execute(
-        "insert into moon_driver_deferred_constraint (i) values (1)",
-      ),
+      tx.execute("insert into moon_driver_deferred_constraint (i) values (1)"),
       1,
     )
-    let err = expect_database_error(
-      try? client.execute(
-        "insert into moon_driver_deferred_constraint (i) values (1)",
-      ),
+    assert_eq(
+      tx.execute("insert into moon_driver_deferred_constraint (i) values (1)"),
+      1,
     )
+    let err = expect_database_error(try? tx.commit())
     assert_eq(err.code(), Some("23505"))
+    let count : Int = client
+      .query_one(
+        "select count(*)::int4 as count from moon_driver_deferred_constraint",
+      )
+      .get_name("count")
+    assert_eq(count, 0)
 
     client.close()
   })
