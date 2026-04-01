@@ -123,12 +123,10 @@ pub fn varbit_to_sql(Int, Iter[Byte], @buffer.Buffer) -> Unit raise @protocol.Pr
 pub struct ArrayDimension {
   len : Int
   lower_bound : Int
-}
+} derive(Eq, Show)
 pub fn ArrayDimension::len(Self) -> Int
 pub fn ArrayDimension::lower_bound(Self) -> Int
 pub fn ArrayDimension::new(Int, Int) -> Self
-pub impl Eq for ArrayDimension
-pub impl Show for ArrayDimension
 
 pub struct ArrayDimensions {
   mut buf : BytesView
@@ -144,11 +142,9 @@ pub fn ArrayValues::next(Self) -> Bytes?? raise @protocol.ProtocolError
 pub struct Box {
   upper_right : Point
   lower_left : Point
-}
+} derive(Eq, Show)
 pub fn Box::lower_left(Self) -> Point
 pub fn Box::upper_right(Self) -> Point
-pub impl Eq for Box
-pub impl Show for Box
 
 pub struct HstoreEntries {
   mut remaining : Int
@@ -209,11 +205,9 @@ pub fn PgArray::values(Self) -> ArrayValues
 pub struct Point {
   x : Double
   y : Double
-}
+} derive(Eq, Show)
 pub fn Point::x(Self) -> Double
 pub fn Point::y(Self) -> Double
-pub impl Eq for Point
-pub impl Show for Point
 
 pub enum Range {
   Empty

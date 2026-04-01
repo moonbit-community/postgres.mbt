@@ -243,10 +243,10 @@ pub async fn Client::check_connection(self : Client) -> Unit {
 
 ///|
 /// Execute a SQL string with the simple query protocol.
-pub async fn Client::simple_query(
+pub fn Client::simple_query(
   self : Client,
   sql : String,
-) -> SimpleQueryStream {
+) -> SimpleQueryStream raise {
   ensure_open(self.shared)
   let responses = self.send_request(
     RequestKind::Messages,
@@ -435,13 +435,13 @@ pub async fn Client::query_typed_raw(
 
 ///|
 /// Execute a previously prepared statement and stream its rows.
-pub async fn Client::query_statement(
+pub fn Client::query_statement(
   self : Client,
   statement : Statement,
   params? : Array[&ToSql] = [],
-) -> RowStream {
+) -> RowStream raise {
   ensure_open(self.shared)
-  guard not(statement.closed.val) else {
+  guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
   guard statement.params.length() == params.length() else {
@@ -494,7 +494,7 @@ pub async fn Client::bind(
   params? : Array[&ToSql] = [],
 ) -> Portal {
   ensure_open(self.shared)
-  guard not(statement.closed.val) else {
+  guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
   guard statement.params.length() == params.length() else {
@@ -557,13 +557,13 @@ pub async fn Portal::close(self : Portal) -> Unit {
 
 ///|
 /// Execute a portal and stream up to `max_rows` rows.
-pub async fn Client::query_portal(
+pub fn Client::query_portal(
   self : Client,
   portal : Portal,
   max_rows : Int,
-) -> RowStream {
+) -> RowStream raise {
   ensure_open(self.shared)
-  guard not(portal.closed.val) else {
+  guard !portal.closed.val else {
     raise ClientError::Closed("portal already closed")
   }
   let responses = self.send_request(
@@ -610,7 +610,7 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
 ///|
 /// Send one COPY data chunk to the server.
 pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
-  guard not(self.finished.val) else {
+  guard !self.finished.val else {
     raise ClientError::Closed("copy sink already finished")
   }
   self.input.put(CopyInAction::Data(data.to_bytes()))
@@ -619,7 +619,7 @@ pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
 ///|
 /// Finish the COPY IN operation and return the affected row count.
 pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
-  guard not(self.finished.val) else {
+  guard !self.finished.val else {
     raise ClientError::Closed("copy sink already finished")
   }
   self.finished.val = true
@@ -633,7 +633,7 @@ pub async fn CopyInSink::abort(
   self : CopyInSink,
   message? : String = "COPY aborted",
 ) -> Unit {
-  guard not(self.finished.val) else { return }
+  guard !self.finished.val else { return }
   self.finished.val = true
   self.input.put(CopyInAction::Fail(message))
   let _ = collect_copy_in_completion(self.responses) catch { _ => 0 }
@@ -832,11 +832,11 @@ pub async fn Connection::run(
   let mut sent_terminate = false
   try {
     while true {
-      if pending.is_empty() && not(sent_terminate) {
+      if pending.is_empty() && !sent_terminate {
         let request = self.shared.requests.get()
         sent_terminate = self.send_outbound_request(request, pending)
       }
-      if self.can_pipeline_requests(pending) && not(sent_terminate) {
+      if self.can_pipeline_requests(pending) && !sent_terminate {
         sent_terminate = self.pipeline_pending_requests(pending)
       }
       if pending.is_empty() {
@@ -944,7 +944,7 @@ async fn Connection::forward_pending_message(
   if self.handle_async_message(message, on_async) {
     return
   }
-  guard not(pending.is_empty()) else {
+  guard !pending.is_empty() else {
     raise ClientError::UnexpectedMessage("unexpected backend message")
   }
   let request = pending[0]
@@ -1538,7 +1538,7 @@ async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
 async fn RowStream::run_cleanup(self : RowStream) -> Unit {
   match self.cleanup {
     Some(cleanup) =>
-      if not(cleanup.done) {
+      if !cleanup.done {
         cleanup.done = true
         let responses = cleanup.client.send_request(
           RequestKind::Messages,
@@ -1693,7 +1693,7 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 fn rows_affected(command_tag : String) -> Int {
   match command_tag.split(" ").last() {
     None => 0
-    Some(last) => (try? @strconv.parse_int(last)).unwrap_or(0)
+    Some(last) => (try? @string.parse_int(last)).unwrap_or(0)
   }
 }
 

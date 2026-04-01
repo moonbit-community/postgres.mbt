@@ -99,7 +99,7 @@ fn consume_utf8_scalar(bytes : BytesView) -> BytesView raise ProtocolError {
 /// Validate that bytes are valid UTF-8.
 pub fn validate_utf8(bytes : BytesView) -> Unit raise ProtocolError {
   let mut rest = bytes
-  while not(rest.is_empty()) {
+  while !rest.is_empty() {
     rest = consume_utf8_scalar(rest)
   }
 }

@@ -6,47 +6,47 @@ import {
 }
 
 // Values
-pub const AUTHENTICATION_TAG : Byte = R
+pub const AUTHENTICATION_TAG : Byte = b'R'
 
-pub const BACKEND_KEY_DATA_TAG : Byte = K
+pub const BACKEND_KEY_DATA_TAG : Byte = b'K'
 
-pub const BIND_COMPLETE_TAG : Byte = 2
+pub const BIND_COMPLETE_TAG : Byte = b'2'
 
-pub const CLOSE_COMPLETE_TAG : Byte = 3
+pub const CLOSE_COMPLETE_TAG : Byte = b'3'
 
-pub const COMMAND_COMPLETE_TAG : Byte = C
+pub const COMMAND_COMPLETE_TAG : Byte = b'C'
 
-pub const COPY_DATA_TAG : Byte = d
+pub const COPY_DATA_TAG : Byte = b'd'
 
-pub const COPY_DONE_TAG : Byte = c
+pub const COPY_DONE_TAG : Byte = b'c'
 
-pub const COPY_IN_RESPONSE_TAG : Byte = G
+pub const COPY_IN_RESPONSE_TAG : Byte = b'G'
 
-pub const COPY_OUT_RESPONSE_TAG : Byte = H
+pub const COPY_OUT_RESPONSE_TAG : Byte = b'H'
 
-pub const DATA_ROW_TAG : Byte = D
+pub const DATA_ROW_TAG : Byte = b'D'
 
-pub const EMPTY_QUERY_RESPONSE_TAG : Byte = I
+pub const EMPTY_QUERY_RESPONSE_TAG : Byte = b'I'
 
-pub const ERROR_RESPONSE_TAG : Byte = E
+pub const ERROR_RESPONSE_TAG : Byte = b'E'
 
-pub const NOTICE_RESPONSE_TAG : Byte = N
+pub const NOTICE_RESPONSE_TAG : Byte = b'N'
 
-pub const NOTIFICATION_RESPONSE_TAG : Byte = A
+pub const NOTIFICATION_RESPONSE_TAG : Byte = b'A'
 
-pub const NO_DATA_TAG : Byte = n
+pub const NO_DATA_TAG : Byte = b'n'
 
-pub const PARAMETER_DESCRIPTION_TAG : Byte = t
+pub const PARAMETER_DESCRIPTION_TAG : Byte = b't'
 
-pub const PARAMETER_STATUS_TAG : Byte = S
+pub const PARAMETER_STATUS_TAG : Byte = b'S'
 
-pub const PARSE_COMPLETE_TAG : Byte = 1
+pub const PARSE_COMPLETE_TAG : Byte = b'1'
 
-pub const PORTAL_SUSPENDED_TAG : Byte = s
+pub const PORTAL_SUSPENDED_TAG : Byte = b's'
 
-pub const READY_FOR_QUERY_TAG : Byte = Z
+pub const READY_FOR_QUERY_TAG : Byte = b'Z'
 
-pub const ROW_DESCRIPTION_TAG : Byte = T
+pub const ROW_DESCRIPTION_TAG : Byte = b'T'
 
 // Errors
 
@@ -127,12 +127,10 @@ pub fn CopyOutResponseBody::format(Self) -> Byte
 pub struct DataRowBody {
   storage : Bytes
   len : Int
-}
+} derive(Eq, Show)
 pub fn DataRowBody::buffer(Self) -> BytesView
 pub fn DataRowBody::buffer_bytes(Self) -> Bytes
 pub fn DataRowBody::ranges(Self) -> DataRowRanges
-pub impl Eq for DataRowBody
-pub impl Show for DataRowBody
 
 pub struct DataRowRanges {
   mut buf : BytesView
@@ -185,11 +183,10 @@ pub fn Fields::next(Self) -> Field? raise @protocol.ProtocolError
 pub struct Header {
   tag : Byte
   len : Int
-}
+} derive(Show)
 pub fn Header::len(Self) -> Int
 pub fn Header::parse(BytesView) -> Self? raise @protocol.ProtocolError
 pub fn Header::tag(Self) -> Byte
-pub impl Show for Header
 
 pub enum Message {
   AuthenticationCleartextPassword

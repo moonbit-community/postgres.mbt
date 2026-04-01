@@ -225,7 +225,7 @@ async test "integration connect and typed query" {
 ///|
 async test "integration tls prefer connects and queries" {
   guard integration_config() is Some(config) else { return }
-  guard not(integration_tls_failure_expected()) else { return }
+  guard !integration_tls_failure_expected() else { return }
   assert_tls_query_ok(
     config,
     @client.SslMode::prefer(),
@@ -236,7 +236,7 @@ async test "integration tls prefer connects and queries" {
 ///|
 async test "integration tls require connects and queries" {
   guard integration_config() is Some(config) else { return }
-  guard not(integration_tls_failure_expected()) else { return }
+  guard !integration_tls_failure_expected() else { return }
   assert_tls_query_ok(
     config,
     @client.SslMode::require(),
