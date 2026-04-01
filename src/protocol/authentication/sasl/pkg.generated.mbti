@@ -6,9 +6,9 @@ import {
 }
 
 // Values
-pub const SCRAM_SHA_256 : Bytes = SCRAM-SHA-256
+pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
 
-pub const SCRAM_SHA_256_PLUS : Bytes = SCRAM-SHA-256-PLUS
+pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 pub fn hi(BytesView, BytesView, Int) -> Bytes raise @protocol.ProtocolError
 

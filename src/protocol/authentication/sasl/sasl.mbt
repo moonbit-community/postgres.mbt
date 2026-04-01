@@ -46,7 +46,7 @@ fn validate_saslprep_output(s : String) -> Unit raise @proto.ProtocolError {
 
 ///|
 fn is_non_ascii_space(ch : Char) -> Bool {
-  not(ch.is_ascii()) && ch.is_whitespace()
+  !ch.is_ascii() && ch.is_whitespace()
 }
 
 ///|
@@ -280,7 +280,7 @@ pub fn ScramSha256::update(
     _ => raise @proto.ProtocolError::InvalidInput("invalid SCRAM state")
   }
   let parsed = Parser::new(message).server_first_message()
-  if not(starts_with(parsed.nonce[:], client_nonce[:])) {
+  if !starts_with(parsed.nonce[:], client_nonce[:]) {
     raise @proto.ProtocolError::InvalidInput("invalid nonce")
   }
   let salt_str = @utf8.decode(parsed.salt) catch {
@@ -363,7 +363,7 @@ pub fn ScramSha256::finish(
   }
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])
   let server_signature = @crypto.hmac_sha256(server_key[:], auth_message[:])
-  if not(bytes_equal(server_signature[:], verifier[:])) {
+  if !bytes_equal(server_signature[:], verifier[:]) {
     raise @proto.ProtocolError::InvalidInput("SCRAM verification error")
   }
   self.state = Done

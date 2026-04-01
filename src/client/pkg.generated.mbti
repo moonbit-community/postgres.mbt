@@ -22,18 +22,14 @@ pub suberror ClientError {
   ColumnNotFound(String)
   RowCount(String)
   UnexpectedMessage(String)
-}
-pub impl Eq for ClientError
-pub impl Show for ClientError
+} derive(Eq, Show)
 
 // Types and methods
 pub enum AsyncMessage {
   Notice(DatabaseError)
   Notification(Notification)
   ParameterStatus(String, String)
-}
-pub impl Eq for AsyncMessage
-pub impl Show for AsyncMessage
+} derive(Eq, Show)
 
 type CancelToken
 pub async fn CancelToken::cancel(Self) -> Unit
@@ -59,11 +55,11 @@ pub async fn Client::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Client::query(Self, String, params? : Array[&ToSql]) -> RowStream
 pub async fn Client::query_one(Self, String, params? : Array[&ToSql]) -> Row
 pub async fn Client::query_opt(Self, String, params? : Array[&ToSql]) -> Row?
-pub async fn Client::query_portal(Self, Portal, Int) -> RowStream
-pub async fn Client::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
+pub fn Client::query_portal(Self, Portal, Int) -> RowStream raise
+pub fn Client::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream raise
 pub async fn Client::query_typed(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
 pub async fn Client::query_typed_raw(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
-pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
+pub fn Client::simple_query(Self, String) -> SimpleQueryStream raise
 pub async fn Client::transaction(Self) -> Transaction
 
 pub struct Column {
@@ -74,7 +70,7 @@ pub struct Column {
   type_size : Int
   type_modifier : Int
   format : Int
-}
+} derive(Eq, Show)
 pub fn Column::column_id(Self) -> Int
 pub fn Column::format(Self) -> Int
 pub fn Column::name(Self) -> String
@@ -83,8 +79,6 @@ pub fn Column::type_(Self) -> Type
 pub fn Column::type_modifier(Self) -> Int
 pub fn Column::type_oid(Self) -> UInt
 pub fn Column::type_size(Self) -> Int
-pub impl Eq for Column
-pub impl Show for Column
 
 pub struct Config {
   host : String
@@ -94,7 +88,7 @@ pub struct Config {
   password : String?
   ssl_mode : SslMode
   application_name : String
-}
+} derive(Eq, Show)
 pub fn Config::application_name(Self) -> String
 pub fn Config::database(Self) -> String
 pub fn Config::host(Self) -> String
@@ -103,8 +97,6 @@ pub fn Config::password(Self) -> String?
 pub fn Config::port(Self) -> Int
 pub fn Config::ssl_mode(Self) -> SslMode
 pub fn Config::user(Self) -> String
-pub impl Eq for Config
-pub impl Show for Config
 
 type Connection
 pub async fn Connection::next_message(Self) -> AsyncMessage?
@@ -128,23 +120,19 @@ pub struct DatabaseError {
   message : String
   detail : String?
   hint : String?
-}
+} derive(Eq, Show)
 pub fn DatabaseError::code(Self) -> String?
 pub fn DatabaseError::detail(Self) -> String?
 pub fn DatabaseError::hint(Self) -> String?
 pub fn DatabaseError::message(Self) -> String
 pub fn DatabaseError::severity(Self) -> String?
-pub impl Eq for DatabaseError
-pub impl Show for DatabaseError
 
 pub struct Field {
   name : String
   type_oid : UInt
-}
+} derive(Eq, Show)
 pub fn Field::name(Self) -> String
 pub fn Field::type_oid(Self) -> UInt
-pub impl Eq for Field
-pub impl Show for Field
 
 pub enum Kind {
   Simple
@@ -155,36 +143,30 @@ pub enum Kind {
   Range(UInt)
   Pseudo
   Unknown
-}
-pub impl Eq for Kind
-pub impl Show for Kind
+} derive(Eq, Show)
 
 pub struct Notification {
   process_id : Int
   channel : String
   payload : String
-}
+} derive(Eq, Show)
 pub fn Notification::channel(Self) -> String
 pub fn Notification::payload(Self) -> String
 pub fn Notification::process_id(Self) -> Int
-pub impl Eq for Notification
-pub impl Show for Notification
 
 type Portal
 pub async fn Portal::close(Self) -> Unit
 pub fn Portal::columns(Self) -> Array[Column]
 
-type QuerySummary
+type QuerySummary derive(Eq, Show)
 pub fn QuerySummary::command_tag(Self) -> String
 pub fn QuerySummary::row_count(Self) -> Int
 pub fn QuerySummary::suspended(Self) -> Bool
-pub impl Eq for QuerySummary
-pub impl Show for QuerySummary
 
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
-}
+} derive(Eq, Show)
 pub fn Row::columns(Self) -> Array[Column]
 pub fn[T : FromSql] Row::get(Self, Int) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
@@ -196,8 +178,6 @@ pub fn Row::index_of(Self, String) -> Int?
 pub fn Row::len(Self) -> Int
 pub fn[T : FromSql] Row::try_get(Self, Int) -> T? raise
 pub fn[T : FromSql] Row::try_get_name(Self, String) -> T? raise
-pub impl Eq for Row
-pub impl Show for Row
 
 type RowStream
 pub async fn RowStream::collect(Self) -> Array[Row]
@@ -209,21 +189,17 @@ pub enum SimpleQueryMessage {
   RowDescription(Array[String])
   Row(SimpleQueryRow)
   CommandComplete(String)
-}
-pub impl Eq for SimpleQueryMessage
-pub impl Show for SimpleQueryMessage
+} derive(Eq, Show)
 
 pub struct SimpleQueryRow {
   columns : Array[String]
   values : Array[String?]
-}
+} derive(Eq, Show)
 pub fn SimpleQueryRow::columns(Self) -> Array[String]
 pub fn SimpleQueryRow::get(Self, Int) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
 pub fn SimpleQueryRow::index_of(Self, String) -> Int?
 pub fn SimpleQueryRow::len(Self) -> Int
-pub impl Eq for SimpleQueryRow
-pub impl Show for SimpleQueryRow
 
 type SimpleQueryStream
 pub async fn SimpleQueryStream::collect(Self) -> Array[SimpleQueryMessage]
@@ -234,12 +210,10 @@ pub enum SslMode {
   Disable
   Prefer
   Require
-}
+} derive(Eq, Show)
 pub fn SslMode::disable() -> Self
 pub fn SslMode::prefer() -> Self
 pub fn SslMode::require() -> Self
-pub impl Eq for SslMode
-pub impl Show for SslMode
 
 type Statement
 pub async fn Statement::close(Self) -> Unit
@@ -267,7 +241,7 @@ pub struct Type {
   oid : UInt
   name : String
   kind : Kind
-}
+} derive(Eq, Show)
 pub fn Type::bool() -> Self
 pub fn Type::bool_array() -> Self
 pub fn Type::bytea() -> Self
@@ -303,8 +277,6 @@ pub fn Type::uuid() -> Self
 pub fn Type::uuid_array() -> Self
 pub fn Type::varchar() -> Self
 pub fn Type::varchar_array() -> Self
-pub impl Eq for Type
-pub impl Show for Type
 
 // Type aliases
 

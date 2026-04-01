@@ -22,7 +22,7 @@ async fn integration_config() -> IntegrationConfig? {
   let host = env_var("POSTGRES_HOST").unwrap_or("127.0.0.1")
   let port = match env_var("POSTGRES_PORT") {
     None => 5432
-    Some(port) => @strconv.parse_int(port)
+    Some(port) => @string.parse_int(port)
   }
   let user = env_var("POSTGRES_USER").unwrap_or("moon")
   let password = env_var("POSTGRES_PASSWORD").unwrap_or("moonpass")

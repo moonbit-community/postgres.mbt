@@ -25,11 +25,11 @@ fn escape_internal(input : BytesView, as_ident : Bool) -> Bytes {
     }
   }
   let mut result_size = input.length() + num_quotes + 2
-  if not(as_ident) && num_backslashes > 0 {
+  if !as_ident && num_backslashes > 0 {
     result_size = result_size + num_backslashes + 2
   }
   let out = @buffer.new(size_hint=result_size)
-  if not(as_ident) && num_backslashes > 0 {
+  if !as_ident && num_backslashes > 0 {
     out.write_bytesview(b" "[:])
     out.write_bytesview(b"E"[:])
   }
@@ -38,7 +38,7 @@ fn escape_internal(input : BytesView, as_ident : Bool) -> Bytes {
     out.write_bytesview(input)
   } else {
     for b in input {
-      if b == quote_char || (not(as_ident) && b == b'\\') {
+      if b == quote_char || (!as_ident && b == b'\\') {
         out.write_byte(b)
       }
       out.write_byte(b)

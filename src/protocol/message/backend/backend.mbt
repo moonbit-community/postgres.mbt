@@ -279,7 +279,7 @@ pub fn Message::parse(
     }
     _ => raise @proto.ProtocolError::InvalidInput("unknown message tag")
   }
-  if not(reader.is_empty()) {
+  if !reader.is_empty() {
     raise @proto.ProtocolError::InvalidInput(
       "invalid message length: expected buffer to be empty",
     )

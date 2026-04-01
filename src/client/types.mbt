@@ -511,7 +511,7 @@ pub impl ToSql for Int with to_sql(self, type_, buf) {
 ///|
 pub impl FromSql for Int with from_sql(type_, format, raw) {
   match format {
-    0 => @strconv.parse_int(decode_utf8(raw))
+    0 => @string.parse_int(decode_utf8(raw))
     1 =>
       match type_.oid() {
         21U => @types.int2_from_sql(raw)
@@ -531,7 +531,7 @@ pub impl ToSql for Int64 with to_sql(self, _, buf) {
 ///|
 pub impl FromSql for Int64 with from_sql(_, format, raw) {
   match format {
-    0 => @strconv.parse_int64(decode_utf8(raw))
+    0 => @string.parse_int64(decode_utf8(raw))
     1 => @types.int8_from_sql(raw)
     _ => raise ClientError::Decode("unsupported format code for int8")
   }
@@ -546,7 +546,7 @@ pub impl ToSql for Float with to_sql(self, _, buf) {
 ///|
 pub impl FromSql for Float with from_sql(_, format, raw) {
   match format {
-    0 => Float::from_double(@strconv.parse_double(decode_utf8(raw)))
+    0 => Float::from_double(@string.parse_double(decode_utf8(raw)))
     1 => @types.float4_from_sql(raw)
     _ => raise ClientError::Decode("unsupported format code for float4")
   }
@@ -561,7 +561,7 @@ pub impl ToSql for Double with to_sql(self, _, buf) {
 ///|
 pub impl FromSql for Double with from_sql(_, format, raw) {
   match format {
-    0 => @strconv.parse_double(decode_utf8(raw))
+    0 => @string.parse_double(decode_utf8(raw))
     1 => @types.float8_from_sql(raw)
     _ => raise ClientError::Decode("unsupported format code for float8")
   }
@@ -576,7 +576,7 @@ pub impl ToSql for UInt with to_sql(self, _, buf) {
 ///|
 pub impl FromSql for UInt with from_sql(_, format, raw) {
   match format {
-    0 => @strconv.parse_uint(decode_utf8(raw))
+    0 => @string.parse_uint(decode_utf8(raw))
     1 => @types.oid_from_sql(raw)
     _ => raise ClientError::Decode("unsupported format code for oid")
   }

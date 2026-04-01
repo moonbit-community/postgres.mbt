@@ -13,5 +13,5 @@ import {
   "moonbitlang/core/double" @double,
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/float" @float,
-  "moonbitlang/core/strconv",
+  "moonbitlang/core/string",
 } for "test"

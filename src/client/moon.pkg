@@ -8,7 +8,7 @@ import {
   "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/ref" @ref,
-  "moonbitlang/core/strconv" @strconv,
+  "moonbitlang/core/string",
   "moonbitlang/async" @async,
   "moonbitlang/async/aqueue" @aqueue,
   "moonbitlang/async/io",

@@ -29,9 +29,7 @@ pub(all) suberror ProtocolError {
   InvalidInput(String)
   UnexpectedEof(String)
   Overflow(String)
-}
-pub impl Eq for ProtocolError
-pub impl Show for ProtocolError
+} derive(Eq, Show)
 
 // Types and methods
 pub struct ByteReader {

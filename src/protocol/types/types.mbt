@@ -100,7 +100,7 @@ pub fn int2_to_sql(
 pub fn int2_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i16_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -120,7 +120,7 @@ pub fn int4_to_sql(
 pub fn int4_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -137,7 +137,7 @@ pub fn oid_to_sql(v : @proto.Oid, buf : @buffer.Buffer) -> Unit {
 pub fn oid_from_sql(buf : BytesView) -> @proto.Oid raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_u32_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -154,7 +154,7 @@ pub fn int8_to_sql(v : Int64, buf : @buffer.Buffer) -> Unit {
 pub fn int8_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -171,7 +171,7 @@ pub fn lsn_to_sql(v : @proto.Lsn, buf : @buffer.Buffer) -> Unit {
 pub fn lsn_from_sql(buf : BytesView) -> @proto.Lsn raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_u64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -188,7 +188,7 @@ pub fn float4_to_sql(v : Float, buf : @buffer.Buffer) -> Unit {
 pub fn float4_from_sql(buf : BytesView) -> Float raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_f32_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -205,7 +205,7 @@ pub fn float8_to_sql(v : Double, buf : @buffer.Buffer) -> Unit {
 pub fn float8_from_sql(buf : BytesView) -> Double raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_f64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   v
@@ -371,7 +371,7 @@ pub fn timestamp_to_sql(v : Int64, buf : @buffer.Buffer) -> Unit {
 pub fn timestamp_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput(
       "invalid message length: timestamp not drained",
     )
@@ -393,7 +393,7 @@ pub fn date_to_sql(
 pub fn date_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput(
       "invalid message length: date not drained",
     )
@@ -412,7 +412,7 @@ pub fn time_to_sql(v : Int64, buf : @buffer.Buffer) -> Unit {
 pub fn time_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput(
       "invalid message length: time not drained",
     )
@@ -746,7 +746,7 @@ pub fn range_from_sql(buf : BytesView) -> Range raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let tag = r.read_u8()
   if tag == range_empty {
-    if not(r.is_empty()) {
+    if !r.is_empty() {
       raise @proto.ProtocolError::InvalidInput("invalid message size")
     }
     return Range::Empty
@@ -815,7 +815,7 @@ pub fn point_from_sql(buf : BytesView) -> Point raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let x = r.read_f64_be()
   let y = r.read_f64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   { x, y }
@@ -862,7 +862,7 @@ pub fn box_from_sql(buf : BytesView) -> Box raise @proto.ProtocolError {
   let y1 = r.read_f64_be()
   let x2 = r.read_f64_be()
   let y2 = r.read_f64_be()
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   { upper_right: { x: x1, y: y1 }, lower_left: { x: x2, y: y2 } }
@@ -1072,7 +1072,7 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
     }
     _ => raise @proto.ProtocolError::InvalidInput("invalid IP family")
   }
-  if not(r.is_empty()) {
+  if !r.is_empty() {
     raise @proto.ProtocolError::InvalidInput("invalid buffer size")
   }
   { addr, netmask }
