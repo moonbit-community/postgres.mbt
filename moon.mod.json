@@ -1,8 +1,8 @@
 {
   "name": "moonbit-community/postgres",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "deps": {
-    "moonbitlang/async": "0.16.7",
+    "moonbitlang/async": "0.17.0",
     "moonbitlang/x": "0.4.41",
     "tonyfettes/unicode": "0.3.0"
   },
