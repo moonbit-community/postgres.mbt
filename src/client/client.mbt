@@ -97,20 +97,20 @@ struct Connection {
 }
 
 ///|
-struct Statement {
-  client : Client
-  name : Bytes
+pub struct Statement {
+  priv client : Client
+  priv name : Bytes
   params : Array[Type]
   columns : Array[Column]
-  closed : @ref.Ref[Bool]
+  priv closed : @ref.Ref[Bool]
 }
 
 ///|
-struct Portal {
-  client : Client
-  name : Bytes
+pub struct Portal {
+  priv client : Client
+  priv name : Bytes
   columns : Array[Column]
-  closed : @ref.Ref[Bool]
+  priv closed : @ref.Ref[Bool]
 }
 
 ///|
@@ -288,18 +288,6 @@ pub async fn Client::prepare_typed(
 }
 
 ///|
-/// Return the parameter types expected by this statement.
-pub fn Statement::params(self : Statement) -> Array[Type] {
-  self.params
-}
-
-///|
-/// Return the result columns described for this statement.
-pub fn Statement::columns(self : Statement) -> Array[Column] {
-  self.columns
-}
-
-///|
 /// Close the prepared statement on the server.
 pub async fn Statement::close(self : Statement) -> Unit {
   if self.closed.val {
@@ -359,16 +347,16 @@ pub async fn Client::query_one(
   let summary = stream.finish()
   match first {
     Some(row) =>
-      if summary.row_count() == 1 {
+      if summary.row_count == 1 {
         row
       } else {
         raise ClientError::RowCount(
-          "expected exactly one row, got \{summary.row_count().to_string()}",
+          "expected exactly one row, got \{summary.row_count.to_string()}",
         )
       }
     None =>
       raise ClientError::RowCount(
-        "expected exactly one row, got \{summary.row_count().to_string()}",
+        "expected exactly one row, got \{summary.row_count.to_string()}",
       )
   }
 }
@@ -383,9 +371,9 @@ pub async fn Client::query_opt(
   let stream = self.query(sql, params~)
   let first = stream.next()
   let summary = stream.finish()
-  guard summary.row_count() <= 1 else {
+  guard summary.row_count <= 1 else {
     raise ClientError::RowCount(
-      "expected zero or one row, got \{summary.row_count().to_string()}",
+      "expected zero or one row, got \{summary.row_count.to_string()}",
     )
   }
   first
@@ -483,7 +471,7 @@ pub async fn Client::execute_raw(
 ) -> Int {
   let stream = self.query_statement(statement, params~)
   let summary = stream.finish()
-  rows_affected(summary.command_tag())
+  rows_affected(summary.command_tag)
 }
 
 ///|
@@ -533,12 +521,6 @@ pub async fn Client::bind(
       }
     _ => raise ClientError::UnexpectedMessage("unexpected bind response")
   }
-}
-
-///|
-/// Return the result columns associated with this portal.
-pub fn Portal::columns(self : Portal) -> Array[Column] {
-  self.columns
 }
 
 ///|
@@ -813,8 +795,8 @@ pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
     return
   }
   let conn = @socket.Tcp::connect_to_host(
-    self.config.host(),
-    port=self.config.port(),
+    self.config.host,
+    port=self.config.port,
   )
   defer conn.close()
   let buf = @buffer.new()
@@ -974,7 +956,7 @@ async fn Connection::forward_message_to_request(
 ) -> Unit {
   match message {
     @backend.Message::ReadyForQuery(body) => {
-      self.shared.transaction_status.val = body.status()
+      self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
     _ => request.responses.put(message)
@@ -994,7 +976,7 @@ async fn Connection::forward_copy_in_message(
       self.drain_copy_input(copy_input)
     }
     @backend.Message::ReadyForQuery(body) => {
-      self.shared.transaction_status.val = body.status()
+      self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
     _ => request.responses.put(message)
@@ -1105,7 +1087,7 @@ fn Connection::handle_async_message(
     @backend.Message::NotificationResponse(body) => {
       self.push_async_message(
         AsyncMessage::Notification({
-          process_id: body.process_id(),
+          process_id: body.process_id,
           channel: body.channel_str(),
           payload: body.message_str(),
         }),
@@ -1138,7 +1120,7 @@ async fn Connection::read_message(self : Connection) -> @backend.Message {
   packet.write_bytes(header)
   packet.write_bytes(body)
   match @backend.Message::parse(packet.to_bytes()[:]) {
-    Some(parsed) => parsed.message()
+    Some(parsed) => parsed.message
     None => raise ClientError::UnexpectedMessage("incomplete backend message")
   }
 }
@@ -1255,7 +1237,7 @@ fn seed_builtin_types(types : Map[@proto.Oid, Type]) -> Unit {
       Type::date_array(),
       Type::uuid_array(),
     ] {
-    types[type_.oid()] = type_
+    types[type_.oid] = type_
   }
 }
 
@@ -1384,7 +1366,7 @@ async fn resolve_columns(
 ) -> Array[Column] {
   let out : Array[Column] = []
   for column in columns {
-    out.push({ ..column, type_: cached_type(shared, column.type_oid()) })
+    out.push({ ..column, type_: cached_type(shared, column.type_.oid) })
   }
   out
 }
@@ -1428,7 +1410,7 @@ fn prepare_bytes(
   @frontend.parse(
     name,
     @proto.utf8_encode(sql)[:],
-    types.map(t => t.oid()).iter(),
+    types.map(t => t.oid).iter(),
     buf,
   )
   @frontend.describe(b'S', name, buf)
@@ -1722,8 +1704,8 @@ fn serialize_param(
 
 ///|
 async fn connect_stream(config : Config) -> Stream {
-  let conn = @socket.Tcp::connect_to_host(config.host(), port=config.port())
-  match config.ssl_mode() {
+  let conn = @socket.Tcp::connect_to_host(config.host, port=config.port)
+  match config.ssl_mode {
     Disable => Plain(conn)
     Prefer | Require => {
       let request = @buffer.new()
@@ -1732,7 +1714,7 @@ async fn connect_stream(config : Config) -> Stream {
       let response = conn.read_exactly(1)
       match response[0] {
         b'S' => {
-          let tls = @tls.Tls::client(conn, host=config.host()) catch {
+          let tls = @tls.Tls::client(conn, host=config.host) catch {
             err => {
               conn.close()
               raise ClientError::Ssl(err.to_string())
@@ -1741,7 +1723,7 @@ async fn connect_stream(config : Config) -> Stream {
           Secure(tls)
         }
         b'N' =>
-          if config.ssl_mode() is Require {
+          if config.ssl_mode is Require {
             conn.close()
             raise ClientError::Ssl("server does not support TLS")
           } else {
@@ -1767,10 +1749,10 @@ priv struct StartupState {
 ///|
 async fn startup(stream : Stream, config : Config) -> StartupState {
   let parameters : Array[(BytesView, BytesView)] = [
-    (b"user"[:], @proto.utf8_encode(config.user())[:]),
-    (b"database"[:], @proto.utf8_encode(config.database())[:]),
+    (b"user"[:], @proto.utf8_encode(config.user)[:]),
+    (b"database"[:], @proto.utf8_encode(config.database)[:]),
     (b"client_encoding"[:], b"UTF8"[:]),
-    (b"application_name"[:], @proto.utf8_encode(config.application_name())[:]),
+    (b"application_name"[:], @proto.utf8_encode(config.application_name)[:]),
   ]
   let buf = @buffer.new()
   @frontend.startup_message(parameters.iter(), buf)
@@ -1783,20 +1765,15 @@ async fn startup(stream : Stream, config : Config) -> StartupState {
   loop read_message(stream) {
     @backend.Message::AuthenticationOk => continue read_message(stream)
     @backend.Message::AuthenticationCleartextPassword => {
-      send_password_message(stream, config.password())
+      send_password_message(stream, config.password)
       continue read_message(stream)
     }
     @backend.Message::AuthenticationMd5Password(body) => {
-      send_md5_password_message(
-        stream,
-        config.user(),
-        config.password(),
-        body.salt(),
-      )
+      send_md5_password_message(stream, config.user, config.password, body.salt)
       continue read_message(stream)
     }
     @backend.Message::AuthenticationSasl(body) => {
-      scram = Some(begin_scram(stream, body, config.password()))
+      scram = Some(begin_scram(stream, body, config.password))
       continue read_message(stream)
     }
     @backend.Message::AuthenticationSaslContinue(body) => {
@@ -1812,13 +1789,13 @@ async fn startup(stream : Stream, config : Config) -> StartupState {
       continue read_message(stream)
     }
     @backend.Message::BackendKeyData(body) => {
-      process_id = body.process_id()
-      secret_key = body.secret_key()
+      process_id = body.process_id
+      secret_key = body.secret_key
       continue read_message(stream)
     }
     @backend.Message::NoticeResponse(_) => continue read_message(stream)
     @backend.Message::ReadyForQuery(body) => {
-      transaction_status = body.status()
+      transaction_status = body.status
       return { process_id, secret_key, parameters: status, transaction_status }
     }
     @backend.Message::ErrorResponse(body) =>
@@ -1844,7 +1821,7 @@ async fn read_message(stream : Stream) -> @backend.Message {
   packet.write_bytes(header)
   packet.write_bytes(body)
   match @backend.Message::parse(packet.to_bytes()[:]) {
-    Some(parsed) => parsed.message()
+    Some(parsed) => parsed.message
     None => raise ClientError::UnexpectedMessage("incomplete backend message")
   }
 }

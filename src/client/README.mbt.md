@@ -61,7 +61,7 @@ async fn _streaming_query_example(client : @client.Client) -> Unit {
   let value : Int = row.get_name("value")
   let summary = stream.finish()
   ignore(value)
-  ignore(summary.row_count())
+  ignore(summary.row_count)
 }
 ```
 
@@ -99,8 +99,8 @@ async fn _handle_error_example(client : @client.Client) -> Unit {
   let result = try? client.query_one("select 1 / 0")
   match result {
     Err(@client.ClientError::Database(err)) => {
-      ignore(err.code())
-      ignore(err.message())
+      ignore(err.code)
+      ignore(err.message)
     }
     _ => ()
   }

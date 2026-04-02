@@ -40,7 +40,7 @@ async fn assert_wrong_password(
       auth_client_config(config, user, password=Some("wrongpass")),
     ),
   )
-  assert_eq(err.code(), Some("28P01"))
+  assert_eq(err.code, Some("28P01"))
 }
 
 ///|
@@ -549,9 +549,9 @@ async test "integration row stream supports pipelining" {
     let stream = client.query(
       "select generate_series(1, 3)::int4 as value order by value",
     )
-    let columns = stream.columns()
+    let columns = stream.columns
     assert_eq(columns.length(), 1)
-    assert_eq(columns[0].name(), "value")
+    assert_eq(columns[0].name, "value")
     guard stream.next() is Some(first_row) else { fail("expected first row") }
     let first_value : Int = first_row.get_name("value")
     assert_eq(first_value, 1)
@@ -570,8 +570,8 @@ async test "integration row stream supports pipelining" {
     )
 
     let summary = stream.finish()
-    assert_eq(summary.row_count(), 3)
-    assert_eq(summary.suspended(), false)
+    assert_eq(summary.row_count, 3)
+    assert_eq(summary.suspended, false)
 
     client.close()
   })
@@ -599,7 +599,7 @@ async test "integration row stream backpressures after bounded buffering" {
     )
 
     let summary = stream.finish()
-    assert_eq(summary.row_count(), 16)
+    assert_eq(summary.row_count, 16)
     assert_eq(
       wait_for_task_or_fail(
         task, "expected blocked query to complete after draining buffered rows",
@@ -754,7 +754,7 @@ async test "integration cancel token cancels running query" {
     token.cancel()
 
     let err = expect_database_error(task.wait())
-    assert_eq(err.code(), Some("57014"))
+    assert_eq(err.code, Some("57014"))
     let value : Int = client
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -797,12 +797,12 @@ async test "integration notice and notification surface as async messages" {
     guard messages[3] is @client.AsyncMessage::Notification(second_notification) else {
       fail("expected second notification")
     }
-    assert_eq(first_notice.message(), "integration notice 1")
-    assert_eq(second_notice.message(), "integration notice 2")
-    assert_eq(first_notification.channel(), "moon_driver_notification")
-    assert_eq(first_notification.payload(), "hello")
-    assert_eq(second_notification.channel(), "moon_driver_notification")
-    assert_eq(second_notification.payload(), "world")
+    assert_eq(first_notice.message, "integration notice 1")
+    assert_eq(second_notice.message, "integration notice 2")
+    assert_eq(first_notification.channel, "moon_driver_notification")
+    assert_eq(first_notification.payload, "hello")
+    assert_eq(second_notification.channel, "moon_driver_notification")
+    assert_eq(second_notification.payload, "world")
 
     client.close()
   })
@@ -834,7 +834,7 @@ async test "integration copy out" {
         continue stream.next()
       }
     }
-    assert_eq(stream.column_formats(), [0, 0])
+    assert_eq(stream.formats, [0, 0])
     assert_true(chunks.length() >= 1)
     assert_eq(payload.contents(), b"1\tjim\n2\tjoe\n")
 
@@ -858,7 +858,7 @@ async test "integration copy out supports pipelining" {
     let stream = client.copy_out(
       "copy moon_driver_copy_out_finish (id, name) to stdout",
     )
-    assert_eq(stream.column_formats(), [0, 0])
+    assert_eq(stream.formats, [0, 0])
     guard stream.next() is Some(chunk) else { fail("expected copy chunk") }
     assert_true(chunk.length() > 0)
 
@@ -1068,7 +1068,7 @@ async test "integration deferred constraint" {
       1,
     )
     let err = expect_database_error(try? tx.commit())
-    assert_eq(err.code(), Some("23505"))
+    assert_eq(err.code, Some("23505"))
     let count : Int = client
       .query_one(
         "select count(*)::int4 as count from moon_driver_deferred_constraint",
@@ -1322,10 +1322,10 @@ async test "integration resolves custom type metadata" {
     let mood_stream = client.query(
       "select 'happy'::pg_temp.moon_driver_mood as mood",
     )
-    let mood_type = mood_stream.columns()[0].type_()
+    let mood_type = mood_stream.columns[0].type_
     ignore(mood_stream.finish())
-    assert_eq(mood_type.name(), "moon_driver_mood")
-    guard mood_type.kind() is @client.Kind::Enum(labels) else {
+    assert_eq(mood_type.name, "moon_driver_mood")
+    guard mood_type.kind is @client.Kind::Enum(labels) else {
       fail("expected enum type metadata")
     }
     assert_eq(labels, ["sad", "happy"])
@@ -1333,29 +1333,29 @@ async test "integration resolves custom type metadata" {
     let pair_stream = client.query(
       "select row(1, 'hi')::pg_temp.moon_driver_pair as pair",
     )
-    let pair_type = pair_stream.columns()[0].type_()
+    let pair_type = pair_stream.columns[0].type_
     ignore(pair_stream.finish())
-    assert_eq(pair_type.name(), "moon_driver_pair")
-    guard pair_type.kind() is @client.Kind::Composite(fields) else {
+    assert_eq(pair_type.name, "moon_driver_pair")
+    guard pair_type.kind is @client.Kind::Composite(fields) else {
       fail("expected composite type metadata")
     }
-    assert_eq(fields.map(field => field.name()), ["left_value", "right_value"])
-    assert_eq(fields.map(field => field.type_oid()), [23U, 25U])
+    assert_eq(fields.map(field => field.name), ["left_value", "right_value"])
+    assert_eq(fields.map(field => field.type_oid), [23U, 25U])
 
-    let domain_type = client
-      .prepare("select $1::pg_temp.moon_driver_name as name")
-      .params()[0]
-    assert_eq(domain_type.name(), "moon_driver_name")
-    guard domain_type.kind() is @client.Kind::Domain(base_oid) else {
+    let domain_type = client.prepare(
+        "select $1::pg_temp.moon_driver_name as name",
+      ).params[0]
+    assert_eq(domain_type.name, "moon_driver_name")
+    guard domain_type.kind is @client.Kind::Domain(base_oid) else {
       fail("expected domain type metadata")
     }
     assert_eq(base_oid, 25U)
 
     let range_stream = client.query("select int4range(1, 3) as r")
-    let range_type = range_stream.columns()[0].type_()
+    let range_type = range_stream.columns[0].type_
     ignore(range_stream.finish())
-    assert_eq(range_type.name(), "int4range")
-    guard range_type.kind() is @client.Kind::Range(subtype_oid) else {
+    assert_eq(range_type.name, "int4range")
+    guard range_type.kind is @client.Kind::Range(subtype_oid) else {
       fail("expected range type metadata")
     }
     assert_eq(subtype_oid, 23U)
@@ -1372,7 +1372,7 @@ async test "integration database errors surface" {
     group.spawn_bg(() => connection.run())
 
     let err = expect_database_error(try? client.query_one("select 1 / 0"))
-    assert_eq(err.code(), Some("22012"))
+    assert_eq(err.code, Some("22012"))
 
     client.close()
   })

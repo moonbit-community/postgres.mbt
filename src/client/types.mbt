@@ -49,48 +49,6 @@ pub fn Config::new(
 }
 
 ///|
-/// Return the configured server host.
-pub fn Config::host(self : Config) -> String {
-  self.host
-}
-
-///|
-/// Return the configured server port.
-pub fn Config::port(self : Config) -> Int {
-  self.port
-}
-
-///|
-/// Return the configured database user.
-pub fn Config::user(self : Config) -> String {
-  self.user
-}
-
-///|
-/// Return the configured database name.
-pub fn Config::database(self : Config) -> String {
-  self.database
-}
-
-///|
-/// Return the configured password, if any.
-pub fn Config::password(self : Config) -> String? {
-  self.password
-}
-
-///|
-/// Return the configured SSL mode.
-pub fn Config::ssl_mode(self : Config) -> SslMode {
-  self.ssl_mode
-}
-
-///|
-/// Return the configured application name.
-pub fn Config::application_name(self : Config) -> String {
-  self.application_name
-}
-
-///|
 pub struct DatabaseError {
   severity : String?
   code : String?
@@ -98,36 +56,6 @@ pub struct DatabaseError {
   detail : String?
   hint : String?
 } derive(Show, Eq)
-
-///|
-/// Return the server-reported error severity.
-pub fn DatabaseError::severity(self : DatabaseError) -> String? {
-  self.severity
-}
-
-///|
-/// Return the SQLSTATE error code.
-pub fn DatabaseError::code(self : DatabaseError) -> String? {
-  self.code
-}
-
-///|
-/// Return the primary error message.
-pub fn DatabaseError::message(self : DatabaseError) -> String {
-  self.message
-}
-
-///|
-/// Return the optional error detail text.
-pub fn DatabaseError::detail(self : DatabaseError) -> String? {
-  self.detail
-}
-
-///|
-/// Return the optional error hint text.
-pub fn DatabaseError::hint(self : DatabaseError) -> String? {
-  self.hint
-}
 
 ///|
 pub suberror ClientError {
@@ -163,41 +91,11 @@ pub struct Field {
 } derive(Show, Eq)
 
 ///|
-/// Return the composite field name.
-pub fn Field::name(self : Field) -> String {
-  self.name
-}
-
-///|
-/// Return the composite field type OID.
-pub fn Field::type_oid(self : Field) -> @proto.Oid {
-  self.type_oid
-}
-
-///|
 pub struct Type {
   oid : @proto.Oid
   name : String
   kind : Kind
 } derive(Show, Eq)
-
-///|
-/// Return the PostgreSQL type OID.
-pub fn Type::oid(self : Type) -> @proto.Oid {
-  self.oid
-}
-
-///|
-/// Return the PostgreSQL type name.
-pub fn Type::name(self : Type) -> String {
-  self.name
-}
-
-///|
-/// Return the kind of this PostgreSQL type.
-pub fn Type::kind(self : Type) -> Kind {
-  self.kind
-}
 
 ///|
 /// Return the built-in PostgreSQL `bool` type descriptor.
@@ -453,7 +351,7 @@ pub(open) trait FromSql {
 
 ///|
 impl FromSql with from_sql_null(type_, _) {
-  raise ClientError::Decode("unexpected NULL for type \{type_.name()}")
+  raise ClientError::Decode("unexpected NULL for type \{type_.name}")
 }
 
 ///|
@@ -500,10 +398,10 @@ pub impl FromSql for Bool with from_sql(_, format, raw) {
 
 ///|
 pub impl ToSql for Int with to_sql(self, type_, buf) {
-  match type_.oid() {
+  match type_.oid {
     21U => @types.int2_to_sql(self, buf)
     23U => @types.int4_to_sql(self, buf)
-    _ => raise ClientError::Encode("cannot encode Int for type \{type_.name()}")
+    _ => raise ClientError::Encode("cannot encode Int for type \{type_.name}")
   }
   @proto.IsNull::No
 }
@@ -513,10 +411,10 @@ pub impl FromSql for Int with from_sql(type_, format, raw) {
   match format {
     0 => @string.parse_int(decode_utf8(raw))
     1 =>
-      match type_.oid() {
+      match type_.oid {
         21U => @types.int2_from_sql(raw)
         23U => @types.int4_from_sql(raw)
-        _ => raise ClientError::Decode("cannot decode Int from \{type_.name()}")
+        _ => raise ClientError::Decode("cannot decode Int from \{type_.name}")
       }
     _ => raise ClientError::Decode("unsupported format code for int")
   }
@@ -600,11 +498,10 @@ pub impl FromSql for String with from_sql(_, _, raw) {
 
 ///|
 pub impl ToSql for Bytes with to_sql(self, type_, buf) {
-  match type_.oid() {
+  match type_.oid {
     17U => @types.bytea_to_sql(self[:], buf)
     2950U => @types.uuid_to_sql(self[:], buf)
-    _ =>
-      raise ClientError::Encode("cannot encode bytes for type \{type_.name()}")
+    _ => raise ClientError::Encode("cannot encode bytes for type \{type_.name}")
   }
   @proto.IsNull::No
 }
@@ -613,13 +510,13 @@ pub impl ToSql for Bytes with to_sql(self, type_, buf) {
 pub impl FromSql for Bytes with from_sql(type_, format, raw) {
   match format {
     0 =>
-      if type_.oid() == 17U {
+      if type_.oid == 17U {
         raw.to_bytes()
       } else {
         @proto.utf8_encode(decode_utf8(raw))
       }
     1 =>
-      match type_.oid() {
+      match type_.oid {
         17U => @types.bytea_from_sql(raw).to_bytes()
         2950U => @types.uuid_from_sql(raw)
         _ => raw.to_bytes()
@@ -640,64 +537,10 @@ pub struct Column {
 } derive(Show, Eq)
 
 ///|
-/// Return the column name.
-pub fn Column::name(self : Column) -> String {
-  self.name
-}
-
-///|
-/// Return the source table OID, if known.
-pub fn Column::table_oid(self : Column) -> @proto.Oid {
-  self.table_oid
-}
-
-///|
-/// Return the source column number, if known.
-pub fn Column::column_id(self : Column) -> Int {
-  self.column_id
-}
-
-///|
-/// Return the resolved type descriptor for this column.
-pub fn Column::type_(self : Column) -> Type {
-  self.type_
-}
-
-///|
-/// Return the column type OID.
-pub fn Column::type_oid(self : Column) -> @proto.Oid {
-  self.type_.oid()
-}
-
-///|
-/// Return the column type size.
-pub fn Column::type_size(self : Column) -> Int {
-  self.type_size
-}
-
-///|
-/// Return the column type modifier.
-pub fn Column::type_modifier(self : Column) -> Int {
-  self.type_modifier
-}
-
-///|
-/// Return the wire format code for this column.
-pub fn Column::format(self : Column) -> Int {
-  self.format
-}
-
-///|
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
 } derive(Show, Eq)
-
-///|
-/// Return the columns that describe this row.
-pub fn Row::columns(self : Row) -> Array[Column] {
-  self.columns
-}
 
 ///|
 /// Return the number of values in this row.
@@ -709,7 +552,7 @@ pub fn Row::len(self : Row) -> Int {
 /// Return the index of the named column, if present.
 pub fn Row::index_of(self : Row, name : String) -> Int? {
   for index, column in self.columns {
-    if column.name() == name {
+    if column.name == name {
       return Some(index)
     }
   }
@@ -736,8 +579,8 @@ pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
 pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
   let column = self.columns[index]
   match self.values[index] {
-    None => FromSql::from_sql_null(column.type_(), column.format())
-    Some(value) => FromSql::from_sql(column.type_(), column.format(), value[:])
+    None => FromSql::from_sql_null(column.type_, column.format)
+    Some(value) => FromSql::from_sql(column.type_, column.format, value[:])
   }
 }
 
@@ -781,46 +624,22 @@ pub fn Row::get_text_name(self : Row, name : String) -> String? raise {
 }
 
 ///|
-struct QuerySummary {
+pub struct QuerySummary {
   command_tag : String
   row_count : Int
   suspended : Bool
 } derive(Show, Eq)
 
 ///|
-/// Return the server command tag.
-pub fn QuerySummary::command_tag(self : QuerySummary) -> String {
-  self.command_tag
-}
-
-///|
-/// Return the number of rows produced or affected.
-pub fn QuerySummary::row_count(self : QuerySummary) -> Int {
-  self.row_count
-}
-
-///|
-/// Return whether the portal suspended before completion.
-pub fn QuerySummary::suspended(self : QuerySummary) -> Bool {
-  self.suspended
-}
-
-///|
-struct RowStream {
+pub struct RowStream {
   mut columns : Array[Column]
-  responses : @async.Queue[@backend.Message]
-  cleanup : StreamCleanup?
-  mut command_tag : String
-  mut row_count : Int
-  mut suspended : Bool
-  mut database_error : DatabaseError?
-  mut summary : QuerySummary?
-}
-
-///|
-/// Return the current column description for this stream.
-pub fn RowStream::columns(self : RowStream) -> Array[Column] {
-  self.columns
+  priv responses : @async.Queue[@backend.Message]
+  priv cleanup : StreamCleanup?
+  priv mut command_tag : String
+  priv mut row_count : Int
+  priv mut suspended : Bool
+  priv mut database_error : DatabaseError?
+  priv mut summary : QuerySummary?
 }
 
 ///|
@@ -900,12 +719,6 @@ pub struct SimpleQueryRow {
   columns : Array[String]
   values : Array[String?]
 } derive(Show, Eq)
-
-///|
-/// Return the column names for this row.
-pub fn SimpleQueryRow::columns(self : SimpleQueryRow) -> Array[String] {
-  self.columns
-}
 
 ///|
 /// Return the number of values in this row.
@@ -1028,24 +841,6 @@ pub struct Notification {
 } derive(Show, Eq)
 
 ///|
-/// Return the notifying backend process ID.
-pub fn Notification::process_id(self : Notification) -> Int {
-  self.process_id
-}
-
-///|
-/// Return the notification channel.
-pub fn Notification::channel(self : Notification) -> String {
-  self.channel
-}
-
-///|
-/// Return the notification payload.
-pub fn Notification::payload(self : Notification) -> String {
-  self.payload
-}
-
-///|
 pub enum AsyncMessage {
   Notice(DatabaseError)
   Notification(Notification)
@@ -1053,17 +848,11 @@ pub enum AsyncMessage {
 } derive(Show, Eq)
 
 ///|
-struct CopyOutStream {
-  responses : @async.Queue[@backend.Message]
+pub struct CopyOutStream {
+  priv responses : @async.Queue[@backend.Message]
   formats : Array[Int]
-  mut database_error : DatabaseError?
-  mut finished : Bool
-}
-
-///|
-/// Return the COPY OUT column format codes.
-pub fn CopyOutStream::column_formats(self : CopyOutStream) -> Array[Int] {
-  self.formats
+  priv mut database_error : DatabaseError?
+  priv mut finished : Bool
 }
 
 ///|
@@ -1073,7 +862,7 @@ pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
     return self.raise_terminal_error_or_none()
   }
   loop self.responses.get() {
-    @backend.Message::CopyData(body) => return Some(body.into_bytes())
+    @backend.Message::CopyData(body) => return Some(body.storage)
     @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
       continue self.responses.get()
     @backend.Message::ErrorResponse(body) => {
@@ -1123,12 +912,12 @@ fn parse_columns(body : @backend.RowDescriptionBody) -> Array[Column] raise {
     Some(field) => {
       columns.push({
         name: field.name_str(),
-        table_oid: field.table_oid(),
-        column_id: field.column_id(),
-        type_: resolve_type(field.type_oid()),
-        type_size: field.type_size(),
-        type_modifier: field.type_modifier(),
-        format: field.format(),
+        table_oid: field.table_oid,
+        column_id: field.column_id,
+        type_: resolve_type(field.type_oid),
+        type_size: field.type_size,
+        type_modifier: field.type_modifier,
+        format: field.format,
       })
       continue fields.next()
     }
@@ -1149,7 +938,7 @@ fn parse_binary_values(
       continue ranges.next()
     }
     Some(Some(range)) => {
-      values.push(Some(buffer[range.start():range.end()].to_bytes()))
+      values.push(Some(buffer[range.start:range.end].to_bytes()))
       continue ranges.next()
     }
   }
@@ -1170,7 +959,7 @@ fn parse_text_row(
       continue ranges.next()
     }
     Some(Some(range)) => {
-      values.push(Some(decode_utf8(buffer[range.start():range.end()])))
+      values.push(Some(decode_utf8(buffer[range.start:range.end])))
       continue ranges.next()
     }
   }
@@ -1223,7 +1012,7 @@ fn parse_database_error(
       }
     Some(field) => {
       let value = decode_utf8(field.value_bytes())
-      match field.type_() {
+      match field.type_ {
         b'S' | b'V' => severity = Some(value)
         b'C' => code = Some(value)
         b'M' => message = Some(value)
@@ -1260,12 +1049,12 @@ fn merge_stream_columns(
   let merged : Array[Column] = []
   for index, column in described {
     let resolved = current[index]
-    guard resolved.type_oid() == column.type_oid() else {
+    guard resolved.type_.oid == column.type_.oid else {
       raise ClientError::Protocol(
-        "row description type mismatch at column \{index.to_string()}: expected oid \{resolved.type_oid().to_string()}, got \{column.type_oid().to_string()}",
+        "row description type mismatch at column \{index.to_string()}: expected oid \{resolved.type_.oid.to_string()}, got \{column.type_.oid.to_string()}",
       )
     }
-    merged.push({ ..column, type_: resolved.type_() })
+    merged.push({ ..column, type_: resolved.type_ })
   }
   merged
 }

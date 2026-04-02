@@ -124,8 +124,6 @@ pub struct ArrayDimension {
   len : Int
   lower_bound : Int
 } derive(Eq, Show)
-pub fn ArrayDimension::len(Self) -> Int
-pub fn ArrayDimension::lower_bound(Self) -> Int
 pub fn ArrayDimension::new(Int, Int) -> Self
 
 pub struct ArrayDimensions {
@@ -143,8 +141,6 @@ pub struct Box {
   upper_right : Point
   lower_left : Point
 } derive(Eq, Show)
-pub fn Box::lower_left(Self) -> Point
-pub fn Box::upper_right(Self) -> Point
 
 pub struct HstoreEntries {
   mut remaining : Int
@@ -156,8 +152,6 @@ pub struct Inet {
   addr : IpAddr
   netmask : Byte
 }
-pub fn Inet::addr(Self) -> IpAddr
-pub fn Inet::netmask(Self) -> Byte
 
 pub enum IpAddr {
   V4(Ipv4Addr)
@@ -181,7 +175,6 @@ pub struct Path {
   points : Int
   buf : BytesView
 }
-pub fn Path::closed(Self) -> Bool
 pub fn Path::points(Self) -> PathPoints
 
 pub struct PathPoints {
@@ -198,16 +191,12 @@ pub struct PgArray {
   buf : Bytes
 }
 pub fn PgArray::dimensions(Self) -> ArrayDimensions
-pub fn PgArray::element_type(Self) -> UInt
-pub fn PgArray::has_nulls(Self) -> Bool
 pub fn PgArray::values(Self) -> ArrayValues
 
 pub struct Point {
   x : Double
   y : Double
 } derive(Eq, Show)
-pub fn Point::x(Self) -> Double
-pub fn Point::y(Self) -> Double
 
 pub enum Range {
   Empty
@@ -224,9 +213,7 @@ pub struct Varbit {
   len : Int
   bytes : BytesView
 }
-pub fn Varbit::bytes(Self) -> BytesView
 pub fn Varbit::is_empty(Self) -> Bool
-pub fn Varbit::len(Self) -> Int
 
 // Type aliases
 

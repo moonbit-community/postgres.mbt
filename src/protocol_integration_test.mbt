@@ -46,7 +46,7 @@ async fn WireConnection::read_message(
 ) -> @backend.Message {
   let packet = read_socket_packet(self.socket)
   match @backend.Message::parse(packet[:]) {
-    Some(parsed) => parsed.message()
+    Some(parsed) => parsed.message
     None => fail("incomplete backend message")
   }
 }
@@ -60,12 +60,12 @@ async fn WireConnection::collect_until_ready(
     message => {
       match message {
         @backend.Message::ReadyForQuery(body) =>
-          self.transaction_status = body.status()
+          self.transaction_status = body.status
         @backend.Message::ParameterStatus(body) =>
           self.parameters[body.name_str()] = body.value_str()
         @backend.Message::BackendKeyData(body) => {
-          self.process_id = body.process_id()
-          self.secret_key = body.secret_key()
+          self.process_id = body.process_id
+          self.secret_key = body.secret_key
         }
         _ => ()
       }
@@ -141,7 +141,7 @@ async fn wire_connect(
         connection,
         config.user,
         config.password,
-        body.salt(),
+        body.salt,
       )
       continue connection.read_message()
     }
@@ -164,13 +164,13 @@ async fn wire_connect(
       continue connection.read_message()
     }
     @backend.Message::BackendKeyData(body) => {
-      connection.process_id = body.process_id()
-      connection.secret_key = body.secret_key()
+      connection.process_id = body.process_id
+      connection.secret_key = body.secret_key
       continue connection.read_message()
     }
     @backend.Message::NoticeResponse(_) => continue connection.read_message()
     @backend.Message::ReadyForQuery(body) => {
-      connection.transaction_status = body.status()
+      connection.transaction_status = body.status
       connection
     }
     @backend.Message::ErrorResponse(body) => {
@@ -310,7 +310,7 @@ fn parse_wire_database_error(
       }
     Some(field) => {
       let value = wire_decode_utf8(field.value_bytes())
-      match field.type_() {
+      match field.type_ {
         b'S' | b'V' => severity = Some(value)
         b'C' => code = Some(value)
         b'M' => message = Some(value)
@@ -337,7 +337,7 @@ fn data_row_texts(
       continue ranges.next()
     }
     Some(Some(range)) => {
-      out.push(Some(wire_decode_utf8(buffer[range.start():range.end()])))
+      out.push(Some(wire_decode_utf8(buffer[range.start:range.end])))
       continue ranges.next()
     }
   }
@@ -443,8 +443,8 @@ async test "integration protocol startup packet header parsing" {
     Some(header) => header
     None => fail("expected startup header")
   }
-  assert_eq(header.tag(), @backend.AUTHENTICATION_TAG)
-  assert_eq(header.len(), packet.length() - 1)
+  assert_eq(header.tag, @backend.AUTHENTICATION_TAG)
+  assert_eq(header.len, packet.length() - 1)
 
   assert_true(@backend.Message::parse(packet[:4]) is None)
   assert_true(@backend.Message::parse(packet[:packet.length() - 1]) is None)
@@ -452,8 +452,8 @@ async test "integration protocol startup packet header parsing" {
     Some(parsed) => parsed
     None => fail("expected startup authentication message")
   }
-  assert_eq(parsed.consumed(), packet.length())
-  match parsed.message() {
+  assert_eq(parsed.consumed, packet.length())
+  match parsed.message {
     @backend.Message::AuthenticationSasl(body) => {
       let mechanisms = body.mechanisms()
       assert_eq(try! mechanisms.next_str(), Some("SCRAM-SHA-256"))
@@ -496,7 +496,7 @@ async test "integration cancel request uses protocol frontend" {
     @frontend.cancel_request(token.process_id(), token.secret_key(), buf)
     cancel.write(buf.to_bytes())
     let err = expect_database_error(task.wait())
-    assert_eq(err.code(), Some("57014"))
+    assert_eq(err.code, Some("57014"))
     let ping : Int = client
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -566,7 +566,7 @@ async test "integration protocol copy out flush and terminate" {
   assert_eq(wire.transaction_status, b'I')
   match messages[0] {
     @backend.Message::CopyOutResponse(body) => {
-      assert_eq(body.format().to_int(), 0)
+      assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
       assert_eq(try! formats.next(), Some(0))
       assert_eq(try! formats.next(), None)
@@ -584,7 +584,7 @@ async test "integration protocol copy out flush and terminate" {
       @backend.Message::CopyData(body) => {
         saw_copy_data = true
         let data_len = body.data().length()
-        let bytes = body.into_bytes()
+        let bytes = body.storage
         assert_eq(bytes.length(), data_len)
         payload.write_bytes(bytes)
       }
@@ -630,7 +630,7 @@ async test "integration protocol copy in success" {
   wire.write_buffer(start)
   match wire.read_message() {
     @backend.Message::CopyInResponse(body) => {
-      assert_eq(body.format().to_int(), 0)
+      assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
       assert_eq(try! formats.next(), Some(0))
       assert_eq(try! formats.next(), None)
@@ -729,9 +729,9 @@ async test "integration protocol describe close and parameter description" {
       match first_field {
         Some(field) => {
           assert_eq(wire_decode_utf8(field.name_bytes()), "value")
-          assert_eq(field.type_oid(), 23U)
-          assert_eq(field.type_size(), 4)
-          assert_eq(field.format(), 0)
+          assert_eq(field.type_oid, 23U)
+          assert_eq(field.type_size, 4)
+          assert_eq(field.format, 0)
         }
         None => fail("missing described field")
       }
@@ -802,24 +802,24 @@ async test "integration protocol bind text formats and null row ranges" {
       match first {
         Some(field) => {
           assert_eq(try! field.name_str(), "id")
-          assert_true(field.table_oid() > 0U)
-          assert_eq(field.column_id(), 1)
-          assert_eq(field.type_oid(), 23U)
-          assert_eq(field.type_size(), 4)
-          assert_eq(field.type_modifier(), -1)
-          assert_eq(field.format(), 0)
+          assert_true(field.table_oid > 0U)
+          assert_eq(field.column_id, 1)
+          assert_eq(field.type_oid, 23U)
+          assert_eq(field.type_size, 4)
+          assert_eq(field.type_modifier, -1)
+          assert_eq(field.format, 0)
         }
         None => fail("missing first described field")
       }
       match second {
         Some(field) => {
           assert_eq(try! field.name_str(), "note")
-          assert_true(field.table_oid() > 0U)
-          assert_eq(field.column_id(), 2)
-          assert_eq(field.type_oid(), 25U)
-          assert_eq(field.type_size(), -1)
-          assert_eq(field.type_modifier(), -1)
-          assert_eq(field.format(), 0)
+          assert_true(field.table_oid > 0U)
+          assert_eq(field.column_id, 2)
+          assert_eq(field.type_oid, 25U)
+          assert_eq(field.type_size, -1)
+          assert_eq(field.type_modifier, -1)
+          assert_eq(field.format, 0)
         }
         None => fail("missing second described field")
       }
@@ -835,7 +835,7 @@ async test "integration protocol bind text formats and null row ranges" {
       let first_range = try! ranges.next()
       match first_range {
         Some(Some(range)) =>
-          assert_eq(wire_decode_utf8(buffer[range.start():range.end()]), "7")
+          assert_eq(wire_decode_utf8(buffer[range.start:range.end]), "7")
         _ => fail("expected first column data")
       }
       assert_true((try! ranges.next()) is Some(None))
@@ -885,7 +885,7 @@ async test "integration protocol portal suspended" {
   assert_true(messages[2] is @backend.Message::RowDescription(_))
   match messages[3] {
     @backend.Message::DataRow(body) => {
-      assert_true(body.buffer_bytes().length() > 0)
+      assert_true(body.storage.length() > 0)
       assert_eq(data_row_texts(body), [Some("1")])
     }
     _ => fail("expected DataRow")
@@ -909,7 +909,7 @@ async test "integration protocol notice and notification getters" {
   loop notice_fields.next() {
     None => break
     Some(field) =>
-      if field.type_() == b'M' {
+      if field.type_ == b'M' {
         saw_message = true
         assert_eq(wire_decode_utf8(field.value_bytes()), "wire notice")
       } else {
@@ -927,7 +927,7 @@ async test "integration protocol notice and notification getters" {
 
   let notify_messages = wire.simple_query("notify wire_channel, 'payload'")
   let notification = find_notification_response(notify_messages)
-  assert_true(notification.process_id() > 0)
+  assert_true(notification.process_id > 0)
   assert_eq(notification.channel_bytes().to_bytes(), b"wire_channel")
   assert_eq(try! notification.channel_str(), "wire_channel")
   assert_eq(notification.message_bytes().to_bytes(), b"payload")

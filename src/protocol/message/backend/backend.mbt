@@ -85,34 +85,10 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
 }
 
 ///|
-/// Return the message tag byte.
-pub fn Header::tag(self : Header) -> Byte {
-  self.tag
-}
-
-///|
-/// Return the message body length reported by the header.
-pub fn Header::len(self : Header) -> Int {
-  self.len
-}
-
-///|
 /// Parsed backend message plus consumed bytes.
 pub struct ParsedMessage {
   message : Message
   consumed : Int
-}
-
-///|
-/// Return the parsed backend message.
-pub fn ParsedMessage::message(self : ParsedMessage) -> Message {
-  self.message
-}
-
-///|
-/// Return the number of bytes consumed from the input buffer.
-pub fn ParsedMessage::consumed(self : ParsedMessage) -> Int {
-  self.consumed
 }
 
 ///|
@@ -293,14 +269,6 @@ pub struct AuthenticationMd5PasswordBody {
 }
 
 ///|
-/// Return the MD5 salt bytes.
-pub fn AuthenticationMd5PasswordBody::salt(
-  self : AuthenticationMd5PasswordBody,
-) -> Bytes {
-  self.salt
-}
-
-///|
 pub struct AuthenticationGssContinueBody {
   data : Bytes
 }
@@ -399,18 +367,6 @@ pub struct BackendKeyDataBody {
 }
 
 ///|
-/// Return the backend process ID for cancellation.
-pub fn BackendKeyDataBody::process_id(self : BackendKeyDataBody) -> Int {
-  self.process_id
-}
-
-///|
-/// Return the backend secret key for cancellation.
-pub fn BackendKeyDataBody::secret_key(self : BackendKeyDataBody) -> Int {
-  self.secret_key
-}
-
-///|
 pub struct CommandCompleteBody {
   tag : Bytes
 }
@@ -441,22 +397,10 @@ pub fn CopyDataBody::data(self : CopyDataBody) -> BytesView {
 }
 
 ///|
-/// Consume and return the raw COPY data payload.
-pub fn CopyDataBody::into_bytes(self : CopyDataBody) -> Bytes {
-  self.storage
-}
-
-///|
 pub struct CopyInResponseBody {
   format : Byte
   len : Int
   storage : Bytes
-}
-
-///|
-/// Return the overall COPY format code.
-pub fn CopyInResponseBody::format(self : CopyInResponseBody) -> Byte {
-  self.format
 }
 
 ///|
@@ -501,12 +445,6 @@ pub struct CopyOutResponseBody {
 }
 
 ///|
-/// Return the overall COPY format code.
-pub fn CopyOutResponseBody::format(self : CopyOutResponseBody) -> Byte {
-  self.format
-}
-
-///|
 /// Return an iterator over the COPY OUT column format codes.
 pub fn CopyOutResponseBody::column_formats(
   self : CopyOutResponseBody,
@@ -533,27 +471,9 @@ pub fn DataRowBody::buffer(self : DataRowBody) -> BytesView {
 }
 
 ///|
-/// Consume and return the raw row payload buffer.
-pub fn DataRowBody::buffer_bytes(self : DataRowBody) -> Bytes {
-  self.storage
-}
-
-///|
 pub struct ByteRange {
   start : Int
   end : Int
-}
-
-///|
-/// Return the inclusive start offset of this field payload.
-pub fn ByteRange::start(self : ByteRange) -> Int {
-  self.start
-}
-
-///|
-/// Return the exclusive end offset of this field payload.
-pub fn ByteRange::end(self : ByteRange) -> Int {
-  self.end
 }
 
 ///|
@@ -644,12 +564,6 @@ pub struct ErrorField {
 }
 
 ///|
-/// Return the field type code.
-pub fn ErrorField::type_(self : ErrorField) -> Byte {
-  self.type_
-}
-
-///|
 /// Return the raw field value bytes.
 pub fn ErrorField::value_bytes(self : ErrorField) -> BytesView {
   self.value[:]
@@ -671,14 +585,6 @@ pub struct NotificationResponseBody {
   process_id : Int
   channel : Bytes
   message : Bytes
-}
-
-///|
-/// Return the notifying backend process ID.
-pub fn NotificationResponseBody::process_id(
-  self : NotificationResponseBody,
-) -> Int {
-  self.process_id
 }
 
 ///|
@@ -795,12 +701,6 @@ pub struct ReadyForQueryBody {
 }
 
 ///|
-/// Return the backend transaction status byte.
-pub fn ReadyForQueryBody::status(self : ReadyForQueryBody) -> Byte {
-  self.status
-}
-
-///|
 pub struct RowDescriptionBody {
   storage : Bytes
   len : Int
@@ -873,42 +773,6 @@ pub fn Field::name_bytes(self : Field) -> BytesView {
 /// Decode the field name as UTF-8 text.
 pub fn Field::name_str(self : Field) -> String raise @proto.ProtocolError {
   decode_utf8(self.name[:])
-}
-
-///|
-/// Return the source table OID.
-pub fn Field::table_oid(self : Field) -> @proto.Oid {
-  self.table_oid
-}
-
-///|
-/// Return the source column number.
-pub fn Field::column_id(self : Field) -> Int {
-  self.column_id
-}
-
-///|
-/// Return the field type OID.
-pub fn Field::type_oid(self : Field) -> @proto.Oid {
-  self.type_oid
-}
-
-///|
-/// Return the field type size.
-pub fn Field::type_size(self : Field) -> Int {
-  self.type_size
-}
-
-///|
-/// Return the field type modifier.
-pub fn Field::type_modifier(self : Field) -> Int {
-  self.type_modifier
-}
-
-///|
-/// Return the field format code.
-pub fn Field::format(self : Field) -> Int {
-  self.format
 }
 
 ///|

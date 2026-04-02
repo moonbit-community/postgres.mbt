@@ -343,21 +343,9 @@ pub struct Varbit {
 }
 
 ///|
-/// Return the number of bits in this value.
-pub fn Varbit::len(self : Varbit) -> Int {
-  self.len
-}
-
-///|
 /// Return whether this value contains no bits.
 pub fn Varbit::is_empty(self : Varbit) -> Bool {
   self.len == 0
-}
-
-///|
-/// Return the raw packed bytes of this value.
-pub fn Varbit::bytes(self : Varbit) -> BytesView {
-  self.bytes
 }
 
 ///|
@@ -566,18 +554,6 @@ pub struct PgArray {
 }
 
 ///|
-/// Return whether this array contains NULL elements.
-pub fn PgArray::has_nulls(self : PgArray) -> Bool {
-  self.has_nulls
-}
-
-///|
-/// Return the PostgreSQL element type OID.
-pub fn PgArray::element_type(self : PgArray) -> @proto.Oid {
-  self.element_type
-}
-
-///|
 /// Return an iterator over the array dimensions.
 pub fn PgArray::dimensions(self : PgArray) -> ArrayDimensions {
   let start = 12
@@ -624,18 +600,6 @@ pub struct ArrayDimension {
 /// Construct an array dimension descriptor.
 pub fn ArrayDimension::new(len : Int, lower_bound : Int) -> ArrayDimension {
   { len, lower_bound }
-}
-
-///|
-/// Return the length of this dimension.
-pub fn ArrayDimension::len(self : ArrayDimension) -> Int {
-  self.len
-}
-
-///|
-/// Return the lower bound of this dimension.
-pub fn ArrayDimension::lower_bound(self : ArrayDimension) -> Int {
-  self.lower_bound
 }
 
 ///|
@@ -828,18 +792,6 @@ pub struct Point {
 } derive(Show, Eq)
 
 ///|
-/// Return the x-coordinate.
-pub fn Point::x(self : Point) -> Double {
-  self.x
-}
-
-///|
-/// Return the y-coordinate.
-pub fn Point::y(self : Point) -> Double {
-  self.y
-}
-
-///|
 /// Serialize a box value.
 pub fn box_to_sql(
   x1 : Double,
@@ -873,18 +825,6 @@ pub struct Box {
   upper_right : Point
   lower_left : Point
 } derive(Show, Eq)
-
-///|
-/// Return the upper-right corner.
-pub fn Box::upper_right(self : Box) -> Point {
-  self.upper_right
-}
-
-///|
-/// Return the lower-left corner.
-pub fn Box::lower_left(self : Box) -> Point {
-  self.lower_left
-}
 
 ///|
 /// Serialize a path value.
@@ -929,12 +869,6 @@ pub struct Path {
   closed : Bool
   points : Int
   buf : BytesView
-}
-
-///|
-/// Return whether this path is closed.
-pub fn Path::closed(self : Path) -> Bool {
-  self.closed
 }
 
 ///|
@@ -1083,18 +1017,6 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
 pub struct Inet {
   addr : IpAddr
   netmask : Byte
-}
-
-///|
-/// Return the decoded IP address.
-pub fn Inet::addr(self : Inet) -> IpAddr {
-  self.addr
-}
-
-///|
-/// Return the network prefix length.
-pub fn Inet::netmask(self : Inet) -> Byte {
-  self.netmask
 }
 
 ///|

@@ -71,14 +71,6 @@ pub struct Column {
   type_modifier : Int
   format : Int
 } derive(Eq, Show)
-pub fn Column::column_id(Self) -> Int
-pub fn Column::format(Self) -> Int
-pub fn Column::name(Self) -> String
-pub fn Column::table_oid(Self) -> UInt
-pub fn Column::type_(Self) -> Type
-pub fn Column::type_modifier(Self) -> Int
-pub fn Column::type_oid(Self) -> UInt
-pub fn Column::type_size(Self) -> Int
 
 pub struct Config {
   host : String
@@ -89,14 +81,7 @@ pub struct Config {
   ssl_mode : SslMode
   application_name : String
 } derive(Eq, Show)
-pub fn Config::application_name(Self) -> String
-pub fn Config::database(Self) -> String
-pub fn Config::host(Self) -> String
 pub fn Config::new(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
-pub fn Config::password(Self) -> String?
-pub fn Config::port(Self) -> Int
-pub fn Config::ssl_mode(Self) -> SslMode
-pub fn Config::user(Self) -> String
 
 type Connection
 pub async fn Connection::next_message(Self) -> AsyncMessage?
@@ -108,9 +93,11 @@ pub async fn CopyInSink::abort(Self, message? : String) -> Unit
 pub async fn CopyInSink::finish(Self) -> Int
 pub async fn CopyInSink::send(Self, BytesView) -> Unit
 
-type CopyOutStream
+pub struct CopyOutStream {
+  formats : Array[Int]
+  // private fields
+}
 pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
-pub fn CopyOutStream::column_formats(Self) -> Array[Int]
 pub async fn CopyOutStream::finish(Self) -> Unit
 pub async fn CopyOutStream::next(Self) -> Bytes?
 
@@ -121,18 +108,11 @@ pub struct DatabaseError {
   detail : String?
   hint : String?
 } derive(Eq, Show)
-pub fn DatabaseError::code(Self) -> String?
-pub fn DatabaseError::detail(Self) -> String?
-pub fn DatabaseError::hint(Self) -> String?
-pub fn DatabaseError::message(Self) -> String
-pub fn DatabaseError::severity(Self) -> String?
 
 pub struct Field {
   name : String
   type_oid : UInt
 } derive(Eq, Show)
-pub fn Field::name(Self) -> String
-pub fn Field::type_oid(Self) -> UInt
 
 pub enum Kind {
   Simple
@@ -150,24 +130,23 @@ pub struct Notification {
   channel : String
   payload : String
 } derive(Eq, Show)
-pub fn Notification::channel(Self) -> String
-pub fn Notification::payload(Self) -> String
-pub fn Notification::process_id(Self) -> Int
 
-type Portal
+pub struct Portal {
+  columns : Array[Column]
+  // private fields
+}
 pub async fn Portal::close(Self) -> Unit
-pub fn Portal::columns(Self) -> Array[Column]
 
-type QuerySummary derive(Eq, Show)
-pub fn QuerySummary::command_tag(Self) -> String
-pub fn QuerySummary::row_count(Self) -> Int
-pub fn QuerySummary::suspended(Self) -> Bool
+pub struct QuerySummary {
+  command_tag : String
+  row_count : Int
+  suspended : Bool
+} derive(Eq, Show)
 
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
 } derive(Eq, Show)
-pub fn Row::columns(Self) -> Array[Column]
 pub fn[T : FromSql] Row::get(Self, Int) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
 pub fn Row::get_raw(Self, Int) -> Bytes?
@@ -179,9 +158,11 @@ pub fn Row::len(Self) -> Int
 pub fn[T : FromSql] Row::try_get(Self, Int) -> T? raise
 pub fn[T : FromSql] Row::try_get_name(Self, String) -> T? raise
 
-type RowStream
+pub struct RowStream {
+  mut columns : Array[Column]
+  // private fields
+}
 pub async fn RowStream::collect(Self) -> Array[Row]
-pub fn RowStream::columns(Self) -> Array[Column]
 pub async fn RowStream::finish(Self) -> QuerySummary
 pub async fn RowStream::next(Self) -> Row?
 
@@ -195,7 +176,6 @@ pub struct SimpleQueryRow {
   columns : Array[String]
   values : Array[String?]
 } derive(Eq, Show)
-pub fn SimpleQueryRow::columns(Self) -> Array[String]
 pub fn SimpleQueryRow::get(Self, Int) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
 pub fn SimpleQueryRow::index_of(Self, String) -> Int?
@@ -215,10 +195,12 @@ pub fn SslMode::disable() -> Self
 pub fn SslMode::prefer() -> Self
 pub fn SslMode::require() -> Self
 
-type Statement
+pub struct Statement {
+  params : Array[Type]
+  columns : Array[Column]
+  // private fields
+}
 pub async fn Statement::close(Self) -> Unit
-pub fn Statement::columns(Self) -> Array[Column]
-pub fn Statement::params(Self) -> Array[Type]
 
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
@@ -261,10 +243,7 @@ pub fn Type::int8() -> Self
 pub fn Type::int8_array() -> Self
 pub fn Type::json() -> Self
 pub fn Type::jsonb() -> Self
-pub fn Type::kind(Self) -> Kind
-pub fn Type::name(Self) -> String
 pub fn Type::name_type() -> Self
-pub fn Type::oid(Self) -> UInt
 pub fn Type::oid_type() -> Self
 pub fn Type::text() -> Self
 pub fn Type::text_array() -> Self
