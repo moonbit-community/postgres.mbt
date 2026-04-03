@@ -208,6 +208,7 @@ async fn wire_send_md5_password(
 }
 
 ///|
+#warnings("-14")
 async fn wire_begin_scram(
   connection : WireConnection,
   body : @backend.AuthenticationSaslBody,

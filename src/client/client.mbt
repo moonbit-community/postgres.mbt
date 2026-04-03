@@ -1878,6 +1878,7 @@ async fn send_md5_password_message(
 }
 
 ///|
+#warnings("-14")
 async fn begin_scram(
   stream : Stream,
   body : @backend.AuthenticationSaslBody,

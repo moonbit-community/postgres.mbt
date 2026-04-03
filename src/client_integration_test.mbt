@@ -117,6 +117,15 @@ async fn assert_tls_query_ok(
       )
       .get_name("application_name")
     assert_eq(negotiated_application_name, application_name)
+    let backend_pid : Int = client
+      .query_one("select pg_backend_pid()::int4 as pid")
+      .get_name("pid")
+    let using_tls : Bool = client
+      .query_one("select ssl from pg_stat_ssl where pid = $1::int4", params=[
+        backend_pid as &@client.ToSql,
+      ])
+      .get_name("ssl")
+    assert_eq(using_tls, true)
     let value : Int = client
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -822,7 +831,7 @@ async test "integration copy out" {
       "insert into moon_driver_copy_out(id, name) values (1, 'jim'), (2, 'joe')",
     )
     let stream = client.copy_out(
-      "copy moon_driver_copy_out (id, name) to stdout",
+      "copy (select id, name from moon_driver_copy_out order by id) to stdout",
     )
     let chunks : Array[Bytes] = []
     let payload = @buffer.new()
