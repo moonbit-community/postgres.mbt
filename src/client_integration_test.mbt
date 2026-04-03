@@ -1266,6 +1266,18 @@ async test "integration bytea and bpchar roundtrips" {
       bytea_value,
     )
 
+    let uuid_value = Bytes::from_array([
+      b'\x00', b'\x01', b'\x02', b'\x03', b'\x04', b'\x05', b'\x06', b'\x07', b'\x08',
+      b'\x09', b'\x0a', b'\x0b', b'\x0c', b'\x0d', b'\x0e', b'\x0f',
+    ])
+    assert_roundtrip(
+      client,
+      "uuid",
+      @client.Type::uuid(),
+      "'00010203-0405-0607-0809-0a0b0c0d0e0f'",
+      uuid_value,
+    )
+
     client.batch_execute(
       "create temp table moon_driver_bpchar (id serial primary key, b char(5))",
     )

@@ -18,7 +18,7 @@ pub suberror ClientError {
   Ssl(String)
   Encode(String)
   Decode(String)
-  WrongType(String)
+  WrongType(WrongTypeError)
   ColumnNotFound(String)
   RowCount(String)
   UnexpectedMessage(String)
@@ -209,7 +209,7 @@ pub async fn Transaction::commit(Self) -> Unit
 pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Transaction::prepare(Self, String) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
-pub async fn Transaction::query_portal(Self, Portal, Int) -> RowStream
+pub fn Transaction::query_portal(Self, Portal, Int) -> RowStream raise
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::transaction(Self) -> Self
 
@@ -257,11 +257,18 @@ pub fn Type::uuid_array() -> Self
 pub fn Type::varchar() -> Self
 pub fn Type::varchar_array() -> Self
 
+pub struct WrongTypeError {
+  moonbit_type : String
+  postgres_type : Type
+} derive(Eq, Show)
+
 // Type aliases
 
 // Traits
 pub(open) trait FromSql {
   from_sql(Type, Int, BytesView) -> Self raise
+  accepts(Type) -> Bool
+  moonbit_type_name() -> String
   from_sql_null(Type, Int) -> Self raise = _
 }
 pub impl FromSql for Bool
@@ -276,6 +283,8 @@ pub impl FromSql for Bytes
 
 pub(open) trait ToSql {
   format(Self, Type) -> Int = _
+  accepts(Self, Type) -> Bool
+  moonbit_type_name(Self) -> String
   to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
 }
 pub impl ToSql for Bool

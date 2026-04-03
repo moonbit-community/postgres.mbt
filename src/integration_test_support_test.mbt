@@ -110,6 +110,16 @@ fn[T] expect_row_count_error(result : Result[T, Error]) -> String raise {
 }
 
 ///|
+fn[T] expect_wrong_type_error(
+  result : Result[T, Error],
+) -> @client.WrongTypeError raise {
+  guard result is Err(@client.ClientError::WrongType(err)) else {
+    fail("expected wrong type error")
+  }
+  err
+}
+
+///|
 fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
   guard result is Err(@client.ClientError::Ssl(message)) else {
     fail("expected SSL error")

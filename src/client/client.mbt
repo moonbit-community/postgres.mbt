@@ -1453,6 +1453,39 @@ fn execute_portal_bytes(portal_name : BytesView, max_rows : Int) -> Bytes raise 
 }
 
 ///|
+priv struct EncodedParam {
+  format : Int
+  value : Bytes?
+}
+
+///|
+fn encode_param(param : &ToSql, type_ : Type) -> EncodedParam raise {
+  guard param.accepts(type_) else {
+    raise wrong_type_error(param.moonbit_type_name(), type_)
+  }
+  let payload = @buffer.new()
+  let value = match param.to_sql(type_, payload) {
+    @proto.IsNull::Yes => None
+    @proto.IsNull::No => Some(payload.to_bytes())
+  }
+  { format: param.format(type_), value }
+}
+
+///|
+fn write_encoded_param(
+  param : EncodedParam,
+  payload : @buffer.Buffer,
+) -> @proto.IsNull {
+  match param.value {
+    None => @proto.IsNull::Yes
+    Some(bytes) => {
+      payload.write_bytes(bytes)
+      @proto.IsNull::No
+    }
+  }
+}
+
+///|
 fn write_bind(
   buf : @buffer.Buffer,
   portal : BytesView,
@@ -1461,14 +1494,17 @@ fn write_bind(
   params : Array[&ToSql],
   describe_portal : Bool,
 ) -> Unit raise {
-  let formats = params.mapi((index, param) => param.format(param_types[index]))
-  let values = params.mapi((index, param) => (param, param_types[index]))
+  let encoded_params : Array[EncodedParam] = []
+  for index, param in params {
+    encoded_params.push(encode_param(param, param_types[index]))
+  }
+  let formats = encoded_params.map(param => param.format)
   @frontend.bind(
     portal,
     statement,
     formats.iter(),
-    values.iter(),
-    (pair, payload) => serialize_param(pair.0, pair.1, payload),
+    encoded_params.iter(),
+    (param, payload) => write_encoded_param(param, payload),
     [1].iter(),
     buf,
   )
@@ -1689,17 +1725,6 @@ fn join_clauses(clauses : Array[String]) -> String {
     out += clause
   }
   out
-}
-
-///|
-fn serialize_param(
-  param : &ToSql,
-  type_ : Type,
-  payload : @buffer.Buffer,
-) -> @proto.IsNull raise @proto.ProtocolError {
-  param.to_sql(type_, payload) catch {
-    err => raise @proto.ProtocolError::InvalidInput(err.to_string())
-  }
 }
 
 ///|

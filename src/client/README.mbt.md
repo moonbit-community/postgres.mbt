@@ -91,7 +91,7 @@ async fn _transaction_example(client : @client.Client) -> Unit {
 
 ## Errors
 
-Driver operations raise `ClientError`.
+Driver operations raise `ClientError`. Type mismatches detected before encoding or decoding raise `ClientError::WrongType`.
 
 ```mbt check
 ///|

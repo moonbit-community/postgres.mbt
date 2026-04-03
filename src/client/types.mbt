@@ -58,6 +58,12 @@ pub struct DatabaseError {
 } derive(Show, Eq)
 
 ///|
+pub struct WrongTypeError {
+  moonbit_type : String
+  postgres_type : Type
+} derive(Show, Eq)
+
+///|
 pub suberror ClientError {
   Database(DatabaseError)
   Authentication(String)
@@ -66,7 +72,7 @@ pub suberror ClientError {
   Ssl(String)
   Encode(String)
   Decode(String)
-  WrongType(String)
+  WrongType(WrongTypeError)
   ColumnNotFound(String)
   RowCount(String)
   UnexpectedMessage(String)
@@ -333,8 +339,36 @@ fn resolve_type(oid : @proto.Oid) -> Type {
 }
 
 ///|
+fn wrong_type_error(moonbit_type : String, postgres_type : Type) -> ClientError {
+  ClientError::WrongType({ moonbit_type, postgres_type })
+}
+
+///|
+fn is_text_type(type_ : Type) -> Bool {
+  match type_.oid {
+    19U | 25U | 1043U => true
+    _ =>
+      match type_.name {
+        "bpchar" | "citext" | "lquery" | "ltree" | "ltxtquery" | "unknown" =>
+          true
+        _ => false
+      }
+  }
+}
+
+///|
+fn is_bytes_type(type_ : Type) -> Bool {
+  match type_.oid {
+    17U | 2950U => true
+    _ => false
+  }
+}
+
+///|
 pub(open) trait ToSql {
   format(Self, Type) -> Int = _
+  accepts(Self, Type) -> Bool
+  moonbit_type_name(Self) -> String
   to_sql(Self, Type, @buffer.Buffer) -> @proto.IsNull raise Error
 }
 
@@ -346,6 +380,8 @@ impl ToSql with format(_, _) {
 ///|
 pub(open) trait FromSql {
   from_sql(Type, Int, BytesView) -> Self raise Error
+  accepts(Type) -> Bool
+  moonbit_type_name() -> String
   from_sql_null(Type, Int) -> Self raise Error = _
 }
 
@@ -359,6 +395,22 @@ pub impl[T : ToSql] ToSql for T? with format(self, type_) {
   match self {
     None => 1
     Some(value) => value.format(type_)
+  }
+}
+
+///|
+pub impl[T : ToSql] ToSql for T? with accepts(self, type_) {
+  match self {
+    None => true
+    Some(value) => value.accepts(type_)
+  }
+}
+
+///|
+pub impl[T : ToSql] ToSql for T? with moonbit_type_name(self) {
+  match self {
+    None => "Option"
+    Some(value) => "\{value.moonbit_type_name()}?"
   }
 }
 
@@ -377,14 +429,44 @@ pub impl[T : FromSql] FromSql for T? with from_sql(type_, format, raw) {
 }
 
 ///|
+pub impl[T : FromSql] FromSql for T? with accepts(type_) {
+  T::accepts(type_)
+}
+
+///|
+pub impl[T : FromSql] FromSql for T? with moonbit_type_name() {
+  "\{T::moonbit_type_name()}?"
+}
+
+///|
 pub impl[T : FromSql] FromSql for T? with from_sql_null(_, _) {
   None
+}
+
+///|
+pub impl ToSql for Bool with accepts(_, type_) {
+  type_.oid == 16U
+}
+
+///|
+pub impl ToSql for Bool with moonbit_type_name(_) {
+  "Bool"
 }
 
 ///|
 pub impl ToSql for Bool with to_sql(self, _, buf) {
   @types.bool_to_sql(self, buf)
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Bool with accepts(type_) {
+  type_.oid == 16U
+}
+
+///|
+pub impl FromSql for Bool with moonbit_type_name() {
+  "Bool"
 }
 
 ///|
@@ -407,6 +489,19 @@ pub impl ToSql for Int with to_sql(self, type_, buf) {
 }
 
 ///|
+pub impl ToSql for Int with accepts(_, type_) {
+  match type_.oid {
+    21U | 23U => true
+    _ => false
+  }
+}
+
+///|
+pub impl ToSql for Int with moonbit_type_name(_) {
+  "Int"
+}
+
+///|
 pub impl FromSql for Int with from_sql(type_, format, raw) {
   match format {
     0 => @string.parse_int(decode_utf8(raw))
@@ -421,9 +516,42 @@ pub impl FromSql for Int with from_sql(type_, format, raw) {
 }
 
 ///|
+pub impl FromSql for Int with accepts(type_) {
+  match type_.oid {
+    21U | 23U => true
+    _ => false
+  }
+}
+
+///|
+pub impl FromSql for Int with moonbit_type_name() {
+  "Int"
+}
+
+///|
+pub impl ToSql for Int64 with accepts(_, type_) {
+  type_.oid == 20U
+}
+
+///|
+pub impl ToSql for Int64 with moonbit_type_name(_) {
+  "Int64"
+}
+
+///|
 pub impl ToSql for Int64 with to_sql(self, _, buf) {
   @types.int8_to_sql(self, buf)
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Int64 with accepts(type_) {
+  type_.oid == 20U
+}
+
+///|
+pub impl FromSql for Int64 with moonbit_type_name() {
+  "Int64"
 }
 
 ///|
@@ -436,9 +564,29 @@ pub impl FromSql for Int64 with from_sql(_, format, raw) {
 }
 
 ///|
+pub impl ToSql for Float with accepts(_, type_) {
+  type_.oid == 700U
+}
+
+///|
+pub impl ToSql for Float with moonbit_type_name(_) {
+  "Float"
+}
+
+///|
 pub impl ToSql for Float with to_sql(self, _, buf) {
   @types.float4_to_sql(self, buf)
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Float with accepts(type_) {
+  type_.oid == 700U
+}
+
+///|
+pub impl FromSql for Float with moonbit_type_name() {
+  "Float"
 }
 
 ///|
@@ -451,9 +599,29 @@ pub impl FromSql for Float with from_sql(_, format, raw) {
 }
 
 ///|
+pub impl ToSql for Double with accepts(_, type_) {
+  type_.oid == 701U
+}
+
+///|
+pub impl ToSql for Double with moonbit_type_name(_) {
+  "Double"
+}
+
+///|
 pub impl ToSql for Double with to_sql(self, _, buf) {
   @types.float8_to_sql(self, buf)
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Double with accepts(type_) {
+  type_.oid == 701U
+}
+
+///|
+pub impl FromSql for Double with moonbit_type_name() {
+  "Double"
 }
 
 ///|
@@ -466,9 +634,29 @@ pub impl FromSql for Double with from_sql(_, format, raw) {
 }
 
 ///|
+pub impl ToSql for UInt with accepts(_, type_) {
+  type_.oid == 26U
+}
+
+///|
+pub impl ToSql for UInt with moonbit_type_name(_) {
+  "UInt"
+}
+
+///|
 pub impl ToSql for UInt with to_sql(self, _, buf) {
   @types.oid_to_sql(self, buf)
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for UInt with accepts(type_) {
+  type_.oid == 26U
+}
+
+///|
+pub impl FromSql for UInt with moonbit_type_name() {
+  "UInt"
 }
 
 ///|
@@ -478,6 +666,16 @@ pub impl FromSql for UInt with from_sql(_, format, raw) {
     1 => @types.oid_from_sql(raw)
     _ => raise ClientError::Decode("unsupported format code for oid")
   }
+}
+
+///|
+pub impl ToSql for String with accepts(_, type_) {
+  is_text_type(type_)
+}
+
+///|
+pub impl ToSql for String with moonbit_type_name(_) {
+  "String"
 }
 
 ///|
@@ -492,8 +690,28 @@ pub impl ToSql for String with to_sql(self, _, buf) {
 }
 
 ///|
+pub impl FromSql for String with accepts(type_) {
+  is_text_type(type_)
+}
+
+///|
+pub impl FromSql for String with moonbit_type_name() {
+  "String"
+}
+
+///|
 pub impl FromSql for String with from_sql(_, _, raw) {
   decode_utf8(raw)
+}
+
+///|
+pub impl ToSql for Bytes with accepts(_, type_) {
+  is_bytes_type(type_)
+}
+
+///|
+pub impl ToSql for Bytes with moonbit_type_name(_) {
+  "Bytes"
 }
 
 ///|
@@ -504,6 +722,16 @@ pub impl ToSql for Bytes with to_sql(self, type_, buf) {
     _ => raise ClientError::Encode("cannot encode bytes for type \{type_.name}")
   }
   @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Bytes with accepts(type_) {
+  is_bytes_type(type_)
+}
+
+///|
+pub impl FromSql for Bytes with moonbit_type_name() {
+  "Bytes"
 }
 
 ///|
@@ -578,6 +806,9 @@ pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
 /// Decode the value at `index` as `T`.
 pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
   let column = self.columns[index]
+  guard T::accepts(column.type_) else {
+    raise wrong_type_error(T::moonbit_type_name(), column.type_)
+  }
   match self.values[index] {
     None => FromSql::from_sql_null(column.type_, column.format)
     Some(value) => FromSql::from_sql(column.type_, column.format, value[:])
