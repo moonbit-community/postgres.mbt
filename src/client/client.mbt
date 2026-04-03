@@ -754,11 +754,11 @@ pub async fn Transaction::bind(
 
 ///|
 /// Execute a portal within this transaction.
-pub async fn Transaction::query_portal(
+pub fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,
   max_rows : Int,
-) -> RowStream {
+) -> RowStream raise {
   self.assert_open()
   self.client.query_portal(portal, max_rows)
 }
