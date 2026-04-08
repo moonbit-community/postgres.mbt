@@ -1,4 +1,17 @@
 ///|
+/// Frontend message serializers for PostgreSQL protocol 3.x.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// Write the length-prefixed body portion shared by almost all frontend
+/// messages.
+///
+/// In PostgreSQL's normal message framing, the tag byte is followed by an
+/// `Int32` length that includes itself but not the tag byte. Callers are
+/// responsible for writing the tag first. `StartupMessage` is the one exception
+/// and therefore calls this helper without writing a tag.
 fn write_body(
   buf : @buffer.Buffer,
   f : (@buffer.Buffer) -> Unit raise @proto.ProtocolError,
@@ -11,6 +24,10 @@ fn write_body(
 }
 
 ///|
+/// Write an `Int16` count followed by that many values.
+///
+/// Protocol Section 54.7 uses this pattern for format-code arrays and OID
+/// arrays in messages such as `Bind` and `Parse`.
 fn[T] write_counted(
   items : Iter[T],
   serializer : (T, @buffer.Buffer) -> Unit raise @proto.ProtocolError,
@@ -28,6 +45,10 @@ fn[T] write_counted(
 }
 
 ///|
+/// Write a protocol `String`.
+///
+/// PostgreSQL message strings are NUL-terminated, so embedded zero bytes would
+/// truncate the field and are therefore rejected here.
 fn write_cstr(
   s : BytesView,
   buf : @buffer.Buffer,
@@ -42,7 +63,22 @@ fn write_cstr(
 }
 
 ///|
-/// Serialize a Bind message.
+/// Serialize a `Bind` message for the extended query protocol.
+///
+/// The parameter payloads are written as repeated `Int32 len + Byte n` fields,
+/// where `-1` denotes NULL. Result format codes follow PostgreSQL's usual
+/// convention of `0 = text` and `1 = binary`.
+///
+/// Wire order:
+/// 1. `String` destination portal name
+/// 2. `String` source prepared-statement name
+/// 3. `Int16 C`, then `Int16[C]` parameter format codes
+/// 4. `Int16 N`, then `N` times: `Int32 len` plus `Byte n` payload
+/// 5. `Int16 R`, then `Int16[R]` result-column format codes
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn[T] bind(
   portal : BytesView,
   statement : BytesView,
@@ -71,7 +107,21 @@ pub fn[T] bind(
 }
 
 ///|
-/// Serialize a CancelRequest message.
+/// Serialize a `CancelRequest` startup packet.
+///
+/// The current implementation writes the historical 4-byte secret key used by
+/// protocol 3.0. PostgreSQL 3.2 redefines this field as variable-length.
+///
+/// Wire order in this implementation:
+/// 1. `Int32(16)` total message length
+/// 2. `Int32(80877102)` cancel request code
+/// 3. `Int32` backend process ID
+/// 4. `Int32` backend secret key
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
 pub fn cancel_request(
   process_id : Int,
   secret_key : Int,
@@ -85,7 +135,9 @@ pub fn cancel_request(
 }
 
 ///|
-/// Serialize a Close message.
+/// Serialize a `Close` message.
+///
+/// `variant` must be `S` for a prepared statement or `P` for a portal.
 pub fn close(
   variant : Byte,
   name : BytesView,
@@ -99,14 +151,17 @@ pub fn close(
 }
 
 ///|
-/// A CopyData message writer.
+/// Prepared writer for a `CopyData` frame.
+///
+/// Backend `CopyData` messages always correspond to a single row, while
+/// frontend `CopyData` messages may chunk the copy stream arbitrarily.
 pub struct CopyData {
   buf : Bytes
   len : Int
 }
 
 ///|
-/// Construct a `CopyData` message body from raw payload bytes.
+/// Construct a `CopyData` frame from raw payload bytes.
 pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
   let len = buf.length() + 4
   let _ = @proto.checked_i32(len)
@@ -122,14 +177,15 @@ pub fn CopyData::write(self : CopyData, out : @buffer.Buffer) -> Unit {
 }
 
 ///|
-/// Serialize a CopyDone message.
+/// Serialize `CopyDone`, indicating that the sender has finished a COPY stream.
 pub fn copy_done(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'c')
   try! write_body(buf, fn(_) { () })
 }
 
 ///|
-/// Serialize a CopyFail message.
+/// Serialize `CopyFail`, aborting a frontend COPY IN stream with an error
+/// message.
 pub fn copy_fail(
   message : BytesView,
   buf : @buffer.Buffer,
@@ -139,7 +195,10 @@ pub fn copy_fail(
 }
 
 ///|
-/// Serialize a Describe message.
+/// Serialize a `Describe` message.
+///
+/// `variant` must be `S` to describe a prepared statement or `P` to describe a
+/// portal.
 pub fn describe(
   variant : Byte,
   name : BytesView,
@@ -153,7 +212,18 @@ pub fn describe(
 }
 
 ///|
-/// Serialize an Execute message.
+/// Serialize an `Execute` message for a portal.
+///
+/// `max_rows == 0` means "no limit". A positive row limit can cause the backend
+/// to stop early and emit `PortalSuspended`.
+///
+/// Wire order:
+/// 1. `String` portal name
+/// 2. `Int32` maximum rows to return before suspension
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn execute(
   portal : BytesView,
   max_rows : Int,
@@ -167,7 +237,19 @@ pub fn execute(
 }
 
 ///|
-/// Serialize a Parse message.
+/// Serialize a `Parse` message.
+///
+/// Each OID in `param_types` prespecifies one parameter type. A zero OID leaves
+/// that parameter type unspecified for the backend to infer later.
+///
+/// Wire order:
+/// 1. `String` prepared-statement name
+/// 2. `String` query text
+/// 3. `Int16 N`, then `Int32[N]` parameter type OIDs
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn parse(
   name : BytesView,
   query : BytesView,
@@ -183,7 +265,18 @@ pub fn parse(
 }
 
 ///|
-/// Serialize a PasswordMessage.
+/// Serialize the context-dependent `PasswordMessage` (`p`) frame.
+///
+/// During startup this is used for cleartext or MD5 password responses. The
+/// same wire tag is also reused by GSS and SASL messages, which have dedicated
+/// helpers below.
+///
+/// Wire order for password authentication:
+/// 1. `String` password payload
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn password_message(
   password : BytesView,
   buf : @buffer.Buffer,
@@ -193,7 +286,17 @@ pub fn password_message(
 }
 
 ///|
-/// Serialize a Query message.
+/// Serialize a simple-query `Query` message.
+///
+/// The query string may contain multiple semicolon-separated SQL statements,
+/// which the backend executes as one simple-query cycle.
+///
+/// Wire order:
+/// 1. `String` query text
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn query(
   query : BytesView,
   buf : @buffer.Buffer,
@@ -203,7 +306,20 @@ pub fn query(
 }
 
 ///|
-/// Serialize a SASLInitialResponse message.
+/// Serialize `SASLInitialResponse`.
+///
+/// This writes the selected mechanism name, then an explicit initial-response
+/// length, then the mechanism-specific bytes. It does not encode PostgreSQL's
+/// special `-1` form for "no initial response".
+///
+/// Wire order:
+/// 1. `String` selected SASL mechanism
+/// 2. `Int32` initial-response length
+/// 3. `Byte n` initial-response payload
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn sasl_initial_response(
   mechanism : BytesView,
   data : BytesView,
@@ -219,7 +335,15 @@ pub fn sasl_initial_response(
 }
 
 ///|
-/// Serialize a SASLResponse message.
+/// Serialize `SASLResponse`, the follow-up client message used after an
+/// `AuthenticationSASLContinue` challenge.
+///
+/// Wire order:
+/// 1. `Byte n` mechanism-specific response payload
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn sasl_response(
   data : BytesView,
   buf : @buffer.Buffer,
@@ -229,13 +353,28 @@ pub fn sasl_response(
 }
 
 ///|
-/// Serialize an SSLRequest message.
+/// Serialize the tagless `SSLRequest` startup packet.
 pub fn ssl_request(buf : @buffer.Buffer) -> Unit {
   try! write_body(buf, fn(b) { b.write_int_be(80_877_103) })
 }
 
 ///|
-/// Serialize a StartupMessage.
+/// Serialize a tagless `StartupMessage`.
+///
+/// Although the current PostgreSQL documentation describes protocol 3.2 as the
+/// latest version, libpq still defaults to protocol 3.0 for compatibility. This
+/// implementation follows that compatibility path and sends `0x00030000`
+/// without attempting minor-version negotiation.
+///
+/// Wire order:
+/// 1. `Int32` total message length
+/// 2. `Int32(0x00030000)` startup protocol version
+/// 3. repeated `String` parameter name + `String` parameter value pairs
+/// 4. trailing zero byte terminator
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn startup_message(
   parameters : Iter[(BytesView, BytesView)],
   buf : @buffer.Buffer,
@@ -252,21 +391,30 @@ pub fn startup_message(
 }
 
 ///|
-/// Serialize a Flush message.
+/// Serialize `Flush`, forcing the backend to emit any response messages it has
+/// buffered so far.
 pub fn flush(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'H')
   try! write_body(buf, fn(_) { () })
 }
 
 ///|
-/// Serialize a Sync message.
+/// Serialize `Sync`, ending the current extended-query cycle and asking the
+/// backend to return to a clean `ReadyForQuery` state.
+///
+/// Wire order:
+/// 1. no body; the length word is always `4`
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn sync(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'S')
   try! write_body(buf, fn(_) { () })
 }
 
 ///|
-/// Serialize a Terminate message.
+/// Serialize `Terminate`, requesting a graceful end to the session.
 pub fn terminate(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'X')
   try! write_body(buf, fn(_) { () })

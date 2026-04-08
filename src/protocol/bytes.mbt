@@ -1,5 +1,11 @@
 ///|
-/// Convert a length to an i16 with overflow checks.
+/// Wire-level scalar decoding helpers for PostgreSQL protocol values.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-message-types.html
+/// Convert a count to the signed 16-bit representation used by many protocol
+/// fields, such as parameter counts and format-code counts.
 pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
   if len < 0 || len > 0x7fff {
     raise ProtocolError::Overflow("value too large to transmit")
@@ -8,7 +14,11 @@ pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
 }
 
 ///|
-/// Convert a length to an i32 with overflow checks.
+/// Convert a length to the signed 32-bit representation used by PostgreSQL
+/// length fields.
+///
+/// Whether the resulting value includes the length word itself depends on the
+/// surrounding message format.
 pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
   if len < 0 || len > 0x7fff_ffff {
     raise ProtocolError::Overflow("value too large to transmit")
@@ -17,7 +27,8 @@ pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
 }
 
 ///|
-/// Ensure value fits in signed i32.
+/// Ensure a value fits in the signed 32-bit range accepted by wire `Int32`
+/// fields.
 pub fn checked_i32(value : Int) -> Int raise ProtocolError {
   if value < -0x8000_0000 || value > 0x7fff_ffff {
     raise ProtocolError::Overflow("value out of range for i32")
@@ -26,7 +37,8 @@ pub fn checked_i32(value : Int) -> Int raise ProtocolError {
 }
 
 ///|
-/// Ensure value fits in signed i16.
+/// Ensure a value fits in the signed 16-bit range accepted by wire `Int16`
+/// fields.
 pub fn checked_i16(value : Int) -> Int16 raise ProtocolError {
   if value < -0x8000 || value > 0x7fff {
     raise ProtocolError::Overflow("value out of range for i16")
@@ -48,7 +60,10 @@ pub fn i32_from_u32(value : UInt) -> Int {
 }
 
 ///|
-/// A byte reader for protocol parsing.
+/// Cursor-based reader for the scalar types from protocol Section 54.6.
+///
+/// All integer reads use network byte order, and `read_cstr` implements the
+/// protocol `String` type (a NUL-terminated byte sequence).
 pub struct ByteReader {
   buf : BytesView
   mut idx : Int
@@ -73,6 +88,8 @@ pub fn ByteReader::is_empty(self : ByteReader) -> Bool {
 }
 
 ///|
+/// Ensure that at least `n` unread bytes remain before reading a fixed-width
+/// field.
 fn ByteReader::ensure(self : ByteReader, n : Int) -> Unit raise ProtocolError {
   if self.remaining() < n {
     raise ProtocolError::UnexpectedEof("unexpected EOF")
@@ -170,7 +187,8 @@ pub fn ByteReader::read_f64_be(self : ByteReader) -> Double raise ProtocolError 
 }
 
 ///|
-/// Read the next `len` bytes.
+/// Read the next `len` bytes from a preceding `Byte n` or length-prefixed
+/// field.
 pub fn ByteReader::read_bytes(
   self : ByteReader,
   len : Int,
@@ -187,6 +205,9 @@ pub fn ByteReader::read_bytes(
 
 ///|
 /// Consume and return all remaining bytes.
+///
+/// Many message formats end with `Byte n`, where `n` is implied by the overall
+/// message length. This helper returns that trailing payload.
 pub fn ByteReader::read_all(self : ByteReader) -> BytesView {
   let start = self.idx
   self.idx = self.buf.length()
@@ -194,6 +215,7 @@ pub fn ByteReader::read_all(self : ByteReader) -> BytesView {
 }
 
 ///|
+/// Find the next NUL terminator used by a protocol `String`.
 fn find_null(buf : BytesView, start : Int) -> Int raise ProtocolError {
   let mut i = start
   while i < buf.length() {
@@ -206,7 +228,10 @@ fn find_null(buf : BytesView, start : Int) -> Int raise ProtocolError {
 }
 
 ///|
-/// Read a NULL-terminated byte string.
+/// Read a protocol `String`.
+///
+/// PostgreSQL protocol strings are C-style NUL-terminated byte sequences with
+/// no separate length prefix.
 pub fn ByteReader::read_cstr(self : ByteReader) -> Bytes raise ProtocolError {
   let end = find_null(self.buf, self.idx)
   let slice = self.buf[self.idx:end]

@@ -1,9 +1,16 @@
 ///|
-/// Identifier of SCRAM-SHA-256 SASL authentication mechanism.
+/// Client-side SCRAM helpers for PostgreSQL SASL authentication.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// Mechanism name advertised in `AuthenticationSASL` for SCRAM without channel
+/// binding.
 pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
 
 ///|
-/// Identifier of SCRAM-SHA-256-PLUS SASL authentication mechanism.
+/// Mechanism name advertised in `AuthenticationSASL` for SCRAM with
+/// `tls-server-end-point` channel binding.
 pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 ///|
@@ -11,6 +18,14 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 /// Applies SASLprep-style mapping plus modern Unicode NFKC normalization.
 /// This uses the public normalization API from `tonyfettes/unicode`, so it is
 /// intentionally closer to modern Unicode behavior than strict RFC 4013.
+///
+/// PostgreSQL's server-side behavior is slightly more permissive: if the
+/// password bytes are not valid UTF-8, it falls back to using the raw bytes
+/// instead of rejecting them. This client implementation is stricter and
+/// requires valid UTF-8 input.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
 pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
   let s = @utf8.decode(pass) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
@@ -120,7 +135,7 @@ fn is_tagging(cp : Int) -> Bool {
 }
 
 ///|
-/// PBKDF2-HMAC-SHA256.
+/// SCRAM `Hi()` function, implemented as PBKDF2-HMAC-SHA-256.
 pub fn hi(
   str : BytesView,
   salt : BytesView,
@@ -152,7 +167,11 @@ fn xor_bytes(a : BytesView, b : BytesView) -> Bytes {
 }
 
 ///|
-/// Channel binding configuration for SCRAM authentication.
+/// GS2 channel-binding choice for a SCRAM exchange.
+///
+/// PostgreSQL supports the `tls-server-end-point` binding for
+/// `SCRAM-SHA-256-PLUS`. The enum also carries the two non-binding GS2 headers
+/// used when the client does not request binding.
 pub enum ChannelBinding {
   Unrequested
   Unsupported
@@ -197,6 +216,14 @@ fn ChannelBinding::cbind_data(self : ChannelBinding) -> BytesView {
 }
 
 ///|
+/// Internal SCRAM exchange phase.
+///
+/// The state machine mirrors the PostgreSQL SASL flow:
+/// `AuthenticationSASL` -> `SASLInitialResponse` -> `AuthenticationSASLContinue`
+/// -> `SASLResponse` -> `AuthenticationSASLFinal`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
 enum State {
   Update(nonce~ : Bytes, password~ : Bytes, channel_binding~ : ChannelBinding)
   Finish(salted_password~ : Bytes, auth_message~ : Bytes)
@@ -204,7 +231,7 @@ enum State {
 }
 
 ///|
-/// Client-side SCRAM-SHA-256 handler.
+/// Client-side SCRAM state machine for PostgreSQL SASL authentication.
 pub struct ScramSha256 {
   mut message : Bytes
   mut state : State
@@ -212,7 +239,8 @@ pub struct ScramSha256 {
 
 ///|
 /// Construct a new SCRAM-SHA-256 exchange from caller-provided random nonce bytes.
-/// The nonce bytes are base64-encoded to a SCRAM-safe ASCII nonce.
+/// The nonce bytes are base64-encoded to a SCRAM-safe ASCII nonce before they
+/// are embedded in the initial client message.
 pub fn ScramSha256::new(
   password : BytesView,
   channel_binding : ChannelBinding,
@@ -226,7 +254,17 @@ pub fn ScramSha256::new(
 }
 
 ///|
-/// Construct a new SCRAM-SHA-256 exchange with a provided encoded nonce.
+/// Construct a new SCRAM exchange from a pre-encoded nonce.
+///
+/// This creates the SCRAM `client-first-message` payload that the caller should
+/// place inside `SASLInitialResponse`.
+///
+/// SCRAM wire form built here:
+/// 1. GS2 header: `n,,`, `y,,`, or `p=tls-server-end-point,,`
+/// 2. client-first-message-bare: `n=,r=<client nonce>`
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
 pub fn ScramSha256::new_inner(
   password : BytesView,
   channel_binding : ChannelBinding,
@@ -246,6 +284,7 @@ pub fn ScramSha256::new_inner(
 }
 
 ///|
+/// Validate the SCRAM nonce grammar expected by PostgreSQL.
 fn validate_nonce(nonce : BytesView) -> Unit raise @proto.ProtocolError {
   if nonce.length() == 0 {
     raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
@@ -258,7 +297,11 @@ fn validate_nonce(nonce : BytesView) -> Unit raise @proto.ProtocolError {
 }
 
 ///|
-/// Get the current client message to send.
+/// Return the current SCRAM payload to send on the wire.
+///
+/// Before `update`, this is the `client-first-message` for
+/// `SASLInitialResponse`. After `update`, it is the `client-final-message` for
+/// `SASLResponse`.
 pub fn ScramSha256::message(
   self : ScramSha256,
 ) -> BytesView raise @proto.ProtocolError {
@@ -269,7 +312,22 @@ pub fn ScramSha256::message(
 }
 
 ///|
-/// Update state with server first message.
+/// Consume a SCRAM `server-first-message` and prepare the client final payload.
+///
+/// The input should be the bytes carried by `AuthenticationSASLContinue`.
+///
+/// Expected server message shape:
+/// 1. `r=<combined nonce>`
+/// 2. `,s=<base64 salt>`
+/// 3. `,i=<iteration count>`
+///
+/// Generated client-final-message shape:
+/// 1. `c=<base64(gs2-header || cbind-data)>`
+/// 2. `,r=<combined nonce>`
+/// 3. `,p=<base64 client proof>`
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
 pub fn ScramSha256::update(
   self : ScramSha256,
   message : BytesView,
@@ -296,6 +354,7 @@ pub fn ScramSha256::update(
     size_hint=channel_binding.gs2_header().length() +
       channel_binding.cbind_data().length(),
   )
+  // The `c=` field is base64(gs2-header || channel-binding-data).
   cbind.write_bytesview(channel_binding.gs2_header())
   cbind.write_bytesview(channel_binding.cbind_data())
   let cbind_b64 = @proto.utf8_encode(@base64.encode(cbind.to_bytes()[:]))
@@ -307,6 +366,9 @@ pub fn ScramSha256::update(
   client_final.write_bytesview(b",r="[:])
   client_final.write_bytesview(parsed.nonce[:])
   let client_final_without_proof = client_final.to_bytes()
+  // SCRAM auth_message =
+  // client-first-message-bare "," server-first-message ","
+  // client-final-message-without-proof.
   let auth = @buffer.new(
     size_hint=4 +
       client_nonce.length() +
@@ -338,7 +400,16 @@ pub fn ScramSha256::update(
 }
 
 ///|
-/// Finish SCRAM exchange with server final message.
+/// Finish the SCRAM exchange by verifying the `server-final-message`.
+///
+/// The input should be the bytes carried by `AuthenticationSASLFinal`.
+///
+/// Accepted terminal forms:
+/// 1. success: `v=<base64 server signature>`
+/// 2. failure: `e=<server error text>`
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
 pub fn ScramSha256::finish(
   self : ScramSha256,
   message : BytesView,
@@ -370,6 +441,7 @@ pub fn ScramSha256::finish(
 }
 
 ///|
+/// Compare two SCRAM digests byte-for-byte.
 fn bytes_equal(a : BytesView, b : BytesView) -> Bool {
   if a.length() != b.length() {
     return false
@@ -383,6 +455,7 @@ fn bytes_equal(a : BytesView, b : BytesView) -> Bool {
 }
 
 ///|
+/// Check that the server nonce extends the client nonce, as required by SCRAM.
 fn starts_with(haystack : BytesView, needle : BytesView) -> Bool {
   if needle.length() > haystack.length() {
     return false
@@ -396,6 +469,10 @@ fn starts_with(haystack : BytesView, needle : BytesView) -> Bool {
 }
 
 ///|
+/// Parser for the SCRAM attribute lists carried in PostgreSQL SASL messages.
+///
+/// It intentionally handles only the server payload shapes that PostgreSQL uses
+/// for SCRAM: `server-first-message` and `server-final-message`.
 priv struct Parser {
   buf : BytesView
   mut idx : Int

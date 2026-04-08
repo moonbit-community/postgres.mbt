@@ -1,6 +1,17 @@
 ///|
-/// Hashes authentication information for AuthenticationMd5Password.
-/// Returns bytes containing ASCII "md5" prefix plus hex digest.
+/// Authentication helpers for PostgreSQL startup negotiation.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// Build the legacy response for `AuthenticationMD5Password`.
+///
+/// PostgreSQL sends a 4-byte salt in the backend authentication request. The
+/// frontend must reply with ASCII `md5` followed by the hex-encoded digest of
+/// `md5(md5(password || username) || salt)`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub fn md5_hash(
   username : BytesView,
   password : BytesView,

@@ -1,4 +1,15 @@
 ///|
+/// Binary/text value codecs used inside PostgreSQL protocol payloads.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-message-types.html
+/// Value encoders and decoders used inside protocol payloads.
+///
+/// These helpers do not build full frontend/backend messages. They only encode
+/// or decode the value bytes carried inside messages such as `Bind`, `DataRow`,
+/// and `COPY` after the surrounding protocol has selected text format (`0`) or
+/// binary format (`1`).
 let range_upper_unbounded : Byte = 0b0001_0000
 
 ///|

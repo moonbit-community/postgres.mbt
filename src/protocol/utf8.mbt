@@ -1,4 +1,10 @@
 ///|
+/// UTF-8 validation helpers used for PostgreSQL protocol strings and text
+/// payloads.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-message-types.html
 fn[T] invalid_utf8() -> T raise ProtocolError {
   raise ProtocolError::InvalidInput("invalid UTF-8")
 }
@@ -97,6 +103,9 @@ fn consume_utf8_scalar(bytes : BytesView) -> BytesView raise ProtocolError {
 
 ///|
 /// Validate that bytes are valid UTF-8.
+///
+/// The higher-level client requests `client_encoding=UTF8`, so protocol strings
+/// and textual values handled by this package are expected to pass this check.
 pub fn validate_utf8(bytes : BytesView) -> Unit raise ProtocolError {
   let mut rest = bytes
   while !rest.is_empty() {

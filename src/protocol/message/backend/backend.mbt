@@ -1,4 +1,17 @@
 ///|
+/// Backend message parsers for PostgreSQL protocol 3.x.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
+/// Backend message tags from protocol Section 54.7.
+///
+/// This parser covers the tags needed for authentication, simple query,
+/// extended query, notifications, and COPY IN/OUT. Replication-specific tags
+/// such as `W` (`CopyBothResponse`) and protocol-negotiation tag `v`
+/// (`NegotiateProtocolVersion`) are intentionally not parsed here.
 pub const PARSE_COMPLETE_TAG : Byte = b'1'
 
 ///|
@@ -62,6 +75,9 @@ pub const ROW_DESCRIPTION_TAG : Byte = b'T'
 pub const READY_FOR_QUERY_TAG : Byte = b'Z'
 
 ///|
+/// Parsed `Byte1 tag + Int32 len` prefix of a backend message.
+///
+/// `len` includes the 4-byte length word itself, but not the initial tag byte.
 pub struct Header {
   tag : Byte
   len : Int
@@ -69,6 +85,8 @@ pub struct Header {
 
 ///|
 /// Parse a backend message header if enough bytes are available.
+///
+/// Returns `None` until the full 5-byte prefix has been buffered.
 pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
   if buf.length() < 5 {
     return None
@@ -85,14 +103,21 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
 }
 
 ///|
-/// Parsed backend message plus consumed bytes.
+/// Parsed backend message plus the number of bytes consumed from the input
+/// buffer.
+///
+/// `consumed` includes the tag byte, the 4-byte length word, and the message
+/// body.
 pub struct ParsedMessage {
   message : Message
   consumed : Int
 }
 
 ///|
-/// Backend messages.
+/// Backend messages understood by this package.
+///
+/// `Authentication*` variants come from the single wire tag `R` and are
+/// distinguished by the authentication subtype carried in the body.
 pub enum Message {
   AuthenticationCleartextPassword
   AuthenticationGss
@@ -128,7 +153,10 @@ pub enum Message {
 }
 
 ///|
-/// Parse one backend message from the front of `buf`.
+/// Parse one complete backend message from the front of `buf`.
+///
+/// Returns `None` until the whole frame is buffered. The parser validates the
+/// declared length before decoding the message-specific body.
 pub fn Message::parse(
   buf : BytesView,
 ) -> ParsedMessage? raise @proto.ProtocolError {
@@ -201,6 +229,8 @@ pub fn Message::parse(
       Message::NoticeResponse({ storage, })
     }
     AUTHENTICATION_TAG => {
+      // `AuthenticationRequest` reuses tag `R`; a 32-bit subtype selects the
+      // concrete authentication method or challenge frame.
       let auth_tag = reader.read_i32_be()
       match auth_tag {
         0 => Message::AuthenticationOk
@@ -264,6 +294,10 @@ pub fn Message::parse(
 }
 
 ///|
+/// Body of `AuthenticationMD5Password`.
+///
+/// The server provides a 4-byte salt that the frontend must mix into the MD5
+/// password response.
 pub struct AuthenticationMd5PasswordBody {
   salt : Bytes
 }
@@ -282,6 +316,18 @@ pub fn AuthenticationGssContinueBody::data(
 }
 
 ///|
+/// Body of `AuthenticationSASL`.
+///
+/// The payload is a sequence of protocol `String` mechanism names terminated by
+/// an extra zero byte.
+///
+/// Wire order after the authentication subtype:
+/// 1. repeated `String` SASL mechanism names
+/// 2. trailing zero byte terminator
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct AuthenticationSaslBody {
   data : Bytes
 }
@@ -295,6 +341,11 @@ pub fn AuthenticationSaslBody::mechanisms(
 }
 
 ///|
+/// Iterator over the NUL-terminated SASL mechanism list carried by
+/// `AuthenticationSASL`.
+///
+/// Each successful `next()` consumes one mechanism `String`. The final empty
+/// string on the wire is represented only as end-of-iterator.
 pub struct SaslMechanisms {
   mut buf : BytesView
 }
@@ -361,12 +412,33 @@ pub fn AuthenticationSaslFinalBody::data(
 }
 
 ///|
+/// Body of `BackendKeyData`.
+///
+/// Protocol 3.2 extends the secret key to a variable-length byte field. This
+/// parser still models the pre-3.2 fixed-width integer form and therefore
+/// documents the current implementation boundary.
+///
+/// Wire order on the server side:
+/// 1. `Int32` backend process ID
+/// 2. `Byte n` secret key bytes to end of message
+///
+/// Current implementation boundary:
+/// - parses step 2 as the historical pre-3.2 `Int32` form
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-overview.html
 pub struct BackendKeyDataBody {
   process_id : Int
   secret_key : Int
 }
 
 ///|
+/// Body of `CommandComplete`.
+///
+/// The backend command tag is textual metadata such as `INSERT 0 1` or
+/// `SELECT 3`.
 pub struct CommandCompleteBody {
   tag : Bytes
 }
@@ -397,6 +469,19 @@ pub fn CopyDataBody::data(self : CopyDataBody) -> BytesView {
 }
 
 ///|
+/// Body of `CopyInResponse`.
+///
+/// `format` is the overall COPY format (`0` text, `1` binary). The remaining
+/// payload is an `Int16[N]` array of per-column format codes.
+///
+/// Wire order:
+/// 1. `Int8` overall COPY format
+/// 2. `Int16 N` column count
+/// 3. `Int16[N]` per-column format codes
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct CopyInResponseBody {
   format : Byte
   len : Int
@@ -412,6 +497,8 @@ pub fn CopyInResponseBody::column_formats(
 }
 
 ///|
+/// Iterator over the `Int16[N]` column-format array used by COPY response
+/// messages.
 pub struct ColumnFormats {
   mut buf : BytesView
   mut remaining : Int
@@ -438,6 +525,12 @@ pub fn ColumnFormats::next(
 }
 
 ///|
+/// Body of `CopyOutResponse`.
+///
+/// Wire order matches `CopyInResponse`:
+/// 1. `Int8` overall COPY format
+/// 2. `Int16 N` column count
+/// 3. `Int16[N]` per-column format codes
 pub struct CopyOutResponseBody {
   format : Byte
   len : Int
@@ -453,6 +546,17 @@ pub fn CopyOutResponseBody::column_formats(
 }
 
 ///|
+/// Body of `DataRow`.
+///
+/// `len` is the number of columns. `storage` contains only the repeated
+/// `Int32 len + Byte n` field payloads that follow that count.
+///
+/// Full wire order:
+/// 1. `Int16 N` column count
+/// 2. repeated `N` times: `Int32 len`, then `Byte n` value bytes
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct DataRowBody {
   storage : Bytes
   len : Int
@@ -471,12 +575,20 @@ pub fn DataRowBody::buffer(self : DataRowBody) -> BytesView {
 }
 
 ///|
+/// Half-open byte range into `DataRowBody::buffer`.
 pub struct ByteRange {
   start : Int
   end : Int
 }
 
 ///|
+/// Iterator over the raw field slots of a `DataRow`.
+///
+/// Each element is `None` for SQL NULL or `Some(range)` identifying the value
+/// bytes inside the row buffer.
+///
+/// The returned byte ranges are offsets into `DataRowBody::buffer()`, not into
+/// the original full message frame.
 pub struct DataRowRanges {
   mut buf : BytesView
   len : Int
@@ -518,6 +630,18 @@ pub fn DataRowRanges::next(
 }
 
 ///|
+/// Body of `ErrorResponse`.
+///
+/// The payload is an unordered sequence of identified string fields terminated
+/// by a zero byte.
+///
+/// Wire order:
+/// 1. repeated fields: `Byte1 field_code`, then `String field_value`
+/// 2. trailing zero byte terminator
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
 pub struct ErrorResponseBody {
   storage : Bytes
 }
@@ -529,6 +653,11 @@ pub fn ErrorResponseBody::fields(self : ErrorResponseBody) -> ErrorFields {
 }
 
 ///|
+/// Iterator over the field list contained in `ErrorResponse` and
+/// `NoticeResponse`.
+///
+/// Field order is not semantically significant, but the iterator preserves the
+/// order received from the server.
 pub struct ErrorFields {
   mut buf : BytesView
 }
@@ -558,6 +687,13 @@ pub fn ErrorFields::next(
 }
 
 ///|
+/// One identified field from `ErrorResponse` or `NoticeResponse`.
+///
+/// `type_` is the field code from protocol Section 54.8, such as `S`, `V`,
+/// `C`, or `M`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
 pub struct ErrorField {
   type_ : Byte
   value : Bytes
@@ -570,6 +706,7 @@ pub fn ErrorField::value_bytes(self : ErrorField) -> BytesView {
 }
 
 ///|
+/// Body of `NoticeResponse`.
 pub struct NoticeResponseBody {
   storage : Bytes
 }
@@ -581,6 +718,9 @@ pub fn NoticeResponseBody::fields(self : NoticeResponseBody) -> ErrorFields {
 }
 
 ///|
+/// Body of `NotificationResponse`.
+///
+/// Carries the notifying backend PID, channel name, and textual payload.
 pub struct NotificationResponseBody {
   process_id : Int
   channel : Bytes
@@ -620,6 +760,16 @@ pub fn NotificationResponseBody::message_str(
 }
 
 ///|
+/// Body of `ParameterDescription`.
+///
+/// The payload is a count followed by one OID per query parameter.
+///
+/// Full wire order:
+/// 1. `Int16 N` parameter count
+/// 2. `Int32[N]` parameter type OIDs
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct ParameterDescriptionBody {
   storage : Bytes
   len : Int
@@ -634,6 +784,10 @@ pub fn ParameterDescriptionBody::parameters(
 }
 
 ///|
+/// Iterator over the parameter type OIDs stored in `ParameterDescription`.
+///
+/// The leading `Int16` count has already been stripped; `buf` starts at the
+/// first 4-byte OID.
 pub struct Parameters {
   mut buf : BytesView
   mut remaining : Int
@@ -660,6 +814,10 @@ pub fn Parameters::next(
 }
 
 ///|
+/// Body of `ParameterStatus`.
+///
+/// These messages report run-time parameters such as `client_encoding` and
+/// `server_version`.
 pub struct ParameterStatusBody {
   name : Bytes
   value : Bytes
@@ -696,11 +854,40 @@ pub fn ParameterStatusBody::value_str(
 }
 
 ///|
+/// Body of `ReadyForQuery`.
+///
+/// `status` is `I` when idle, `T` when inside a transaction block, and `E`
+/// when the transaction is failed and can only accept rollback-like commands.
+///
+/// Wire order:
+/// 1. single `Byte1` transaction status indicator
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct ReadyForQueryBody {
   status : Byte
 }
 
 ///|
+/// Body of `RowDescription`.
+///
+/// The payload is a field count followed by one field descriptor per result
+/// column.
+///
+/// Full wire order:
+/// 1. `Int16 N` result-column count
+/// 2. repeated `N` times:
+///    `String name`
+///    `Int32 table_oid`
+///    `Int16 column_id`
+///    `Int32 type_oid`
+///    `Int16 type_size`
+///    `Int32 type_modifier`
+///    `Int16 format`
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct RowDescriptionBody {
   storage : Bytes
   len : Int
@@ -713,6 +900,10 @@ pub fn RowDescriptionBody::fields(self : RowDescriptionBody) -> Fields {
 }
 
 ///|
+/// Iterator over the field descriptors stored in `RowDescription`.
+///
+/// The leading `Int16` field count has already been stripped; `buf` points at
+/// the first column descriptor.
 pub struct Fields {
   mut buf : BytesView
   mut remaining : Int
@@ -720,6 +911,10 @@ pub struct Fields {
 
 ///|
 /// Read the next described result field.
+///
+/// This decodes one descriptor in the exact order defined by protocol Section
+/// 54.7: name, table OID, attribute number, type OID, type size, type modifier,
+/// and format code.
 pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() == 0 {
@@ -753,6 +948,14 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
 }
 
 ///|
+/// One result-column descriptor from `RowDescription`.
+///
+/// `table_oid` and `column_id` are zero when the field does not map to a base
+/// table column. `format` follows the standard convention `0 = text`,
+/// `1 = binary`. Negative `type_size` values denote variable-width types.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
 pub struct Field {
   name : Bytes
   table_oid : @proto.Oid
@@ -776,6 +979,7 @@ pub fn Field::name_str(self : Field) -> String raise @proto.ProtocolError {
 }
 
 ///|
+/// Find the next NUL terminator used by backend protocol `String` values.
 fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
   let mut i = start
   while i < buf.length() {
@@ -788,6 +992,10 @@ fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
 }
 
 ///|
+/// Decode a backend string as UTF-8.
+///
+/// The client configures `client_encoding=UTF8` during startup, so backend text
+/// fields handled by this package are expected to decode successfully.
 fn decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
