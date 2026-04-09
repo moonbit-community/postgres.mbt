@@ -605,7 +605,7 @@ pub fn ArrayDimensions::next(
 pub struct ArrayDimension {
   len : Int
   lower_bound : Int
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Construct an array dimension descriptor.
@@ -800,7 +800,7 @@ pub fn point_from_sql(buf : BytesView) -> Point raise @proto.ProtocolError {
 pub struct Point {
   x : Double
   y : Double
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Serialize a box value.
@@ -835,7 +835,7 @@ pub fn box_from_sql(buf : BytesView) -> Box raise @proto.ProtocolError {
 pub struct Box {
   upper_right : Point
   lower_left : Point
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Serialize a path value.

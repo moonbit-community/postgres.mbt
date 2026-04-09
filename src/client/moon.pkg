@@ -15,3 +15,7 @@ import {
   "moonbitlang/async/socket",
   "moonbitlang/async/tls",
 }
+
+import {
+  "moonbitlang/core/debug",
+} for "wbtest"

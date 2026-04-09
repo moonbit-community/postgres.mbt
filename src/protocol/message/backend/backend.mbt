@@ -81,7 +81,7 @@ pub const READY_FOR_QUERY_TAG : Byte = b'Z'
 pub struct Header {
   tag : Byte
   len : Int
-} derive(Show)
+} derive(Debug)
 
 ///|
 /// Parse a backend message header if enough bytes are available.
@@ -560,7 +560,7 @@ pub fn CopyOutResponseBody::column_formats(
 pub struct DataRowBody {
   storage : Bytes
   len : Int
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Return an iterator over the raw value ranges in this row.

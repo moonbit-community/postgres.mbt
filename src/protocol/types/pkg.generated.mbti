@@ -4,6 +4,7 @@ package "moonbit-community/postgres/protocol/types"
 import {
   "moonbit-community/postgres/protocol",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -123,7 +124,7 @@ pub fn varbit_to_sql(Int, Iter[Byte], @buffer.Buffer) -> Unit raise @protocol.Pr
 pub struct ArrayDimension {
   len : Int
   lower_bound : Int
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn ArrayDimension::new(Int, Int) -> Self
 
 pub struct ArrayDimensions {
@@ -140,7 +141,7 @@ pub fn ArrayValues::next(Self) -> Bytes?? raise @protocol.ProtocolError
 pub struct Box {
   upper_right : Point
   lower_left : Point
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct HstoreEntries {
   mut remaining : Int
@@ -196,7 +197,7 @@ pub fn PgArray::values(Self) -> ArrayValues
 pub struct Point {
   x : Double
   y : Double
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub enum Range {
   Empty

@@ -3,6 +3,7 @@ package "moonbit-community/postgres/protocol"
 
 import {
   "moonbitlang/core/buffer",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -29,7 +30,7 @@ pub(all) suberror ProtocolError {
   InvalidInput(String)
   UnexpectedEof(String)
   Overflow(String)
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 // Types and methods
 pub struct ByteReader {

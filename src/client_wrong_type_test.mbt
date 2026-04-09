@@ -1,7 +1,7 @@
 ///|
 struct TextOnlyParam {
   value : String
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 impl @client.ToSql for TextOnlyParam with format(_, _) {
@@ -34,8 +34,8 @@ async test "integration wrong type errors on read and write" {
       .query_one("select 1::int4 as value")
       .get_name("value")
     let read_err = expect_wrong_type_error(read_result)
-    assert_eq(read_err.moonbit_type, "Int64")
-    assert_eq(read_err.postgres_type, @client.Type::int4())
+    @debug.assert_eq(read_err.moonbit_type, "Int64")
+    @debug.assert_eq(read_err.postgres_type, @client.Type::int4())
 
     let text_param : TextOnlyParam = { value: "moonbit" }
     let params : Array[&@client.ToSql] = [text_param as &@client.ToSql]
@@ -43,8 +43,8 @@ async test "integration wrong type errors on read and write" {
       .query_typed("select $1::int4 as value", [@client.Type::int4()], params~)
       .collect()
     let write_err = expect_wrong_type_error(write_result)
-    assert_eq(write_err.moonbit_type, "TextOnlyParam")
-    assert_eq(write_err.postgres_type, @client.Type::int4())
+    @debug.assert_eq(write_err.moonbit_type, "TextOnlyParam")
+    @debug.assert_eq(write_err.postgres_type, @client.Type::int4())
 
     client.close()
   })

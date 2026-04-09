@@ -3,6 +3,7 @@ package "moonbit-community/postgres/protocol/message/backend"
 
 import {
   "moonbit-community/postgres/protocol",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -119,7 +120,7 @@ pub fn CopyOutResponseBody::column_formats(Self) -> ColumnFormats
 pub struct DataRowBody {
   storage : Bytes
   len : Int
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn DataRowBody::buffer(Self) -> BytesView
 pub fn DataRowBody::ranges(Self) -> DataRowRanges
 
@@ -167,7 +168,7 @@ pub fn Fields::next(Self) -> Field? raise @protocol.ProtocolError
 pub struct Header {
   tag : Byte
   len : Int
-} derive(Show)
+} derive(@debug.Debug)
 pub fn Header::parse(BytesView) -> Self? raise @protocol.ProtocolError
 
 pub enum Message {
