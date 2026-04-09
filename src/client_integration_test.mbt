@@ -451,7 +451,7 @@ async test "integration simple query supports multiple result sets" {
       is Some(@client.SimpleQueryMessage::CommandComplete(right_tag)) else {
       fail("expected second command tag")
     }
-    assert_eq(stream.next(), None)
+    @debug.assert_eq(stream.next(), None)
     assert_eq(left_columns, ["side", "missing"])
     assert_eq(try! left_row.get_name("side"), Some("left"))
     assert_eq(try! left_row.get_name("missing"), None)
@@ -835,12 +835,14 @@ async test "integration copy out" {
     )
     let chunks : Array[Bytes] = []
     let payload = @buffer.new()
-    loop stream.next() {
-      None => ()
-      Some(chunk) => {
-        chunks.push(chunk)
-        payload.write_bytes(chunk)
-        continue stream.next()
+    for chunk = stream.next() {
+      match chunk {
+        None => break ()
+        Some(chunk) => {
+          chunks.push(chunk)
+          payload.write_bytes(chunk)
+          continue stream.next()
+        }
       }
     }
     assert_eq(stream.formats, [0, 0])
@@ -1037,7 +1039,7 @@ async test "integration query opt" {
     let none_row = client.query_opt(
       "select * from moon_driver_query_opt where name = 'dave'",
     )
-    assert_eq(none_row, None)
+    @debug.assert_eq(none_row, None)
 
     guard client.query_opt(
         "select * from moon_driver_query_opt where name = 'alice'",
@@ -1046,7 +1048,7 @@ async test "integration query opt" {
       fail("expected row")
     }
     let name : String = row.get_name("name")
-    assert_eq(name, "alice")
+    @debug.assert_eq(name, "alice")
 
     let many_message = expect_row_count_error(
       try? client.query_opt("select * from moon_driver_query_opt"),

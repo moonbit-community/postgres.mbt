@@ -56,25 +56,23 @@ async fn WireConnection::collect_until_ready(
   self : WireConnection,
 ) -> Array[@backend.Message] {
   let messages : Array[@backend.Message] = []
-  loop self.read_message() {
-    message => {
-      match message {
-        @backend.Message::ReadyForQuery(body) =>
-          self.transaction_status = body.status
-        @backend.Message::ParameterStatus(body) =>
-          self.parameters[body.name_str()] = body.value_str()
-        @backend.Message::BackendKeyData(body) => {
-          self.process_id = body.process_id
-          self.secret_key = body.secret_key
-        }
-        _ => ()
+  for message = self.read_message() {
+    match message {
+      @backend.Message::ReadyForQuery(body) =>
+        self.transaction_status = body.status
+      @backend.Message::ParameterStatus(body) =>
+        self.parameters[body.name_str()] = body.value_str()
+      @backend.Message::BackendKeyData(body) => {
+        self.process_id = body.process_id
+        self.secret_key = body.secret_key
       }
-      messages.push(message)
-      if message is @backend.Message::ReadyForQuery(_) {
-        messages
-      } else {
-        continue self.read_message()
-      }
+      _ => ()
+    }
+    messages.push(message)
+    if message is @backend.Message::ReadyForQuery(_) {
+      break messages
+    } else {
+      continue self.read_message()
     }
   }
 }
@@ -130,54 +128,56 @@ async fn wire_connect(
   connection.write_buffer(buf)
 
   let mut scram : @sasl.ScramSha256? = None
-  loop connection.read_message() {
-    @backend.Message::AuthenticationOk => continue connection.read_message()
-    @backend.Message::AuthenticationCleartextPassword => {
-      wire_send_password(connection, config.password)
-      continue connection.read_message()
+  for message = connection.read_message() {
+    match message {
+      @backend.Message::AuthenticationOk => continue connection.read_message()
+      @backend.Message::AuthenticationCleartextPassword => {
+        wire_send_password(connection, config.password)
+        continue connection.read_message()
+      }
+      @backend.Message::AuthenticationMd5Password(body) => {
+        wire_send_md5_password(
+          connection,
+          config.user,
+          config.password,
+          body.salt,
+        )
+        continue connection.read_message()
+      }
+      @backend.Message::AuthenticationSasl(body) => {
+        scram = Some(wire_begin_scram(connection, body, config.password))
+        continue connection.read_message()
+      }
+      @backend.Message::AuthenticationSaslContinue(body) => {
+        wire_continue_scram(connection, scram, body.data())
+        continue connection.read_message()
+      }
+      @backend.Message::AuthenticationSaslFinal(body) => {
+        wire_finish_scram(scram, body.data())
+        continue connection.read_message()
+      }
+      @backend.Message::ParameterStatus(body) => {
+        ignore(body.name_bytes())
+        ignore(body.value_bytes())
+        connection.parameters[body.name_str()] = body.value_str()
+        continue connection.read_message()
+      }
+      @backend.Message::BackendKeyData(body) => {
+        connection.process_id = body.process_id
+        connection.secret_key = body.secret_key
+        continue connection.read_message()
+      }
+      @backend.Message::NoticeResponse(_) => continue connection.read_message()
+      @backend.Message::ReadyForQuery(body) => {
+        connection.transaction_status = body.status
+        break connection
+      }
+      @backend.Message::ErrorResponse(body) => {
+        let err = parse_wire_database_error(body.fields())
+        fail("startup failed: \{err.message}")
+      }
+      _ => fail("unexpected startup message")
     }
-    @backend.Message::AuthenticationMd5Password(body) => {
-      wire_send_md5_password(
-        connection,
-        config.user,
-        config.password,
-        body.salt,
-      )
-      continue connection.read_message()
-    }
-    @backend.Message::AuthenticationSasl(body) => {
-      scram = Some(wire_begin_scram(connection, body, config.password))
-      continue connection.read_message()
-    }
-    @backend.Message::AuthenticationSaslContinue(body) => {
-      wire_continue_scram(connection, scram, body.data())
-      continue connection.read_message()
-    }
-    @backend.Message::AuthenticationSaslFinal(body) => {
-      wire_finish_scram(scram, body.data())
-      continue connection.read_message()
-    }
-    @backend.Message::ParameterStatus(body) => {
-      ignore(body.name_bytes())
-      ignore(body.value_bytes())
-      connection.parameters[body.name_str()] = body.value_str()
-      continue connection.read_message()
-    }
-    @backend.Message::BackendKeyData(body) => {
-      connection.process_id = body.process_id
-      connection.secret_key = body.secret_key
-      continue connection.read_message()
-    }
-    @backend.Message::NoticeResponse(_) => continue connection.read_message()
-    @backend.Message::ReadyForQuery(body) => {
-      connection.transaction_status = body.status
-      connection
-    }
-    @backend.Message::ErrorResponse(body) => {
-      let err = parse_wire_database_error(body.fields())
-      fail("startup failed: \{err.message}")
-    }
-    _ => fail("unexpected startup message")
   }
 }
 
@@ -262,14 +262,16 @@ fn wire_require_scram(scram : @sasl.ScramSha256?) -> @sasl.ScramSha256 raise {
 ///|
 fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
-  loop mechanisms.next() {
-    None => false
-    Some(mechanism) =>
-      if mechanism == @sasl.SCRAM_SHA_256 {
-        true
-      } else {
-        continue mechanisms.next()
-      }
+  for mechanism = mechanisms.next() {
+    match mechanism {
+      None => break false
+      Some(mechanism) =>
+        if mechanism == @sasl.SCRAM_SHA_256 {
+          break true
+        } else {
+          continue mechanisms.next()
+        }
+    }
   }
 }
 
@@ -300,26 +302,28 @@ fn parse_wire_database_error(
   let mut message = None
   let mut detail = None
   let mut hint = None
-  loop fields.next() {
-    None =>
-      {
-        severity,
-        code,
-        message: message.unwrap_or("database error"),
-        detail,
-        hint,
+  for field = fields.next() {
+    match field {
+      None =>
+        break {
+          severity,
+          code,
+          message: message.unwrap_or("database error"),
+          detail,
+          hint,
+        }
+      Some(field) => {
+        let value = wire_decode_utf8(field.value_bytes())
+        match field.type_ {
+          b'S' | b'V' => severity = Some(value)
+          b'C' => code = Some(value)
+          b'M' => message = Some(value)
+          b'D' => detail = Some(value)
+          b'H' => hint = Some(value)
+          _ => ()
+        }
+        continue fields.next()
       }
-    Some(field) => {
-      let value = wire_decode_utf8(field.value_bytes())
-      match field.type_ {
-        b'S' | b'V' => severity = Some(value)
-        b'C' => code = Some(value)
-        b'M' => message = Some(value)
-        b'D' => detail = Some(value)
-        b'H' => hint = Some(value)
-        _ => ()
-      }
-      continue fields.next()
     }
   }
 }
@@ -331,15 +335,17 @@ fn data_row_texts(
   let out : Array[String?] = []
   let ranges = body.ranges()
   let buffer = body.buffer()
-  loop ranges.next() {
-    None => out
-    Some(None) => {
-      out.push(None)
-      continue ranges.next()
-    }
-    Some(Some(range)) => {
-      out.push(Some(wire_decode_utf8(buffer[range.start:range.end])))
-      continue ranges.next()
+  for range = ranges.next() {
+    match range {
+      None => break out
+      Some(None) => {
+        out.push(None)
+        continue ranges.next()
+      }
+      Some(Some(range)) => {
+        out.push(Some(wire_decode_utf8(buffer[range.start:range.end])))
+        continue ranges.next()
+      }
     }
   }
 }
@@ -907,15 +913,18 @@ async test "integration protocol notice and notification getters" {
   let notice = find_notice_response(notice_messages)
   let notice_fields = notice.fields()
   let mut saw_message = false
-  loop notice_fields.next() {
-    None => break
-    Some(field) =>
-      if field.type_ == b'M' {
-        saw_message = true
-        assert_eq(wire_decode_utf8(field.value_bytes()), "wire notice")
-      } else {
-        continue notice_fields.next()
-      }
+  for field = notice_fields.next() {
+    match field {
+      None => break ()
+      Some(field) =>
+        if field.type_ == b'M' {
+          saw_message = true
+          assert_eq(wire_decode_utf8(field.value_bytes()), "wire notice")
+          break ()
+        } else {
+          continue notice_fields.next()
+        }
+    }
   }
   assert_true(saw_message)
 

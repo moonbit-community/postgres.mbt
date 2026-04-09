@@ -1,7 +1,7 @@
 ///|
 struct OnlyInt8Value {
   value : Int64
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 impl FromSql for OnlyInt8Value with accepts(type_) {
@@ -42,6 +42,6 @@ test "row get reports wrong type before custom decoder" {
   guard result is Err(ClientError::WrongType(err)) else {
     fail("expected wrong type error")
   }
-  assert_eq(err.moonbit_type, "OnlyInt8Value")
-  assert_eq(err.postgres_type, Type::int4())
+  @debug.assert_eq(err.moonbit_type, "OnlyInt8Value")
+  @debug.assert_eq(err.postgres_type, Type::int4())
 }

@@ -9,7 +9,7 @@ pub(all) suberror ProtocolError {
   InvalidInput(String)
   UnexpectedEof(String)
   Overflow(String)
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// A PostgreSQL object identifier.

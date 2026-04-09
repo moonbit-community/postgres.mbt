@@ -4,6 +4,7 @@ package "moonbit-community/postgres/client"
 import {
   "moonbit-community/postgres/protocol",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -22,14 +23,14 @@ pub suberror ClientError {
   ColumnNotFound(String)
   RowCount(String)
   UnexpectedMessage(String)
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 // Types and methods
 pub enum AsyncMessage {
   Notice(DatabaseError)
   Notification(Notification)
   ParameterStatus(String, String)
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 type CancelToken
 pub async fn CancelToken::cancel(Self) -> Unit
@@ -70,7 +71,7 @@ pub struct Column {
   type_size : Int
   type_modifier : Int
   format : Int
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct Config {
   host : String
@@ -80,7 +81,7 @@ pub struct Config {
   password : String?
   ssl_mode : SslMode
   application_name : String
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn Config::new(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
 
 type Connection
@@ -107,12 +108,12 @@ pub struct DatabaseError {
   message : String
   detail : String?
   hint : String?
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct Field {
   name : String
   type_oid : UInt
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub enum Kind {
   Simple
@@ -123,13 +124,13 @@ pub enum Kind {
   Range(UInt)
   Pseudo
   Unknown
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct Notification {
   process_id : Int
   channel : String
   payload : String
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct Portal {
   columns : Array[Column]
@@ -141,12 +142,12 @@ pub struct QuerySummary {
   command_tag : String
   row_count : Int
   suspended : Bool
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn[T : FromSql] Row::get(Self, Int) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
 pub fn Row::get_raw(Self, Int) -> Bytes?
@@ -170,12 +171,12 @@ pub enum SimpleQueryMessage {
   RowDescription(Array[String])
   Row(SimpleQueryRow)
   CommandComplete(String)
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 pub struct SimpleQueryRow {
   columns : Array[String]
   values : Array[String?]
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn SimpleQueryRow::get(Self, Int) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
 pub fn SimpleQueryRow::index_of(Self, String) -> Int?
@@ -190,7 +191,7 @@ pub enum SslMode {
   Disable
   Prefer
   Require
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn SslMode::disable() -> Self
 pub fn SslMode::prefer() -> Self
 pub fn SslMode::require() -> Self
@@ -223,7 +224,7 @@ pub struct Type {
   oid : UInt
   name : String
   kind : Kind
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 pub fn Type::bool() -> Self
 pub fn Type::bool_array() -> Self
 pub fn Type::bytea() -> Self
@@ -260,7 +261,7 @@ pub fn Type::varchar_array() -> Self
 pub struct WrongTypeError {
   moonbit_type : String
   postgres_type : Type
-} derive(Eq, Show)
+} derive(Eq, @debug.Debug)
 
 // Type aliases
 

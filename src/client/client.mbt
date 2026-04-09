@@ -497,29 +497,33 @@ pub async fn Client::bind(
   )
   let mut columns = statement.columns
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::BindComplete => continue responses.get()
-    @backend.Message::RowDescription(body) => {
-      columns = parse_columns(body)
-      continue responses.get()
-    }
-    @backend.Message::NoData => continue responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None =>
-          {
-            client: self,
-            name,
-            columns: resolve_columns(self.shared, columns),
-            closed: @ref.new(false),
-          }
+  for res = responses.get() {
+    match res {
+      @backend.Message::BindComplete => continue responses.get()
+      @backend.Message::RowDescription(body) => {
+        columns = parse_columns(body)
+        continue responses.get()
       }
-    _ => raise ClientError::UnexpectedMessage("unexpected bind response")
+      @backend.Message::NoData => continue responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => {
+            let portal = Portal::{
+              client: self,
+              name,
+              columns: resolve_columns(self.shared, columns),
+              closed: @ref.new(false),
+            }
+            break portal
+          }
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected bind response")
+    }
   }
 }
 
@@ -573,19 +577,22 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
   let input = @async.Queue::new(kind=Unbounded)
   let responses = self.send_request_with_copy(simple_query_bytes(sql), input)
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::CopyInResponse(_) =>
-      return { input, responses, finished: @ref.new(false) }
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None => raise ClientError::UnexpectedMessage("expected CopyInResponse")
+  for res = responses.get() {
+    match res {
+      @backend.Message::CopyInResponse(_) =>
+        return { input, responses, finished: @ref.new(false) }
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
       }
-    _ => raise ClientError::UnexpectedMessage("unexpected copy-in response")
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None =>
+            raise ClientError::UnexpectedMessage("expected CopyInResponse")
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected copy-in response")
+    }
   }
 }
 
@@ -988,24 +995,26 @@ async fn Connection::drain_copy_input(
   self : Connection,
   input : @async.Queue[CopyInAction],
 ) -> Unit {
-  loop input.get() {
-    CopyInAction::Data(data) => {
-      let payload = @buffer.new()
-      @frontend.CopyData::new(data[:]).write(payload)
-      self.stream.write(payload.to_bytes())
-      continue input.get()
-    }
-    CopyInAction::Finish => {
-      let payload = @buffer.new()
-      @frontend.copy_done(payload)
-      self.stream.write(payload.to_bytes())
-      return
-    }
-    CopyInAction::Fail(message) => {
-      let payload = @buffer.new()
-      @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
-      self.stream.write(payload.to_bytes())
-      return
+  for act = input.get() {
+    match act {
+      CopyInAction::Data(data) => {
+        let payload = @buffer.new()
+        @frontend.CopyData::new(data[:]).write(payload)
+        self.stream.write(payload.to_bytes())
+        continue input.get()
+      }
+      CopyInAction::Finish => {
+        let payload = @buffer.new()
+        @frontend.copy_done(payload)
+        self.stream.write(payload.to_bytes())
+        return
+      }
+      CopyInAction::Fail(message) => {
+        let payload = @buffer.new()
+        @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
+        self.stream.write(payload.to_bytes())
+        return
+      }
     }
   }
 }
@@ -1338,11 +1347,13 @@ fn parse_parameter_oids(
 ) -> Array[@proto.Oid] raise {
   let types : Array[@proto.Oid] = []
   let params = body.parameters()
-  loop params.next() {
-    None => types
-    Some(oid) => {
-      types.push(oid)
-      continue params.next()
+  for param = params.next() {
+    match param {
+      None => break types
+      Some(oid) => {
+        types.push(oid)
+        continue params.next()
+      }
     }
   }
 }
@@ -1573,24 +1584,27 @@ async fn start_copy_out(
   responses : @async.Queue[@backend.Message],
 ) -> CopyOutStream {
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::CopyOutResponse(body) =>
-      return {
-        responses,
-        formats: parse_copy_formats(body.column_formats()),
-        database_error,
-        finished: false,
+  for res = responses.get() {
+    match res {
+      @backend.Message::CopyOutResponse(body) =>
+        return {
+          responses,
+          formats: parse_copy_formats(body.column_formats()),
+          database_error,
+          finished: false,
+        }
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
       }
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None =>
+            raise ClientError::UnexpectedMessage("expected CopyOutResponse")
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected copy out response")
     }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None => raise ClientError::UnexpectedMessage("expected CopyOutResponse")
-      }
-    _ => raise ClientError::UnexpectedMessage("unexpected copy out response")
   }
 }
 
@@ -1602,31 +1616,35 @@ async fn read_prepare_response(
   let mut param_oids : Array[@proto.Oid] = []
   let mut columns : Array[Column] = []
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::ParseComplete => continue responses.get()
-    @backend.Message::ParameterDescription(body) => {
-      param_oids = parse_parameter_oids(body)
-      continue responses.get()
-    }
-    @backend.Message::RowDescription(body) => {
-      columns = parse_columns(body)
-      continue responses.get()
-    }
-    @backend.Message::NoData => continue responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None =>
-          (
-            resolve_parameter_types(shared, param_oids),
-            resolve_columns(shared, columns),
-          )
+  for res = responses.get() {
+    match res {
+      @backend.Message::ParseComplete => continue responses.get()
+      @backend.Message::ParameterDescription(body) => {
+        param_oids = parse_parameter_oids(body)
+        continue responses.get()
       }
-    _ => raise ClientError::UnexpectedMessage("unexpected prepare response")
+      @backend.Message::RowDescription(body) => {
+        columns = parse_columns(body)
+        continue responses.get()
+      }
+      @backend.Message::NoData => continue responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => {
+            let result = (
+              resolve_parameter_types(shared, param_oids),
+              resolve_columns(shared, columns),
+            )
+            break result
+          }
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected prepare response")
+    }
   }
 }
 
@@ -1636,22 +1654,24 @@ async fn collect_copy_in_completion(
 ) -> Int {
   let mut command_tag = ""
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::CommandComplete(body) => {
-      command_tag = body.tag_str()
-      continue responses.get()
-    }
-    @backend.Message::CopyDone => continue responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None => rows_affected(command_tag)
+  for res = responses.get() {
+    match res {
+      @backend.Message::CommandComplete(body) => {
+        command_tag = body.tag_str()
+        continue responses.get()
       }
-    _ => raise ClientError::UnexpectedMessage("unexpected copy in completion")
+      @backend.Message::CopyDone => continue responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => break rows_affected(command_tag)
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected copy in completion")
+    }
   }
 }
 
@@ -1660,18 +1680,20 @@ async fn drain_close_response(
   responses : @async.Queue[@backend.Message],
 ) -> Unit {
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::CloseComplete => continue responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None => ()
+  for res = responses.get() {
+    match res {
+      @backend.Message::CloseComplete => continue responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
       }
-    _ => raise ClientError::UnexpectedMessage("unexpected close response")
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => break ()
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected close response")
+    }
   }
 }
 
@@ -1688,22 +1710,26 @@ async fn drain_sync_response(
 ///|
 async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit {
   let mut database_error : DatabaseError? = None
-  loop responses.get() {
-    @backend.Message::CommandComplete(_)
-    | @backend.Message::EmptyQueryResponse
-    | @backend.Message::RowDescription(_)
-    | @backend.Message::DataRow(_) => continue responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      database_error = Some(parse_database_error(body.fields()))
-      continue responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) =>
-      match database_error {
-        Some(err) => raise ClientError::Database(err)
-        None => ()
+  for res = responses.get() {
+    match res {
+      @backend.Message::CommandComplete(_)
+      | @backend.Message::EmptyQueryResponse
+      | @backend.Message::RowDescription(_)
+      | @backend.Message::DataRow(_) => continue responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
       }
-    _ =>
-      raise ClientError::UnexpectedMessage("unexpected batch execute response")
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => break ()
+        }
+      _ =>
+        raise ClientError::UnexpectedMessage(
+          "unexpected batch execute response",
+        )
+    }
   }
 }
 
@@ -1787,53 +1813,65 @@ async fn startup(stream : Stream, config : Config) -> StartupState {
   let mut secret_key = 0
   let mut transaction_status = b'I'
   let mut scram : @sasl.ScramSha256? = None
-  loop read_message(stream) {
-    @backend.Message::AuthenticationOk => continue read_message(stream)
-    @backend.Message::AuthenticationCleartextPassword => {
-      send_password_message(stream, config.password)
-      continue read_message(stream)
+  for msg = read_message(stream) {
+    match msg {
+      @backend.Message::AuthenticationOk => continue read_message(stream)
+      @backend.Message::AuthenticationCleartextPassword => {
+        send_password_message(stream, config.password)
+        continue read_message(stream)
+      }
+      @backend.Message::AuthenticationMd5Password(body) => {
+        send_md5_password_message(
+          stream,
+          config.user,
+          config.password,
+          body.salt,
+        )
+        continue read_message(stream)
+      }
+      @backend.Message::AuthenticationSasl(body) => {
+        scram = Some(begin_scram(stream, body, config.password))
+        continue read_message(stream)
+      }
+      @backend.Message::AuthenticationSaslContinue(body) => {
+        continue_scram(stream, scram, body.data())
+        continue read_message(stream)
+      }
+      @backend.Message::AuthenticationSaslFinal(body) => {
+        finish_scram(scram, body.data())
+        continue read_message(stream)
+      }
+      @backend.Message::ParameterStatus(body) => {
+        status[body.name_str()] = body.value_str()
+        continue read_message(stream)
+      }
+      @backend.Message::BackendKeyData(body) => {
+        process_id = body.process_id
+        secret_key = body.secret_key
+        continue read_message(stream)
+      }
+      @backend.Message::NoticeResponse(_) => continue read_message(stream)
+      @backend.Message::ReadyForQuery(body) => {
+        transaction_status = body.status
+        return {
+          process_id,
+          secret_key,
+          parameters: status,
+          transaction_status,
+        }
+      }
+      @backend.Message::ErrorResponse(body) =>
+        raise ClientError::Database(parse_database_error(body.fields()))
+      @backend.Message::AuthenticationKerberosV5
+      | @backend.Message::AuthenticationScmCredential
+      | @backend.Message::AuthenticationGss
+      | @backend.Message::AuthenticationGssContinue(_)
+      | @backend.Message::AuthenticationSspi =>
+        raise ClientError::Authentication(
+          "server requested an unsupported authentication method",
+        )
+      _ => raise ClientError::UnexpectedMessage("unexpected startup message")
     }
-    @backend.Message::AuthenticationMd5Password(body) => {
-      send_md5_password_message(stream, config.user, config.password, body.salt)
-      continue read_message(stream)
-    }
-    @backend.Message::AuthenticationSasl(body) => {
-      scram = Some(begin_scram(stream, body, config.password))
-      continue read_message(stream)
-    }
-    @backend.Message::AuthenticationSaslContinue(body) => {
-      continue_scram(stream, scram, body.data())
-      continue read_message(stream)
-    }
-    @backend.Message::AuthenticationSaslFinal(body) => {
-      finish_scram(scram, body.data())
-      continue read_message(stream)
-    }
-    @backend.Message::ParameterStatus(body) => {
-      status[body.name_str()] = body.value_str()
-      continue read_message(stream)
-    }
-    @backend.Message::BackendKeyData(body) => {
-      process_id = body.process_id
-      secret_key = body.secret_key
-      continue read_message(stream)
-    }
-    @backend.Message::NoticeResponse(_) => continue read_message(stream)
-    @backend.Message::ReadyForQuery(body) => {
-      transaction_status = body.status
-      return { process_id, secret_key, parameters: status, transaction_status }
-    }
-    @backend.Message::ErrorResponse(body) =>
-      raise ClientError::Database(parse_database_error(body.fields()))
-    @backend.Message::AuthenticationKerberosV5
-    | @backend.Message::AuthenticationScmCredential
-    | @backend.Message::AuthenticationGss
-    | @backend.Message::AuthenticationGssContinue(_)
-    | @backend.Message::AuthenticationSspi =>
-      raise ClientError::Authentication(
-        "server requested an unsupported authentication method",
-      )
-    _ => raise ClientError::UnexpectedMessage("unexpected startup message")
   }
 }
 
@@ -1942,13 +1980,15 @@ fn require_scram(scram : @sasl.ScramSha256?) -> @sasl.ScramSha256 raise {
 ///|
 fn supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
-  loop mechanisms.next() {
-    None => false
-    Some(mechanism) =>
-      if mechanism == @sasl.SCRAM_SHA_256 {
-        true
-      } else {
-        continue mechanisms.next()
-      }
+  for mechanism = mechanisms.next() {
+    match mechanism {
+      None => break false
+      Some(mechanism) =>
+        if mechanism == @sasl.SCRAM_SHA_256 {
+          break true
+        } else {
+          continue mechanisms.next()
+        }
+    }
   }
 }

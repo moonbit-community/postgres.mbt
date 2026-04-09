@@ -3,7 +3,7 @@ pub enum SslMode {
   Disable
   Prefer
   Require
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Return the `Disable` SSL mode.
@@ -32,7 +32,7 @@ pub struct Config {
   password : String?
   ssl_mode : SslMode
   application_name : String
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Create a client configuration.
@@ -55,13 +55,13 @@ pub struct DatabaseError {
   message : String
   detail : String?
   hint : String?
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct WrongTypeError {
   moonbit_type : String
   postgres_type : Type
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub suberror ClientError {
@@ -76,7 +76,7 @@ pub suberror ClientError {
   ColumnNotFound(String)
   RowCount(String)
   UnexpectedMessage(String)
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub enum Kind {
@@ -88,20 +88,20 @@ pub enum Kind {
   Range(@proto.Oid)
   Pseudo
   Unknown
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct Field {
   name : String
   type_oid : @proto.Oid
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct Type {
   oid : @proto.Oid
   name : String
   kind : Kind
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Return the built-in PostgreSQL `bool` type descriptor.
@@ -762,13 +762,13 @@ pub struct Column {
   type_size : Int
   type_modifier : Int
   format : Int
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct Row {
   columns : Array[Column]
   values : Array[Bytes?]
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Return the number of values in this row.
@@ -859,7 +859,7 @@ pub struct QuerySummary {
   command_tag : String
   row_count : Int
   suspended : Bool
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct RowStream {
@@ -880,46 +880,49 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
     Some(_) => return self.raise_terminal_error_or_none()
     None => ()
   }
-  loop self.responses.get() {
-    @backend.Message::ParseComplete
-    | @backend.Message::BindComplete
-    | @backend.Message::CloseComplete
-    | @backend.Message::ParameterDescription(_) => continue self.responses.get()
-    @backend.Message::NoData => continue self.responses.get()
-    @backend.Message::RowDescription(body) => {
-      self.columns = merge_stream_columns(self.columns, body)
-      continue self.responses.get()
+  for res = self.responses.get() {
+    match res {
+      @backend.Message::ParseComplete
+      | @backend.Message::BindComplete
+      | @backend.Message::CloseComplete
+      | @backend.Message::ParameterDescription(_) =>
+        continue self.responses.get()
+      @backend.Message::NoData => continue self.responses.get()
+      @backend.Message::RowDescription(body) => {
+        self.columns = merge_stream_columns(self.columns, body)
+        continue self.responses.get()
+      }
+      @backend.Message::DataRow(body) => {
+        self.row_count += 1
+        return Some({ columns: self.columns, values: parse_binary_values(body) })
+      }
+      @backend.Message::CommandComplete(body) => {
+        self.command_tag = body.tag_str()
+        continue self.responses.get()
+      }
+      @backend.Message::PortalSuspended => {
+        self.suspended = true
+        continue self.responses.get()
+      }
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.summary = Some({
+          command_tag: self.command_tag,
+          row_count: self.row_count,
+          suspended: self.suspended,
+        })
+        self.run_cleanup()
+        return self.raise_terminal_error_or_none()
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected query response"),
+        )
     }
-    @backend.Message::DataRow(body) => {
-      self.row_count += 1
-      return Some({ columns: self.columns, values: parse_binary_values(body) })
-    }
-    @backend.Message::CommandComplete(body) => {
-      self.command_tag = body.tag_str()
-      continue self.responses.get()
-    }
-    @backend.Message::PortalSuspended => {
-      self.suspended = true
-      continue self.responses.get()
-    }
-    @backend.Message::ErrorResponse(body) => {
-      self.database_error = Some(parse_database_error(body.fields()))
-      continue self.responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) => {
-      self.summary = Some({
-        command_tag: self.command_tag,
-        row_count: self.row_count,
-        suspended: self.suspended,
-      })
-      self.run_cleanup()
-      return self.raise_terminal_error_or_none()
-    }
-    _ =>
-      fail_response_stream(
-        self.responses,
-        ClientError::UnexpectedMessage("unexpected query response"),
-      )
   }
 }
 
@@ -927,11 +930,13 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
 /// Collect all remaining rows into an array.
 pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
   let rows : Array[Row] = []
-  loop self.next() {
-    None => rows
-    Some(row) => {
-      rows.push(row)
-      continue self.next()
+  for row = self.next() {
+    match row {
+      None => break rows
+      Some(row) => {
+        rows.push(row)
+        continue self.next()
+      }
     }
   }
 }
@@ -939,9 +944,11 @@ pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
 ///|
 /// Drain the stream and return its final query summary.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
-  loop self.next() {
-    Some(_) => continue self.next()
-    None => self.summary.unwrap()
+  for row = self.next() {
+    match row {
+      Some(_) => continue self.next()
+      None => break self.summary.unwrap()
+    }
   }
 }
 
@@ -949,7 +956,7 @@ pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
 pub struct SimpleQueryRow {
   columns : Array[String]
   values : Array[String?]
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 /// Return the number of values in this row.
@@ -991,7 +998,7 @@ pub enum SimpleQueryMessage {
   RowDescription(Array[String])
   Row(SimpleQueryRow)
   CommandComplete(String)
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 struct SimpleQueryStream {
@@ -1009,34 +1016,36 @@ pub async fn SimpleQueryStream::next(
   if self.finished {
     return self.raise_terminal_error_or_none()
   }
-  loop self.responses.get() {
-    @backend.Message::RowDescription(body) => {
-      self.columns = parse_column_names(body)
-      return Some(SimpleQueryMessage::RowDescription(self.columns))
+  for response = self.responses.get() {
+    match response {
+      @backend.Message::RowDescription(body) => {
+        self.columns = parse_column_names(body)
+        return Some(SimpleQueryMessage::RowDescription(self.columns))
+      }
+      @backend.Message::DataRow(body) =>
+        return Some(SimpleQueryMessage::Row(parse_text_row(body, self.columns)))
+      @backend.Message::CommandComplete(body) => {
+        self.columns = []
+        return Some(SimpleQueryMessage::CommandComplete(body.tag_str()))
+      }
+      @backend.Message::EmptyQueryResponse => {
+        self.columns = []
+        return Some(SimpleQueryMessage::CommandComplete(""))
+      }
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.finished = true
+        return self.raise_terminal_error_or_none()
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected simple query response"),
+        )
     }
-    @backend.Message::DataRow(body) =>
-      return Some(SimpleQueryMessage::Row(parse_text_row(body, self.columns)))
-    @backend.Message::CommandComplete(body) => {
-      self.columns = []
-      return Some(SimpleQueryMessage::CommandComplete(body.tag_str()))
-    }
-    @backend.Message::EmptyQueryResponse => {
-      self.columns = []
-      return Some(SimpleQueryMessage::CommandComplete(""))
-    }
-    @backend.Message::ErrorResponse(body) => {
-      self.database_error = Some(parse_database_error(body.fields()))
-      continue self.responses.get()
-    }
-    @backend.Message::ReadyForQuery(_) => {
-      self.finished = true
-      return self.raise_terminal_error_or_none()
-    }
-    _ =>
-      fail_response_stream(
-        self.responses,
-        ClientError::UnexpectedMessage("unexpected simple query response"),
-      )
   }
 }
 
@@ -1046,11 +1055,13 @@ pub async fn SimpleQueryStream::collect(
   self : SimpleQueryStream,
 ) -> Array[SimpleQueryMessage] {
   let messages : Array[SimpleQueryMessage] = []
-  loop self.next() {
-    None => messages
-    Some(message) => {
-      messages.push(message)
-      continue self.next()
+  for msg = self.next() {
+    match msg {
+      None => break messages
+      Some(message) => {
+        messages.push(message)
+        continue self.next()
+      }
     }
   }
 }
@@ -1058,9 +1069,11 @@ pub async fn SimpleQueryStream::collect(
 ///|
 /// Drain the simple-query stream.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
-  loop self.next() {
-    Some(_) => continue self.next()
-    None => ()
+  for msg = self.next() {
+    match msg {
+      Some(_) => continue self.next()
+      None => break ()
+    }
   }
 }
 
@@ -1069,14 +1082,14 @@ pub struct Notification {
   process_id : Int
   channel : String
   payload : String
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub enum AsyncMessage {
   Notice(DatabaseError)
   Notification(Notification)
   ParameterStatus(String, String)
-} derive(Show, Eq)
+} derive(Debug, Eq)
 
 ///|
 pub struct CopyOutStream {
@@ -1092,23 +1105,25 @@ pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
   if self.finished {
     return self.raise_terminal_error_or_none()
   }
-  loop self.responses.get() {
-    @backend.Message::CopyData(body) => return Some(body.storage)
-    @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
-      continue self.responses.get()
-    @backend.Message::ErrorResponse(body) => {
-      self.database_error = Some(parse_database_error(body.fields()))
-      continue self.responses.get()
+  for response = self.responses.get() {
+    match response {
+      @backend.Message::CopyData(body) => return Some(body.storage)
+      @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
+        continue self.responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.finished = true
+        return self.raise_terminal_error_or_none()
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected copy out response"),
+        )
     }
-    @backend.Message::ReadyForQuery(_) => {
-      self.finished = true
-      return self.raise_terminal_error_or_none()
-    }
-    _ =>
-      fail_response_stream(
-        self.responses,
-        ClientError::UnexpectedMessage("unexpected copy out response"),
-      )
   }
 }
 
@@ -1116,11 +1131,13 @@ pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
 /// Collect all remaining COPY OUT data chunks.
 pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
   let chunks : Array[Bytes] = []
-  loop self.next() {
-    None => chunks
-    Some(chunk) => {
-      chunks.push(chunk)
-      continue self.next()
+  for chunk = self.next() {
+    match chunk {
+      None => break chunks
+      Some(chunk) => {
+        chunks.push(chunk)
+        continue self.next()
+      }
     }
   }
 }
@@ -1128,9 +1145,12 @@ pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
 ///|
 /// Drain the COPY OUT stream.
 pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
-  loop self.next() {
-    Some(_) => continue self.next()
-    None => ()
+  for bytes = self.next() {
+    if bytes is Some(_) {
+      continue self.next()
+    } else {
+      break ()
+    }
   }
 }
 
@@ -1138,19 +1158,21 @@ pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
 fn parse_columns(body : @backend.RowDescriptionBody) -> Array[Column] raise {
   let columns : Array[Column] = []
   let fields = body.fields()
-  loop fields.next() {
-    None => columns
-    Some(field) => {
-      columns.push({
-        name: field.name_str(),
-        table_oid: field.table_oid,
-        column_id: field.column_id,
-        type_: resolve_type(field.type_oid),
-        type_size: field.type_size,
-        type_modifier: field.type_modifier,
-        format: field.format,
-      })
-      continue fields.next()
+  for field = fields.next() {
+    match field {
+      None => break columns
+      Some(field) => {
+        columns.push({
+          name: field.name_str(),
+          table_oid: field.table_oid,
+          column_id: field.column_id,
+          type_: resolve_type(field.type_oid),
+          type_size: field.type_size,
+          type_modifier: field.type_modifier,
+          format: field.format,
+        })
+        continue fields.next()
+      }
     }
   }
 }
@@ -1162,15 +1184,17 @@ fn parse_binary_values(
   let values : Array[Bytes?] = []
   let ranges = body.ranges()
   let buffer = body.buffer()
-  loop ranges.next() {
-    None => values
-    Some(None) => {
-      values.push(None)
-      continue ranges.next()
-    }
-    Some(Some(range)) => {
-      values.push(Some(buffer[range.start:range.end].to_bytes()))
-      continue ranges.next()
+  for range = ranges.next() {
+    match range {
+      None => break values
+      Some(None) => {
+        values.push(None)
+        continue ranges.next()
+      }
+      Some(Some(range)) => {
+        values.push(Some(buffer[range.start:range.end].to_bytes()))
+        continue ranges.next()
+      }
     }
   }
 }
@@ -1183,15 +1207,17 @@ fn parse_text_row(
   let values : Array[String?] = []
   let ranges = body.ranges()
   let buffer = body.buffer()
-  loop ranges.next() {
-    None => { columns, values }
-    Some(None) => {
-      values.push(None)
-      continue ranges.next()
-    }
-    Some(Some(range)) => {
-      values.push(Some(decode_utf8(buffer[range.start:range.end])))
-      continue ranges.next()
+  for range = ranges.next() {
+    match range {
+      None => break { columns, values }
+      Some(None) => {
+        values.push(None)
+        continue ranges.next()
+      }
+      Some(Some(range)) => {
+        values.push(Some(decode_utf8(buffer[range.start:range.end])))
+        continue ranges.next()
+      }
     }
   }
 }
@@ -1202,11 +1228,13 @@ fn parse_column_names(
 ) -> Array[String] raise {
   let columns : Array[String] = []
   let fields = body.fields()
-  loop fields.next() {
-    None => columns
-    Some(field) => {
-      columns.push(field.name_str())
-      continue fields.next()
+  for field = fields.next() {
+    match field {
+      None => break columns
+      Some(field) => {
+        columns.push(field.name_str())
+        continue fields.next()
+      }
     }
   }
 }
@@ -1214,11 +1242,13 @@ fn parse_column_names(
 ///|
 fn parse_copy_formats(formats : @backend.ColumnFormats) -> Array[Int] raise {
   let out : Array[Int] = []
-  loop formats.next() {
-    None => out
-    Some(format) => {
-      out.push(format)
-      continue formats.next()
+  for format = formats.next() {
+    match format {
+      None => break out
+      Some(format) => {
+        out.push(format)
+        continue formats.next()
+      }
     }
   }
 }
@@ -1232,26 +1262,28 @@ fn parse_database_error(
   let mut message = None
   let mut detail = None
   let mut hint = None
-  loop fields.next() {
-    None =>
-      {
-        severity,
-        code,
-        message: message.unwrap_or("database error"),
-        detail,
-        hint,
+  for field = fields.next() {
+    match field {
+      None =>
+        break {
+          severity,
+          code,
+          message: message.unwrap_or("database error"),
+          detail,
+          hint,
+        }
+      Some(field) => {
+        let value = decode_utf8(field.value_bytes())
+        match field.type_ {
+          b'S' | b'V' => severity = Some(value)
+          b'C' => code = Some(value)
+          b'M' => message = Some(value)
+          b'D' => detail = Some(value)
+          b'H' => hint = Some(value)
+          _ => ()
+        }
+        continue fields.next()
       }
-    Some(field) => {
-      let value = decode_utf8(field.value_bytes())
-      match field.type_ {
-        b'S' | b'V' => severity = Some(value)
-        b'C' => code = Some(value)
-        b'M' => message = Some(value)
-        b'D' => detail = Some(value)
-        b'H' => hint = Some(value)
-        _ => ()
-      }
-      continue fields.next()
     }
   }
 }
