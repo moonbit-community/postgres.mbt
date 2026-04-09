@@ -1,0 +1,190 @@
+// COPY IN / COPY OUT helpers.
+
+///|
+/// Start a `COPY ... TO STDOUT` operation and return a raw chunk stream.
+///
+/// The SQL string is executed with the simple query protocol because PostgreSQL
+/// starts COPY mode directly from the statement text.
+pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
+  ensure_open(self.shared)
+  let responses = self.send_request(
+    RequestKind::Messages,
+    simple_query_bytes(sql),
+  )
+  start_copy_out(responses)
+}
+
+///|
+/// Start a `COPY ... FROM STDIN` operation and return a sink for input chunks.
+///
+/// The returned `CopyInSink` can be fed from another task while the connection
+/// loop relays backend progress and completion messages.
+pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
+  ensure_open(self.shared)
+  let input = @async.Queue::new(kind=Unbounded)
+  let responses = self.send_request_with_copy(simple_query_bytes(sql), input)
+  let mut database_error : DatabaseError? = None
+  for res = responses.get() {
+    match res {
+      @backend.Message::CopyInResponse(_) =>
+        return { input, responses, finished: @ref.new(false) }
+      @backend.Message::ErrorResponse(body) => {
+        database_error = Some(parse_database_error(body.fields()))
+        continue responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) =>
+        match database_error {
+          Some(err) => raise ClientError::Database(err)
+          None =>
+            raise ClientError::UnexpectedMessage("expected CopyInResponse")
+        }
+      _ => raise ClientError::UnexpectedMessage("unexpected copy-in response")
+    }
+  }
+}
+
+///|
+/// Send one COPY data chunk to the server.
+pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
+  guard !self.finished.val else {
+    raise ClientError::Closed("copy sink already finished")
+  }
+  self.input.put(CopyInAction::Data(data.to_bytes()))
+}
+
+///|
+/// Finish the COPY IN operation and return the affected row count.
+///
+/// After calling `finish`, the sink cannot be reused. The method waits for the
+/// backend's command-complete sequence and converts its command tag to an
+/// integer row count.
+pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
+  guard !self.finished.val else {
+    raise ClientError::Closed("copy sink already finished")
+  }
+  self.finished.val = true
+  self.input.put(CopyInAction::Finish)
+  collect_copy_in_completion(self.responses)
+}
+
+///|
+/// Abort the COPY IN operation with an error message.
+///
+/// PostgreSQL still sends a completion sequence after an abort. The driver
+/// drains it internally and suppresses the returned row count because the COPY
+/// did not complete successfully.
+pub async fn CopyInSink::abort(
+  self : CopyInSink,
+  message? : String = "COPY aborted",
+) -> Unit {
+  guard !self.finished.val else { return }
+  self.finished.val = true
+  self.input.put(CopyInAction::Fail(message))
+  let _ = collect_copy_in_completion(self.responses) catch { _ => 0 }
+}
+
+///|
+/// Payload of PostgreSQL `NotificationResponse`.
+pub struct Notification {
+  /// Backend process ID that sent the notification.
+  process_id : Int
+  /// Channel name from `LISTEN` / `NOTIFY`.
+  channel : String
+  /// Optional payload string attached to the notification.
+  payload : String
+} derive(Debug, Eq)
+
+///|
+/// Message delivered out-of-band from the main request/response flow.
+///
+/// These messages are emitted by the connection loop through the optional
+/// callback passed to `Connection::run` and can also be consumed later via
+/// `Connection::next_message`.
+pub enum AsyncMessage {
+  /// Server notice that did not fail the active request.
+  Notice(DatabaseError)
+  /// `NOTIFY` payload from PostgreSQL.
+  Notification(Notification)
+  /// Session parameter update such as `server_version`.
+  ParameterStatus(String, String)
+} derive(Debug, Eq)
+
+///|
+/// Stream of raw chunks produced by `COPY ... TO STDOUT`.
+///
+/// The client does not attempt to decode the copy format. It simply surfaces
+/// each `CopyData` payload exactly as received so higher-level code can parse
+/// CSV, text, or binary COPY output as needed.
+pub struct CopyOutStream {
+  priv responses : @async.Queue[@backend.Message]
+  /// Column format codes reported by PostgreSQL's `CopyOutResponse`.
+  formats : Array[Int]
+  priv mut database_error : DatabaseError?
+  priv mut finished : Bool
+}
+
+///|
+/// Read the next COPY OUT payload chunk.
+pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
+  if self.finished {
+    return self.raise_terminal_error_or_none()
+  }
+  for response = self.responses.get() {
+    match response {
+      @backend.Message::CopyData(body) => return Some(body.storage)
+      @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
+        continue self.responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.finished = true
+        return self.raise_terminal_error_or_none()
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected copy out response"),
+        )
+    }
+  }
+}
+
+///|
+/// Collect all remaining COPY OUT chunks into memory.
+pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
+  let chunks : Array[Bytes] = []
+  for chunk = self.next() {
+    match chunk {
+      None => break chunks
+      Some(chunk) => {
+        chunks.push(chunk)
+        continue self.next()
+      }
+    }
+  }
+}
+
+///|
+/// Drain the COPY OUT stream to its terminal `ReadyForQuery`.
+pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
+  for bytes = self.next() {
+    if bytes is Some(_) {
+      continue self.next()
+    } else {
+      break ()
+    }
+  }
+}
+
+///|
+/// Return the captured database error, or `None` once the stream is finished.
+fn CopyOutStream::raise_terminal_error_or_none(
+  self : CopyOutStream,
+) -> Bytes? raise {
+  match self.database_error {
+    Some(err) => raise ClientError::Database(err)
+    None => None
+  }
+}
