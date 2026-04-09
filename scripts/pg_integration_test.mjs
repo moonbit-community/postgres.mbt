@@ -33,7 +33,7 @@ const authSuites = [
   ['md5', 'moon_md5'],
   ['password', 'moon_password'],
 ]
-const integrationPackages = ['.']
+const integrationPackages = ['tests/baseline']
 
 main().catch((error) => {
   console.error(error.message)
