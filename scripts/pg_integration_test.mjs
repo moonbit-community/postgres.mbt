@@ -33,7 +33,7 @@ const authSuites = [
   ['md5', 'moon_md5'],
   ['password', 'moon_password'],
 ]
-const integrationPackages = ['src']
+const integrationPackages = ['.']
 
 main().catch((error) => {
   console.error(error.message)
@@ -124,7 +124,6 @@ function runInsideVirtualenv() {
   console.log('==> Running integration tests for TLS verification failures')
   const tlsFailureArgs = [
     'test',
-    'src',
     '--filter',
     'integration tls rejects untrusted server certificate',
   ]
