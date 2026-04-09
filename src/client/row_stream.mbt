@@ -1,0 +1,152 @@
+// Streaming results for the extended query protocol.
+
+///|
+/// Final summary reported after an extended query stream is fully drained.
+pub struct QuerySummary {
+  /// Raw PostgreSQL command tag, for example `"INSERT 0 3"` or `"SELECT 1"`.
+  command_tag : String
+  /// Number of `DataRow` messages observed by the stream.
+  row_count : Int
+  /// Whether the server suspended a portal because of a row limit.
+  suspended : Bool
+} derive(Debug, Eq)
+
+///|
+/// Incremental stream of rows produced by the extended query protocol.
+///
+/// The stream owns the queue of backend messages for one request. Temporary
+/// statements created by helper APIs are cleaned up only after the stream
+/// reaches its terminal `ReadyForQuery`, so callers should either consume the
+/// stream to exhaustion or call `finish`.
+pub struct RowStream {
+  /// The latest resolved column metadata. This becomes available after the
+  /// driver sees a `RowDescription`.
+  mut columns : Array[Column]
+  priv responses : @async.Queue[@backend.Message]
+  priv cleanup : StreamCleanup?
+  priv mut command_tag : String
+  priv mut row_count : Int
+  priv mut suspended : Bool
+  priv mut database_error : DatabaseError?
+  priv mut summary : QuerySummary?
+}
+
+///|
+/// Read the next row from the stream.
+///
+/// On the terminal `ReadyForQuery`, the stream records its summary, runs any
+/// deferred cleanup, and then either raises the captured database error or
+/// returns `None`.
+pub async fn RowStream::next(self : RowStream) -> Row? {
+  match self.summary {
+    Some(_) => return self.raise_terminal_error_or_none()
+    None => ()
+  }
+  for res = self.responses.get() {
+    match res {
+      @backend.Message::ParseComplete
+      | @backend.Message::BindComplete
+      | @backend.Message::CloseComplete
+      | @backend.Message::ParameterDescription(_) =>
+        continue self.responses.get()
+      @backend.Message::NoData => continue self.responses.get()
+      @backend.Message::RowDescription(body) => {
+        self.columns = merge_stream_columns(self.columns, body)
+        continue self.responses.get()
+      }
+      @backend.Message::DataRow(body) => {
+        self.row_count += 1
+        return Some({ columns: self.columns, values: parse_binary_values(body) })
+      }
+      @backend.Message::CommandComplete(body) => {
+        self.command_tag = body.tag_str()
+        continue self.responses.get()
+      }
+      @backend.Message::PortalSuspended => {
+        self.suspended = true
+        continue self.responses.get()
+      }
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.summary = Some({
+          command_tag: self.command_tag,
+          row_count: self.row_count,
+          suspended: self.suspended,
+        })
+        self.run_cleanup()
+        return self.raise_terminal_error_or_none()
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected query response"),
+        )
+    }
+  }
+}
+
+///|
+/// Collect all remaining rows into an array.
+///
+/// This is a convenience wrapper over repeated `next` calls. It still drains
+/// the underlying protocol stream and therefore runs the same cleanup logic as
+/// manual iteration.
+pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
+  let rows : Array[Row] = []
+  for row = self.next() {
+    match row {
+      None => break rows
+      Some(row) => {
+        rows.push(row)
+        continue self.next()
+      }
+    }
+  }
+}
+
+///|
+/// Drain the stream and return the final query summary.
+///
+/// Use this when you only need a prefix of the rows but still want the driver
+/// to observe the terminal `ReadyForQuery`, release backpressure, and execute
+/// deferred cleanup such as closing temporary statements.
+pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
+  for row = self.next() {
+    match row {
+      Some(_) => continue self.next()
+      None => break self.summary.unwrap()
+    }
+  }
+}
+
+///|
+/// Run deferred cleanup once the stream reaches its terminal state.
+///
+/// Temporary statements created by helper APIs are closed lazily here so the
+/// driver never interrupts the active request while rows are still in flight.
+async fn RowStream::run_cleanup(self : RowStream) -> Unit {
+  match self.cleanup {
+    Some(cleanup) =>
+      if !cleanup.done {
+        cleanup.done = true
+        let responses = cleanup.client.send_request(
+          RequestKind::Messages,
+          cleanup.bytes,
+        )
+        drain_close_response(responses)
+      }
+    None => ()
+  }
+}
+
+///|
+/// Return the captured database error, or `None` once the stream is finished.
+fn RowStream::raise_terminal_error_or_none(self : RowStream) -> Row? raise {
+  match self.database_error {
+    Some(err) => raise ClientError::Database(err)
+    None => None
+  }
+}
