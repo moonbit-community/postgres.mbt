@@ -2,10 +2,11 @@
 /// Backend message parsers for PostgreSQL protocol 3.x.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
-/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html#PROTOCOL-ERROR-FIELDS
 /// Backend message tags from protocol Section 54.7.
 ///
 /// This parser covers the tags needed for authentication, simple query,
@@ -298,11 +299,20 @@ pub fn Message::parse(
 ///
 /// The server provides a 4-byte salt that the frontend must mix into the MD5
 /// password response.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONMD5PASSWORD
 pub struct AuthenticationMd5PasswordBody {
   salt : Bytes
 }
 
 ///|
+/// Body of `AuthenticationGSSContinue`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-GSSAPI
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONGSSCONTINUE
 pub struct AuthenticationGssContinueBody {
   data : Bytes
 }
@@ -326,8 +336,8 @@ pub fn AuthenticationGssContinueBody::data(
 /// 2. trailing zero byte terminator
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-BEGIN
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONSASL
 pub struct AuthenticationSaslBody {
   data : Bytes
 }
@@ -386,6 +396,11 @@ pub fn SaslMechanisms::next_str(
 }
 
 ///|
+/// Body of `AuthenticationSASLContinue`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-CONTINUE
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONSASLCONTINUE
 pub struct AuthenticationSaslContinueBody {
   data : Bytes
 }
@@ -399,6 +414,11 @@ pub fn AuthenticationSaslContinueBody::data(
 }
 
 ///|
+/// Body of `AuthenticationSASLFinal`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-END
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONSASLFINAL
 pub struct AuthenticationSaslFinalBody {
   data : Bytes
 }
@@ -426,9 +446,8 @@ pub fn AuthenticationSaslFinalBody::data(
 /// - parses step 2 as the historical pre-3.2 `Int32` form
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-BACKENDKEYDATA
 pub struct BackendKeyDataBody {
   process_id : Int
   secret_key : Int
@@ -439,6 +458,11 @@ pub struct BackendKeyDataBody {
 ///
 /// The backend command tag is textual metadata such as `INSERT 0 1` or
 /// `SELECT 3`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COMMANDCOMPLETE
 pub struct CommandCompleteBody {
   tag : Bytes
 }
@@ -458,6 +482,12 @@ pub fn CommandCompleteBody::tag_str(
 }
 
 ///|
+/// Body of `CopyData`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 pub struct CopyDataBody {
   storage : Bytes
 }
@@ -480,8 +510,9 @@ pub fn CopyDataBody::data(self : CopyDataBody) -> BytesView {
 /// 3. `Int16[N]` per-column format codes
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYINRESPONSE
 pub struct CopyInResponseBody {
   format : Byte
   len : Int
@@ -531,6 +562,11 @@ pub fn ColumnFormats::next(
 /// 1. `Int8` overall COPY format
 /// 2. `Int16 N` column count
 /// 3. `Int16[N]` per-column format codes
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYOUTRESPONSE
 pub struct CopyOutResponseBody {
   format : Byte
   len : Int
@@ -556,7 +592,9 @@ pub fn CopyOutResponseBody::column_formats(
 /// 2. repeated `N` times: `Int32 len`, then `Byte n` value bytes
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DATAROW
 pub struct DataRowBody {
   storage : Bytes
   len : Int
@@ -640,8 +678,8 @@ pub fn DataRowRanges::next(
 /// 2. trailing zero byte terminator
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
-/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-ERRORRESPONSE
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html#PROTOCOL-ERROR-FIELDS
 pub struct ErrorResponseBody {
   storage : Bytes
 }
@@ -693,7 +731,7 @@ pub fn ErrorFields::next(
 /// `C`, or `M`.
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-error-fields.html
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html#PROTOCOL-ERROR-FIELDS
 pub struct ErrorField {
   type_ : Byte
   value : Bytes
@@ -707,6 +745,10 @@ pub fn ErrorField::value_bytes(self : ErrorField) -> BytesView {
 
 ///|
 /// Body of `NoticeResponse`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-NOTICERESPONSE
+/// - https://www.postgresql.org/docs/current/protocol-error-fields.html#PROTOCOL-ERROR-FIELDS
 pub struct NoticeResponseBody {
   storage : Bytes
 }
@@ -721,6 +763,9 @@ pub fn NoticeResponseBody::fields(self : NoticeResponseBody) -> ErrorFields {
 /// Body of `NotificationResponse`.
 ///
 /// Carries the notifying backend PID, channel name, and textual payload.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-NOTIFICATIONRESPONSE
 pub struct NotificationResponseBody {
   process_id : Int
   channel : Bytes
@@ -769,7 +814,8 @@ pub fn NotificationResponseBody::message_str(
 /// 2. `Int32[N]` parameter type OIDs
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PARAMETERDESCRIPTION
 pub struct ParameterDescriptionBody {
   storage : Bytes
   len : Int
@@ -818,6 +864,10 @@ pub fn Parameters::next(
 ///
 /// These messages report run-time parameters such as `client_encoding` and
 /// `server_version`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PARAMETERSTATUS
 pub struct ParameterStatusBody {
   name : Bytes
   value : Bytes
@@ -863,8 +913,10 @@ pub fn ParameterStatusBody::value_str(
 /// 1. single `Byte1` transaction status indicator
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-READYFORQUERY
 pub struct ReadyForQueryBody {
   status : Byte
 }
@@ -887,7 +939,9 @@ pub struct ReadyForQueryBody {
 ///    `Int16 format`
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-ROWDESCRIPTION
 pub struct RowDescriptionBody {
   storage : Bytes
   len : Int
@@ -955,7 +1009,7 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
 /// `1 = binary`. Negative `type_size` values denote variable-width types.
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-ROWDESCRIPTION
 pub struct Field {
   name : Bytes
   table_oid : @proto.Oid

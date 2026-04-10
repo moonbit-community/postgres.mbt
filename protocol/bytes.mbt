@@ -2,8 +2,8 @@
 /// Wire-level scalar decoding helpers for PostgreSQL protocol values.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-message-types.html
+/// - https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-OVERVIEW
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 /// Convert a count to the signed 16-bit representation used by many protocol
 /// fields, such as parameter counts and format-code counts.
 pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {

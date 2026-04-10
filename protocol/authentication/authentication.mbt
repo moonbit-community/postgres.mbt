@@ -2,8 +2,9 @@
 /// Authentication helpers for PostgreSQL startup negotiation.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONMD5PASSWORD
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PASSWORDMESSAGE
 /// Build the legacy response for `AuthenticationMD5Password`.
 ///
 /// PostgreSQL sends a 4-byte salt in the backend authentication request. The
@@ -11,7 +12,8 @@
 /// `md5(md5(password || username) || salt)`.
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONMD5PASSWORD
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PASSWORDMESSAGE
 pub fn md5_hash(
   username : BytesView,
   password : BytesView,

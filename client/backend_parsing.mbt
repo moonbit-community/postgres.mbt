@@ -13,6 +13,8 @@ fn parse_columns(body : @backend.RowDescriptionBody) -> Array[Column] raise {
     match field {
       None => break columns
       Some(field) => {
+        // `resolve_type` may only know the builtin shape at parse time; later
+        // cache lookups can enrich the descriptor without changing raw OIDs.
         columns.push({
           name: field.name_str(),
           table_oid: field.table_oid,
@@ -44,6 +46,8 @@ fn parse_binary_values(
         continue ranges.next()
       }
       Some(Some(range)) => {
+        // Copy the slice so the returned row owns stable bytes independent of
+        // the temporary backend message buffer.
         values.push(Some(buffer[range.start:range.end].to_bytes()))
         continue ranges.next()
       }
@@ -68,6 +72,8 @@ fn parse_text_row(
         continue ranges.next()
       }
       Some(Some(range)) => {
+        // Simple-query rows are materialized as owned strings because the
+        // underlying message buffer cannot escape this parser frame.
         values.push(Some(decode_utf8(buffer[range.start:range.end])))
         continue ranges.next()
       }
@@ -118,6 +124,8 @@ fn parse_database_error(
   let mut message = None
   let mut detail = None
   let mut hint = None
+  // Preserve the subset of PostgreSQL error fields that the public
+  // `DatabaseError` struct exposes; all other tags are intentionally ignored.
   for field = fields.next() {
     match field {
       None =>
@@ -164,6 +172,8 @@ fn merge_stream_columns(
 ) -> Array[Column] raise {
   let described = parse_columns(body)
   if current.is_empty() {
+    // Streams created without earlier prepare metadata accept the runtime row
+    // description verbatim the first time they see it.
     return described
   }
   guard current.length() == described.length() else {

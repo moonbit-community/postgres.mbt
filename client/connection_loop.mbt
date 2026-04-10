@@ -26,14 +26,20 @@ pub async fn Connection::run(
     try {
       while true {
         if pending.is_empty() && !sent_terminate {
+          // When nothing is in flight, block until the runtime has a request
+          // that can own subsequent backend replies.
           let request = self.shared.requests.get()
           sent_terminate = self.send_outbound_request(request, pending)
         }
         if self.can_pipeline_requests(pending) && !sent_terminate {
+          // If the current in-flight tail contains no barriers, batch more work
+          // onto the socket before we wait for the next backend frame.
           sent_terminate = self.pipeline_pending_requests(pending)
         }
         if pending.is_empty() {
           if sent_terminate {
+            // `Terminate` has no normal response stream. Once it is the only
+            // outstanding work, shutdown can converge locally.
             self.drain_queued_requests(None)
             close_runtime(self.shared)
             self.stream.close()
@@ -42,6 +48,8 @@ pub async fn Connection::run(
           continue
         }
         let message = self.read_message()
+        // After async side-channel frames are peeled off, protocol order says
+        // the oldest pending request owns the next reply.
         self.forward_pending_message(pending, message, on_async)
       }
     } catch {
@@ -81,6 +89,8 @@ async fn Connection::send_outbound_request(
   self.stream.write(request.bytes)
   match request.kind {
     RequestKind::Terminate => {
+      // PostgreSQL closes the socket after `Terminate`; there is no matching
+      // terminal `ReadyForQuery` for this synthetic request queue.
       request.responses.close()
       true
     }
@@ -122,6 +132,8 @@ async fn Connection::pipeline_pending_requests(
       None => return false
       Some(request) => {
         let sent_terminate = self.send_outbound_request(request, pending)
+        // Stop as soon as pipelining reaches a request that needs extra
+        // mid-stream coordination, such as COPY IN or graceful shutdown.
         let is_barrier = match request.kind {
           RequestKind::Messages => false
           _ => true
@@ -145,12 +157,15 @@ async fn Connection::forward_pending_message(
   on_async : (AsyncMessage) -> Unit,
 ) -> Unit {
   if self.handle_async_message(message, on_async) {
+    // Notices, notifications, and parameter updates never advance a request.
     return
   }
   guard !pending.is_empty() else {
     raise ClientError::UnexpectedMessage("unexpected backend message")
   }
   let request = pending[0]
+  // All remaining frames belong to the request at the front of the protocol
+  // timeline because PostgreSQL replies in request order.
   match request.kind {
     RequestKind::Messages => {
       self.forward_message_to_request(request, message)
@@ -198,6 +213,8 @@ async fn Connection::forward_copy_in_message(
   match message {
     @backend.Message::CopyInResponse(_) => {
       request.responses.put(message)
+      // Only after PostgreSQL enters COPY mode may the client start producing
+      // `CopyData` / `CopyDone` / `CopyFail` frames for this request.
       self.drain_copy_input(copy_input)
     }
     @backend.Message::ReadyForQuery(body) => {
@@ -221,18 +238,24 @@ async fn Connection::drain_copy_input(
   for act = input.get() {
     match act {
       CopyInAction::Data(data) => {
+        // Data chunks can flow indefinitely; keep consuming producer input
+        // until it explicitly finishes or aborts this COPY exchange.
         let payload = @buffer.new()
         @frontend.CopyData::new(data[:]).write(payload)
         self.stream.write(payload.to_bytes())
         continue input.get()
       }
       CopyInAction::Finish => {
+        // After `CopyDone`, the request returns to normal backend completion
+        // handling on the response queue.
         let payload = @buffer.new()
         @frontend.copy_done(payload)
         self.stream.write(payload.to_bytes())
         return
       }
       CopyInAction::Fail(message) => {
+        // PostgreSQL still sends trailing completion frames after `CopyFail`,
+        // so the request stays pending until the backend catches up.
         let payload = @buffer.new()
         @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
         self.stream.write(payload.to_bytes())
@@ -283,6 +306,8 @@ fn Connection::drain_queued_requests(self : Connection, error : Error?) -> Unit 
     Some(err) => Some(err)
     None => Some(ClientError::Closed("connection is closed"))
   }
+  // Requests still sitting in the submission queue were never written to the
+  // socket, so they can only fail locally as shutdown fallout.
   while true {
     let request = self.shared.requests.try_get() catch { _ => None }
     match request {

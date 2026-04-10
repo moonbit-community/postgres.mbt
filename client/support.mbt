@@ -12,6 +12,9 @@ fn Client::send_request(
   response_kind? : @aqueue.Kind = request_response_queue_kind,
 ) -> @async.Queue[@backend.Message] raise {
   let responses = @async.Queue::new(kind=response_kind)
+  // `shared.requests` is created as `Unbounded`, so `try_put` cannot return
+  // `false` for "queue full". The only failure mode here is a closed queue,
+  // which still raises and propagates out of this helper.
   ignore(
     self.shared.requests.try_put({ kind, bytes, responses, copy_input: None }),
   )
@@ -26,6 +29,8 @@ fn Client::send_request_with_copy(
   input : @async.Queue[CopyInAction],
 ) -> @async.Queue[@backend.Message] raise {
   let responses = @async.Queue::new(kind=request_response_queue_kind)
+  // Same reasoning as `send_request`: the shared request queue is unbounded,
+  // so ignoring the `Bool` only discards an impossible "queue full" result.
   ignore(
     self.shared.requests.try_put({
       kind: RequestKind::CopyIn,
@@ -41,6 +46,8 @@ fn Client::send_request_with_copy(
 /// Fail if the shared runtime is already closed or shutting down.
 fn ensure_open(shared : Shared) -> Unit raise {
   if shared.closed.val || shared.closing.val {
+    // `closing` flips before the socket is fully torn down so new work stops
+    // racing against a connection that is already converging toward shutdown.
     raise ClientError::Closed("connection is closed")
   }
 }
@@ -59,6 +66,8 @@ fn spawn_detached_drain(
     Some(group) =>
       group.spawn_bg(no_wait=true, () => {
         try drain() catch {
+          // Detached callers gave up synchronous handling of database failures,
+          // but protocol bugs and runtime errors should still surface.
           err => if err is ClientError::Database(_) { () } else { raise err }
         } noraise {
           _ => ()
@@ -85,6 +94,8 @@ fn close_runtime(shared : Shared, error? : Error) -> Unit {
   if shared.closed.val {
     return
   }
+  // Flip the visible shutdown flags first so concurrent submitters observe a
+  // consistent "no new work" state even if queue closure races with them.
   shared.closed.val = true
   shared.closing.val = true
   match error {

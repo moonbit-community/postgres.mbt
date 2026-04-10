@@ -2,9 +2,10 @@
 /// Frontend message serializers for PostgreSQL protocol 3.x.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 /// Write the length-prefixed body portion shared by almost all frontend
 /// messages.
 ///
@@ -77,8 +78,8 @@ fn write_cstr(
 /// 5. `Int16 R`, then `Int16[R]` result-column format codes
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-BIND
 pub fn[T] bind(
   portal : BytesView,
   statement : BytesView,
@@ -119,9 +120,8 @@ pub fn[T] bind(
 /// 4. `Int32` backend secret key
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-CANCELREQUEST
 pub fn cancel_request(
   process_id : Int,
   secret_key : Int,
@@ -138,6 +138,10 @@ pub fn cancel_request(
 /// Serialize a `Close` message.
 ///
 /// `variant` must be `S` for a prepared statement or `P` for a portal.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-CLOSE
 pub fn close(
   variant : Byte,
   name : BytesView,
@@ -155,6 +159,11 @@ pub fn close(
 ///
 /// Backend `CopyData` messages always correspond to a single row, while
 /// frontend `CopyData` messages may chunk the copy stream arbitrarily.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 pub struct CopyData {
   buf : Bytes
   len : Int
@@ -162,6 +171,9 @@ pub struct CopyData {
 
 ///|
 /// Construct a `CopyData` frame from raw payload bytes.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
   let len = buf.length() + 4
   let _ = @proto.checked_i32(len)
@@ -170,6 +182,9 @@ pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
 
 ///|
 /// Write this `CopyData` message to `out`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 pub fn CopyData::write(self : CopyData, out : @buffer.Buffer) -> Unit {
   out.write_byte(b'd')
   out.write_int_be(self.len)
@@ -178,6 +193,11 @@ pub fn CopyData::write(self : CopyData, out : @buffer.Buffer) -> Unit {
 
 ///|
 /// Serialize `CopyDone`, indicating that the sender has finished a COPY stream.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDONE
 pub fn copy_done(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'c')
   try! write_body(buf, fn(_) { () })
@@ -186,6 +206,11 @@ pub fn copy_done(buf : @buffer.Buffer) -> Unit {
 ///|
 /// Serialize `CopyFail`, aborting a frontend COPY IN stream with an error
 /// message.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYFAIL
 pub fn copy_fail(
   message : BytesView,
   buf : @buffer.Buffer,
@@ -199,6 +224,10 @@ pub fn copy_fail(
 ///
 /// `variant` must be `S` to describe a prepared statement or `P` to describe a
 /// portal.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DESCRIBE
 pub fn describe(
   variant : Byte,
   name : BytesView,
@@ -222,8 +251,8 @@ pub fn describe(
 /// 2. `Int32` maximum rows to return before suspension
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-EXECUTE
 pub fn execute(
   portal : BytesView,
   max_rows : Int,
@@ -248,8 +277,8 @@ pub fn execute(
 /// 3. `Int16 N`, then `Int32[N]` parameter type OIDs
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PARSE
 pub fn parse(
   name : BytesView,
   query : BytesView,
@@ -275,8 +304,10 @@ pub fn parse(
 /// 1. `String` password payload
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONCLEARTEXTPASSWORD
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONMD5PASSWORD
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PASSWORDMESSAGE
 pub fn password_message(
   password : BytesView,
   buf : @buffer.Buffer,
@@ -295,8 +326,8 @@ pub fn password_message(
 /// 1. `String` query text
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-QUERY
 pub fn query(
   query : BytesView,
   buf : @buffer.Buffer,
@@ -318,8 +349,9 @@ pub fn query(
 /// 3. `Byte n` initial-response payload
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-INITIAL-RESPONSE
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-SASLINITIALRESPONSE
 pub fn sasl_initial_response(
   mechanism : BytesView,
   data : BytesView,
@@ -342,8 +374,9 @@ pub fn sasl_initial_response(
 /// 1. `Byte n` mechanism-specific response payload
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-CONTINUE
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FINAL
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-SASLRESPONSE
 pub fn sasl_response(
   data : BytesView,
   buf : @buffer.Buffer,
@@ -354,6 +387,10 @@ pub fn sasl_response(
 
 ///|
 /// Serialize the tagless `SSLRequest` startup packet.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SSL
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-SSLREQUEST
 pub fn ssl_request(buf : @buffer.Buffer) -> Unit {
   try! write_body(buf, fn(b) { b.write_int_be(80_877_103) })
 }
@@ -373,8 +410,8 @@ pub fn ssl_request(buf : @buffer.Buffer) -> Unit {
 /// 4. trailing zero byte terminator
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-STARTUPMESSAGE
 pub fn startup_message(
   parameters : Iter[(BytesView, BytesView)],
   buf : @buffer.Buffer,
@@ -393,6 +430,10 @@ pub fn startup_message(
 ///|
 /// Serialize `Flush`, forcing the backend to emit any response messages it has
 /// buffered so far.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-FLUSH
 pub fn flush(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'H')
   try! write_body(buf, fn(_) { () })
@@ -406,8 +447,8 @@ pub fn flush(buf : @buffer.Buffer) -> Unit {
 /// 1. no body; the length word is always `4`
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/protocol-flow.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-SYNC
 pub fn sync(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'S')
   try! write_body(buf, fn(_) { () })
@@ -415,6 +456,10 @@ pub fn sync(buf : @buffer.Buffer) -> Unit {
 
 ///|
 /// Serialize `Terminate`, requesting a graceful end to the session.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-TERMINATION
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-TERMINATE
 pub fn terminate(buf : @buffer.Buffer) -> Unit {
   buf.write_byte(b'X')
   try! write_body(buf, fn(_) { () })

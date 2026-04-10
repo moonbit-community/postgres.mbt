@@ -67,6 +67,8 @@ async fn start_copy_out(
   for res = responses.get() {
     match res {
       @backend.Message::CopyOutResponse(body) =>
+        // The stream is valid only after PostgreSQL explicitly enters COPY OUT
+        // mode and advertises the per-column format codes.
         return {
           background_group,
           responses,
@@ -107,6 +109,8 @@ async fn read_prepare_response(
     match res {
       @backend.Message::ParseComplete => continue responses.get()
       @backend.Message::ParameterDescription(body) => {
+        // Hold onto raw OIDs for now; the richer `Type` descriptors are loaded
+        // only after PostgreSQL finishes the prepare exchange successfully.
         param_oids = parse_parameter_oids(body)
         continue responses.get()
       }
@@ -123,6 +127,8 @@ async fn read_prepare_response(
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => {
+            // Resolve cached type metadata once, at the end, so callers see a
+            // fully enriched result without partial-success bookkeeping.
             let result = (
               resolve_parameter_types(shared, param_oids),
               resolve_columns(shared, columns),
@@ -145,6 +151,8 @@ async fn collect_copy_in_completion(
   for res = responses.get() {
     match res {
       @backend.Message::CommandComplete(body) => {
+        // COPY IN reports affected rows only through the trailing command tag,
+        // after all client input has already been sent.
         command_tag = body.tag_str()
         continue responses.get()
       }
@@ -203,6 +211,8 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
+      // `batch_execute` intentionally ignores per-statement rows and metadata;
+      // only terminal success or database failure matters here.
       @backend.Message::CommandComplete(_)
       | @backend.Message::EmptyQueryResponse
       | @backend.Message::RowDescription(_)
