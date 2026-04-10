@@ -65,9 +65,11 @@ pub enum SimpleQueryMessage {
 ///|
 /// Incremental stream of `SimpleQueryMessage` values.
 struct SimpleQueryStream {
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   responses : @async.Queue[@backend.Message]
   mut columns : Array[String]
   mut database_error : DatabaseError?
+  mut detached : Bool
   mut finished : Bool
 }
 
@@ -80,6 +82,7 @@ struct SimpleQueryStream {
 pub async fn SimpleQueryStream::next(
   self : SimpleQueryStream,
 ) -> SimpleQueryMessage? {
+  self.assert_attached()
   if self.finished {
     return self.raise_terminal_error_or_none()
   }
@@ -141,6 +144,62 @@ pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
       Some(_) => continue self.next()
       None => break ()
     }
+  }
+}
+
+///|
+/// Explicitly abandon the remaining simple-query frames.
+///
+/// The driver drains to the terminal `ReadyForQuery` in a background coroutine
+/// so later requests can continue without waiting for synchronous completion.
+pub fn SimpleQueryStream::detach(self : SimpleQueryStream) -> Unit {
+  if self.finished || self.detached {
+    return
+  }
+  self.detached = true
+  spawn_detached_drain(self.background_group, () => self.drain_discard())
+}
+
+///|
+/// Drain the remaining protocol frames without constructing row values.
+async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
+  if self.finished {
+    match self.database_error {
+      Some(err) => raise ClientError::Database(err)
+      None => return
+    }
+  }
+  for response = self.responses.get() {
+    match response {
+      @backend.Message::RowDescription(_)
+      | @backend.Message::DataRow(_)
+      | @backend.Message::CommandComplete(_)
+      | @backend.Message::EmptyQueryResponse => continue self.responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.finished = true
+        match self.database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => return
+        }
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected simple query response"),
+        )
+    }
+  }
+}
+
+///|
+/// Fail if the stream was already detached into a background drain.
+fn SimpleQueryStream::assert_attached(self : SimpleQueryStream) -> Unit raise {
+  if self.detached {
+    raise ClientError::Closed("simple query stream already detached")
   }
 }
 

@@ -10,11 +10,13 @@ pub async fn connect(config : Config) -> (Client, Connection) {
   let stream = connect_stream(config)
   let startup = startup(stream, config)
   let types : Map[@proto.Oid, Type] = {}
+  let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(None)
   seed_builtin_types(types)
   let shared = {
     config,
     requests: @async.Queue::new(kind=Unbounded),
     async_messages: @async.Queue::new(kind=Unbounded),
+    background_group,
     parameters: startup.parameters,
     types,
     process_id: @ref.new(startup.process_id),

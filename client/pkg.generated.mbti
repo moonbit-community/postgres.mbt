@@ -99,6 +99,7 @@ pub struct CopyOutStream {
   // private fields
 }
 pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
+pub fn CopyOutStream::detach(Self) -> Unit
 pub async fn CopyOutStream::finish(Self) -> Unit
 pub async fn CopyOutStream::next(Self) -> Bytes?
 
@@ -164,6 +165,7 @@ pub struct RowStream {
   // private fields
 }
 pub async fn RowStream::collect(Self) -> Array[Row]
+pub fn RowStream::detach(Self) -> Unit
 pub async fn RowStream::finish(Self) -> QuerySummary
 pub async fn RowStream::next(Self) -> Row?
 
@@ -184,6 +186,7 @@ pub fn SimpleQueryRow::len(Self) -> Int
 
 type SimpleQueryStream
 pub async fn SimpleQueryStream::collect(Self) -> Array[SimpleQueryMessage]
+pub fn SimpleQueryStream::detach(Self) -> Unit
 pub async fn SimpleQueryStream::finish(Self) -> Unit
 pub async fn SimpleQueryStream::next(Self) -> SimpleQueryMessage?
 

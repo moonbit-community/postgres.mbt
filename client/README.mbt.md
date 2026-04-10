@@ -207,9 +207,23 @@ async fn _streaming_query_example(client : @client.Client) -> Unit {
 }
 ```
 
-If you stop reading a `RowStream` early, call `finish()`. It drains the
-remaining protocol messages, releases backpressure, and lets the driver close
-temporary server-side resources created by helpers such as `query`.
+Warning: if you intend to discard a `RowStream` before reading it to completion,
+do not just drop it. Call `detach()` first, or later requests on the same
+connection can remain blocked behind the unfinished response.
+
+If you stop reading a `RowStream` early, either call `finish()` or `detach()`.
+
+- `finish()` drains synchronously, returns a `QuerySummary`, and still raises a
+  final database error to the caller if PostgreSQL reported one.
+- `detach()` returns immediately, drains the rest in the background, skips
+  decoding discarded rows, and keeps later requests moving while swallowing any
+  final database error locally.
+
+After `detach()`, the stream handle is terminal. Further `next()`, `collect()`,
+or `finish()` calls raise `Closed`.
+
+Both options release backpressure and let the driver close temporary
+server-side resources created by helpers such as `query`.
 
 ## Next APIs To Learn
 
@@ -419,7 +433,14 @@ Use `copy_out(sql)` for bulk export with `COPY ... TO STDOUT`. It returns a
 - `CopyOutStream::next()`: read one chunk
 - `CopyOutStream::collect()`: read the rest into memory
 - `CopyOutStream::finish()`: drain the stream when you stop early
+- `CopyOutStream::detach()`: abandon the rest and drain in the background
 - `CopyOutStream.formats`: PostgreSQL format codes for each output column
+
+Warning: if you intend to discard a `CopyOutStream` before it reaches the
+terminal state, call `detach()` first. Dropping it early can block later
+requests on the same connection.
+
+After `detach()`, treat the `CopyOutStream` handle as closed.
 
 Use it when:
 
@@ -451,6 +472,16 @@ usually means one of these cases:
 
 The returned `SimpleQueryStream` is lower-level than `RowStream`: every row is
 text-format only, and the stream exposes statement boundaries directly.
+
+Warning: if you intend to discard a `SimpleQueryStream` before it reaches the
+terminal state, call `detach()` first. Dropping it early can block later
+requests on the same connection.
+
+If you stop early, use `finish()` when you want synchronous completion or
+`detach()` when you want the remaining frames discarded in the background so
+later requests can continue promptly.
+
+After `detach()`, treat the `SimpleQueryStream` handle as closed.
 
 ```mbt check
 ///|
@@ -552,6 +583,7 @@ type, method, or enum variant is for.
 - `Row::try_get_name(name)`: return `None` if the named column is absent, otherwise decode as `T`.
 - `RowStream { columns }`: incremental extended-query result stream. `columns` holds the latest resolved metadata.
 - `RowStream::collect()`: collect the remaining rows into memory.
+- `RowStream::detach()`: abandon the remaining rows and drain in the background.
 - `RowStream::finish()`: drain the stream and return a `QuerySummary`.
 - `RowStream::next()`: pull the next row, or `None` after the terminal `ReadyForQuery`.
 
@@ -566,6 +598,7 @@ type, method, or enum variant is for.
 - `SimpleQueryRow::index_of(name)`: find a column index by label.
 - `SimpleQueryRow::len()`: number of columns in the row.
 - `SimpleQueryStream::collect()`: collect the remaining simple-query frames.
+- `SimpleQueryStream::detach()`: abandon the remaining frames and drain in the background.
 - `SimpleQueryStream::finish()`: drain the stream to its terminal `ReadyForQuery`.
 - `SimpleQueryStream::next()`: read the next `SimpleQueryMessage`.
 
@@ -576,6 +609,7 @@ type, method, or enum variant is for.
 - `CopyInSink::abort(message?)`: abort the copy and drain PostgreSQL's completion sequence.
 - `CopyOutStream { formats }`: stream of raw `COPY TO STDOUT` chunks plus PostgreSQL column format codes.
 - `CopyOutStream::collect()`: collect the remaining chunks.
+- `CopyOutStream::detach()`: abandon the remaining chunks and drain in the background.
 - `CopyOutStream::finish()`: drain the copy stream when you stop early.
 - `CopyOutStream::next()`: read the next raw copy chunk.
 - `Notification { process_id, channel, payload }`: one PostgreSQL `NOTIFY` payload.

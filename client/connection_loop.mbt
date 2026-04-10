@@ -15,37 +15,44 @@ pub async fn Connection::run(
   self : Connection,
   on_async? : (AsyncMessage) -> Unit = _ => (),
 ) -> Unit {
-  let pending : Array[Request] = []
-  let mut sent_terminate = false
-  try {
-    while true {
-      if pending.is_empty() && !sent_terminate {
-        let request = self.shared.requests.get()
-        sent_terminate = self.send_outbound_request(request, pending)
-      }
-      if self.can_pipeline_requests(pending) && !sent_terminate {
-        sent_terminate = self.pipeline_pending_requests(pending)
-      }
-      if pending.is_empty() {
-        if sent_terminate {
-          self.drain_queued_requests(None)
-          close_runtime(self.shared)
-          self.stream.close()
-          return
+  @async.with_task_group(group => {
+    self.shared.background_group.val = Some(group)
+    defer {
+      self.shared.background_group.val = None
+    }
+
+    let pending : Array[Request] = []
+    let mut sent_terminate = false
+    try {
+      while true {
+        if pending.is_empty() && !sent_terminate {
+          let request = self.shared.requests.get()
+          sent_terminate = self.send_outbound_request(request, pending)
         }
-        continue
+        if self.can_pipeline_requests(pending) && !sent_terminate {
+          sent_terminate = self.pipeline_pending_requests(pending)
+        }
+        if pending.is_empty() {
+          if sent_terminate {
+            self.drain_queued_requests(None)
+            close_runtime(self.shared)
+            self.stream.close()
+            return
+          }
+          continue
+        }
+        let message = self.read_message()
+        self.forward_pending_message(pending, message, on_async)
       }
-      let message = self.read_message()
-      self.forward_pending_message(pending, message, on_async)
+    } catch {
+      err => {
+        self.close_pending_requests(pending, Some(err))
+        self.drain_queued_requests(Some(err))
+        close_runtime(self.shared, error=err)
+        self.stream.close()
+      }
     }
-  } catch {
-    err => {
-      self.close_pending_requests(pending, Some(err))
-      self.drain_queued_requests(Some(err))
-      close_runtime(self.shared, error=err)
-      self.stream.close()
-    }
-  }
+  })
 }
 
 ///|
