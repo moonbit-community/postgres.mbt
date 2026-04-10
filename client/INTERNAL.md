@@ -66,7 +66,8 @@ That means:
 - `SimpleQueryStream`
 - `CopyOutStream`
 
-must either be consumed to `None` or explicitly finished.
+must either be consumed to `None`, explicitly finished, or explicitly
+detached.
 
 Why this matters:
 
@@ -77,6 +78,16 @@ Why this matters:
 
 In short: draining streams is not just a convenience, it is part of correct
 protocol progress.
+
+Use the two early-stop APIs like this:
+
+- `finish()`
+  Synchronously drain to the terminal `ReadyForQuery` and still surface any
+  final database error to the caller.
+- `detach()`
+  Spawn a background discard drain that keeps protocol progress moving with
+  lower client-side decode cost and swallows terminal database errors locally.
+  After this call, the stream handle itself should be treated as closed.
 
 ## Startup And Authentication
 

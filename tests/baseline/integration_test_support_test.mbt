@@ -126,3 +126,11 @@ fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
   }
   message
 }
+
+///|
+fn[T] expect_closed_error(result : Result[T, Error]) -> String raise {
+  guard result is Err(@client.ClientError::Closed(message)) else {
+    fail("expected closed error")
+  }
+  message
+}

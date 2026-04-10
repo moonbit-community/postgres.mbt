@@ -3,11 +3,13 @@
 ///|
 /// Construct a `RowStream` over one backend response queue.
 fn new_row_stream(
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
   initial_columns? : Array[Column] = [],
   cleanup? : StreamCleanup? = None,
 ) -> RowStream {
   {
+    background_group,
     columns: initial_columns,
     responses,
     cleanup,
@@ -15,6 +17,7 @@ fn new_row_stream(
     row_count: 0,
     suspended: false,
     database_error: None,
+    detached: false,
     summary: None,
   }
 }
@@ -22,9 +25,17 @@ fn new_row_stream(
 ///|
 /// Construct a `SimpleQueryStream` over one backend response queue.
 fn new_simple_query_stream(
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
 ) -> SimpleQueryStream {
-  { responses, columns: [], database_error: None, finished: false }
+  {
+    background_group,
+    responses,
+    columns: [],
+    database_error: None,
+    detached: false,
+    finished: false,
+  }
 }
 
 ///|
@@ -49,6 +60,7 @@ async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
 ///|
 /// Wait for PostgreSQL to acknowledge `COPY OUT` mode and build the stream.
 async fn start_copy_out(
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
 ) -> CopyOutStream {
   let mut database_error : DatabaseError? = None
@@ -56,9 +68,11 @@ async fn start_copy_out(
     match res {
       @backend.Message::CopyOutResponse(body) =>
         return {
+          background_group,
           responses,
           formats: parse_copy_formats(body.column_formats()),
           database_error,
+          detached: false,
           finished: false,
         }
       @backend.Message::ErrorResponse(body) => {

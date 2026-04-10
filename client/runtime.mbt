@@ -98,6 +98,7 @@ priv struct Shared {
   config : Config
   requests : @async.Queue[Request]
   async_messages : @async.Queue[AsyncMessage]
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   parameters : Map[String, String]
   types : Map[@proto.Oid, Type]
   process_id : @ref.Ref[Int]

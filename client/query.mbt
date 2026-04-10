@@ -5,6 +5,11 @@
 ///
 /// Use this when you need PostgreSQL's statement batching semantics or when you
 /// want to inspect raw text-format result frames through `SimpleQueryStream`.
+///
+/// Warning: if you stop consuming the returned stream early and want to discard
+/// it, call `detach()` before dropping the handle. Otherwise later requests on
+/// the same connection can remain blocked until the unfinished response is
+/// drained.
 pub fn Client::simple_query(
   self : Client,
   sql : String,
@@ -14,7 +19,7 @@ pub fn Client::simple_query(
     RequestKind::Messages,
     simple_query_bytes(sql),
   )
-  new_simple_query_stream(responses)
+  new_simple_query_stream(self.shared.background_group, responses)
 }
 
 ///|
@@ -79,6 +84,11 @@ pub async fn Statement::close(self : Statement) -> Unit {
 /// can fetch resolved parameter and column metadata before execution. The
 /// temporary statement is closed automatically once the returned stream is fully
 /// drained or `finish` is called.
+///
+/// Warning: if you stop consuming the returned stream early and want to discard
+/// it, call `detach()` before dropping the handle. Otherwise later requests on
+/// the same connection can remain blocked until the unfinished response is
+/// drained.
 pub async fn Client::query(
   self : Client,
   sql : String,
@@ -105,6 +115,7 @@ pub async fn Client::query(
     execute_statement_bytes(name[:], param_types, params),
   )
   new_row_stream(
+    self.shared.background_group,
     responses,
     initial_columns=columns,
     cleanup=Some(make_statement_cleanup(self, name)),
@@ -186,6 +197,7 @@ pub async fn Client::query_typed(
     execute_statement_bytes(name[:], param_types, params),
   )
   new_row_stream(
+    self.shared.background_group,
     responses,
     initial_columns=columns,
     cleanup=Some(make_statement_cleanup(self, name)),
@@ -226,7 +238,11 @@ pub fn Client::query_statement(
     RequestKind::Messages,
     execute_statement_bytes(statement.name[:], statement.params, params),
   )
-  new_row_stream(responses, initial_columns=statement.columns)
+  new_row_stream(
+    self.shared.background_group,
+    responses,
+    initial_columns=statement.columns,
+  )
 }
 
 ///|
@@ -353,5 +369,9 @@ pub fn Client::query_portal(
     RequestKind::Messages,
     execute_portal_bytes(portal.name[:], max_rows),
   )
-  new_row_stream(responses, initial_columns=portal.columns)
+  new_row_stream(
+    self.shared.background_group,
+    responses,
+    initial_columns=portal.columns,
+  )
 }

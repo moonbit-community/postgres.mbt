@@ -5,13 +5,18 @@
 ///
 /// The SQL string is executed with the simple query protocol because PostgreSQL
 /// starts COPY mode directly from the statement text.
+///
+/// Warning: if you stop consuming the returned stream early and want to discard
+/// it, call `detach()` before dropping the handle. Otherwise later requests on
+/// the same connection can remain blocked until the unfinished response is
+/// drained.
 pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   ensure_open(self.shared)
   let responses = self.send_request(
     RequestKind::Messages,
     simple_query_bytes(sql),
   )
-  start_copy_out(responses)
+  start_copy_out(self.shared.background_group, responses)
 }
 
 ///|
@@ -116,16 +121,19 @@ pub enum AsyncMessage {
 /// each `CopyData` payload exactly as received so higher-level code can parse
 /// CSV, text, or binary COPY output as needed.
 pub struct CopyOutStream {
+  priv background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   priv responses : @async.Queue[@backend.Message]
   /// Column format codes reported by PostgreSQL's `CopyOutResponse`.
   formats : Array[Int]
   priv mut database_error : DatabaseError?
+  priv mut detached : Bool
   priv mut finished : Bool
 }
 
 ///|
 /// Read the next COPY OUT payload chunk.
 pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
+  self.assert_attached()
   if self.finished {
     return self.raise_terminal_error_or_none()
   }
@@ -175,6 +183,61 @@ pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
     } else {
       break ()
     }
+  }
+}
+
+///|
+/// Explicitly abandon the remaining COPY OUT payloads.
+///
+/// This starts a background drain that discards `CopyData` frames so later
+/// requests can continue without waiting for synchronous completion.
+pub fn CopyOutStream::detach(self : CopyOutStream) -> Unit {
+  if self.finished || self.detached {
+    return
+  }
+  self.detached = true
+  spawn_detached_drain(self.background_group, () => self.drain_discard())
+}
+
+///|
+/// Drain the remaining COPY OUT protocol messages without buffering payloads.
+async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
+  if self.finished {
+    match self.database_error {
+      Some(err) => raise ClientError::Database(err)
+      None => return
+    }
+  }
+  for response = self.responses.get() {
+    match response {
+      @backend.Message::CopyData(_)
+      | @backend.Message::CopyDone
+      | @backend.Message::CommandComplete(_) => continue self.responses.get()
+      @backend.Message::ErrorResponse(body) => {
+        self.database_error = Some(parse_database_error(body.fields()))
+        continue self.responses.get()
+      }
+      @backend.Message::ReadyForQuery(_) => {
+        self.finished = true
+        match self.database_error {
+          Some(err) => raise ClientError::Database(err)
+          None => return
+        }
+      }
+      _ =>
+        fail_response_stream(
+          self.responses,
+          ClientError::UnexpectedMessage("unexpected copy out response"),
+        )
+    }
+  }
+}
+
+///|
+/// Fail if the stream was already detached into a background drain.
+fn CopyOutStream::assert_attached(self : CopyOutStream) -> Unit raise {
+  if self.detached {
+    raise ClientError::Closed("copy out stream already detached")
   }
 }
 

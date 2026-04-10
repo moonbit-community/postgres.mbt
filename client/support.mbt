@@ -46,6 +46,29 @@ fn ensure_open(shared : Shared) -> Unit raise {
 }
 
 ///|
+/// Spawn one detached stream drain on the connection task group.
+///
+/// Terminal database errors are intentionally swallowed for detached streams,
+/// but any other failure still tears down the task group so protocol bugs or
+/// runtime failures are not silently ignored.
+fn spawn_detached_drain(
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  drain : async () -> Unit,
+) -> Unit {
+  match background_group.val {
+    Some(group) =>
+      group.spawn_bg(no_wait=true, () => {
+        try drain() catch {
+          err => if err is ClientError::Database(_) { () } else { raise err }
+        } noraise {
+          _ => ()
+        }
+      })
+    None => ()
+  }
+}
+
+///|
 /// Fail if the transaction or savepoint handle has already been finished.
 fn Transaction::assert_open(self : Transaction) -> Unit raise {
   if self.finished.val {

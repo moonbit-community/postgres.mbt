@@ -420,6 +420,44 @@ async test "integration raw query closes temporary prepared statements" {
 }
 
 ///|
+async test "integration row stream detach closes temporary prepared statements" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(as_client_config(config))
+    group.spawn_bg(() => connection.run())
+
+    let before : Int = client
+      .query_one("select count(*)::int4 as count from pg_prepared_statements")
+      .get_name("count")
+
+    let stream = client.query(
+      "select generate_series(1, 16)::int4 as value order by value",
+    )
+    guard stream.next() is Some(first_row) else { fail("expected first row") }
+    let first_value : Int = first_row.get_name("value")
+    assert_eq(first_value, 1)
+
+    stream.detach()
+
+    let task = group.spawn(no_wait=true, () => {
+      let count : Int = client
+        .query_one("select count(*)::int4 as count from pg_prepared_statements")
+        .get_name("count")
+      count
+    })
+
+    assert_eq(
+      wait_for_task_or_fail(
+        task, "expected detached temporary statement cleanup to complete",
+      ),
+      before,
+    )
+
+    client.close()
+  })
+}
+
+///|
 async test "integration simple query supports multiple result sets" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
@@ -498,6 +536,83 @@ async test "integration simple query supports pipelining" {
     )
 
     stream.finish()
+
+    client.close()
+  })
+}
+
+///|
+async test "integration simple query detach unblocks later requests" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(as_client_config(config))
+    group.spawn_bg(() => connection.run())
+
+    let stream = client.simple_query(
+      "select generate_series(1, 16)::int4 as value order by value",
+    )
+    guard stream.next()
+      is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+      fail("expected row description")
+    }
+    assert_eq(columns, ["value"])
+    guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
+      fail("expected first row")
+    }
+    assert_eq(try! row.get_name("value"), Some("1"))
+
+    let task = group.spawn(no_wait=true, () => {
+      let value : Int = client
+        .query_one("select 13::int4 as value")
+        .get_name("value")
+      value
+    })
+
+    assert_task_stays_pending(
+      task, "expected follow-up query to stay blocked before detaching simple query stream",
+    )
+
+    stream.detach()
+    stream.detach()
+
+    let closed_message = expect_closed_error(try? stream.next())
+    assert_eq(closed_message, "simple query stream already detached")
+
+    assert_eq(
+      wait_for_task_or_fail(
+        task, "expected detach to let the blocked simple query complete",
+      ),
+      13,
+    )
+
+    client.close()
+  })
+}
+
+///|
+async test "integration simple query detach swallows trailing database error" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(as_client_config(config))
+    group.spawn_bg(() => connection.run())
+
+    let stream = client.simple_query("select 'ok'::text as value; select 1 / 0")
+    guard stream.next()
+      is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+      fail("expected row description")
+    }
+    assert_eq(columns, ["value"])
+    guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
+      fail("expected first row")
+    }
+    assert_eq(try! row.get_name("value"), Some("ok"))
+
+    stream.detach()
+
+    let value : Int = client
+      .query_one("select 21::int4 as value")
+      .get_name("value")
+    assert_eq(value, 21)
 
     client.close()
   })
@@ -614,6 +729,48 @@ async test "integration row stream backpressures after bounded buffering" {
         task, "expected blocked query to complete after draining buffered rows",
       ),
       7,
+    )
+
+    client.close()
+  })
+}
+
+///|
+async test "integration row stream detach unblocks later requests" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(as_client_config(config))
+    group.spawn_bg(() => connection.run())
+
+    let stream = client.query(
+      "select generate_series(1, 16)::int4 as value order by value",
+    )
+    guard stream.next() is Some(first_row) else { fail("expected first row") }
+    let first_value : Int = first_row.get_name("value")
+    assert_eq(first_value, 1)
+
+    let task = group.spawn(no_wait=true, () => {
+      let value : Int = client
+        .query_one("select 15::int4 as value")
+        .get_name("value")
+      value
+    })
+
+    assert_task_stays_pending(
+      task, "expected follow-up query to stay blocked before detaching row stream",
+    )
+
+    stream.detach()
+    stream.detach()
+
+    let closed_message = expect_closed_error(try? stream.finish())
+    assert_eq(closed_message, "row stream already detached")
+
+    assert_eq(
+      wait_for_task_or_fail(
+        task, "expected detach to let the blocked row-stream query complete",
+      ),
+      15,
     )
 
     client.close()
@@ -887,6 +1044,47 @@ async test "integration copy out supports pipelining" {
     )
 
     stream.finish()
+
+    client.close()
+  })
+}
+
+///|
+async test "integration copy out detach unblocks later requests" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let (client, connection) = @client.connect(as_client_config(config))
+    group.spawn_bg(() => connection.run())
+
+    let stream = client.copy_out(
+      "copy (select repeat('x', 32768) from generate_series(1, 32)) to stdout",
+    )
+    guard stream.next() is Some(chunk) else { fail("expected copy chunk") }
+    assert_true(chunk.length() > 0)
+
+    let task = group.spawn(no_wait=true, () => {
+      let value : Int = client
+        .query_one("select 17::int4 as value")
+        .get_name("value")
+      value
+    })
+
+    assert_task_stays_pending(
+      task, "expected follow-up query to stay blocked before detaching copy out stream",
+    )
+
+    stream.detach()
+    stream.detach()
+
+    let closed_message = expect_closed_error(try? stream.next())
+    assert_eq(closed_message, "copy out stream already detached")
+
+    assert_eq(
+      wait_for_task_or_fail(
+        task, "expected detach to let the blocked copy out query complete",
+      ),
+      17,
+    )
 
     client.close()
   })
