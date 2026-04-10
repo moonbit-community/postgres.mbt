@@ -18,6 +18,8 @@ async fn cached_type(shared : Shared, oid : @proto.Oid) -> Type {
   match shared.types.get(oid) {
     Some(type_) => type_
     None => {
+      // Cache misses are resolved once and written back so later row/parameter
+      // decoding for the same OID stays local.
       let type_ = lookup_type(shared, oid)
       shared.types[oid] = type_
       type_
@@ -38,6 +40,8 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
       let rows = query_oid_catalog(shared, typeinfo_query, oid) catch {
         _ => []
       }
+      // Catalog lookup is best-effort; falling back to `Unknown` preserves the
+      // raw OID for later diagnostics without blocking query execution.
       if rows.is_empty() {
         return Type::unknown(oid, name="oid_\{oid.to_string()}")
       }
@@ -48,6 +52,8 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
       let range_subtype : @proto.Oid? = row.get(3)
       let base_oid : @proto.Oid = row.get(4)
       let relid : @proto.Oid = row.get(6)
+      // Match PostgreSQL's richer type families first before falling back to a
+      // plain scalar descriptor.
       let kind = if typtype == "e" {
         Kind::Enum(query_enum_labels(shared, oid))
       } else if typtype == "p" {
@@ -80,6 +86,8 @@ async fn query_oid_catalog(
   oid : @proto.Oid,
 ) -> Array[Row] {
   let client : Client = { shared, }
+  // Reuse the ordinary query pipeline so the type cache does not maintain its
+  // own special-purpose protocol machinery.
   let params : Array[&ToSql] = [oid as &ToSql]
   let stream = client.query_typed(sql, [Type::oid_type()], params~)
   stream.collect()
@@ -145,6 +153,8 @@ async fn resolve_columns(
 ) -> Array[Column] {
   let out : Array[Column] = []
   for column in columns {
+    // Preserve every other row-description field and swap only the placeholder
+    // type descriptor for its cached rich form.
     out.push({ ..column, type_: cached_type(shared, column.type_.oid) })
   }
   out

@@ -4,297 +4,338 @@
 
 The package is built around an explicit split between:
 
-- `Client`: cheap handle used by application code to enqueue work
-- `Connection`: socket-owning task that performs all PostgreSQL protocol I/O
+- `Client`: a lightweight handle used to submit work
+- `Connection`: the socket-owning runtime that performs all PostgreSQL I/O
 
 That split is the main architectural decision in the package.
 
-Consequences:
+At a conceptual level, one live connection consists of:
 
-- every public API eventually becomes a `Request`
-- requests are queued in `Shared.requests`
-- `Connection::run` is the only task that writes to or reads from the socket
-- user-facing streams decode backend messages from per-request response queues
+- one shared outbound queue
+- one ordered list of requests that have been sent but not yet completed
+- one private inbound queue for each in-flight request
+- one side channel for asynchronous backend messages
 
-This design keeps the public API simple while still allowing controlled
-request pipelining and async side-channel delivery.
+Direction note: `outbound` and `inbound` are named relative to the local
+socket-owning connection runtime. `outbound` means bytes and requests flowing
+from this package to PostgreSQL. `inbound` means backend frames flowing from
+PostgreSQL back into this package.
 
-## Runtime Flow
+The important consequence is that the package does not route replies by looking
+up a particular client handle. It routes replies by request ownership.
 
-Normal request flow:
+## Queue Ownership Model
 
-1. `Client` builds frontend protocol bytes.
-2. `Client` wraps those bytes in a `Request`.
-3. The request is pushed into `Shared.requests`.
-4. `Connection::run` takes requests from the queue and writes them to the wire.
-5. Backend messages are read in order.
-6. Messages are routed either to:
-   - the oldest pending request, or
-   - the async-message side channel
-7. `RowStream`, `SimpleQueryStream`, or `CopyOutStream` convert those messages
-   into user-facing values.
+Every operation submitted through a client handle is turned into one or more
+request objects.
 
-Shutdown flow:
+Each request owns:
 
-- `Client::close` enqueues a `Terminate` request
-- `Connection::run` drains queued requests, closes runtime queues, and closes
-  the socket once shutdown is complete
+- encoded outbound protocol bytes
+- a private response queue for backend messages
+- optional extra state when the request needs bidirectional coordination, such
+  as COPY FROM STDIN input
 
-## Important Internal Types
+All client handles derived from the same connection share the same submission
+path. They all send work through one socket and therefore share one protocol
+timeline. The runtime keeps their results separate by giving each request its
+own response queue and routing replies according to request ownership.
 
-- `Shared`
-  All mutable runtime state shared across client handles.
-- `Request`
-  One queued outbound protocol request plus its response queue.
-- `RequestKind`
-  Distinguishes normal message traffic, COPY IN, and termination.
-- `Stream`
-  Abstracts plain TCP versus TLS so later code can ignore transport choice.
-- `StreamCleanup`
-  Deferred cleanup attached to a `RowStream`, typically for temporary prepared
-  statements.
+That is the central routing rule in this package.
 
-## Stream Lifecycle Rules
+## End-To-End Flow
+
+From a high level, message delivery works like this:
+
+1. Connection startup finishes and constructs shared runtime state.
+2. Application code submits work through a lightweight handle.
+3. That work is packaged as a request and pushed into the shared outbound
+   queue.
+4. The socket-owning runtime takes requests from that queue in protocol order
+   and writes them to the wire.
+5. Sent requests enter an ordered pending list.
+6. Backend frames are then read from the socket in order.
+7. Frames that are globally asynchronous are peeled off into the async side
+   channel.
+8. All other frames are delivered to the oldest pending request.
+9. The consumer that already owns that request's private response queue reads
+   and decodes the frames into rows, completion states, copy chunks, or errors.
+10. When PostgreSQL sends `ReadyForQuery`, that request is considered complete
+    and is removed from the pending list.
+
+So the full handoff model is:
+
+- shared outbound queue
+- FIFO pending list
+- one inbound response queue per request
+
+## What "A Specific Client Gets The Data" Means
+
+A `Client` value is only a lightweight reference into shared runtime state.
+It does not own a mailbox of its own.
+
+Inside one live connection, reply ownership is tracked like this:
+
+- the submitting side creates a fresh response queue for a request
+- the consumer that represents that request keeps the queue
+- the connection runtime forwards matching backend frames into that queue
+- that same consumer drains and decodes them
+
+This leads to two important properties:
+
+- copying or passing around a client handle does not create an independent
+  connection
+- true isolation only exists across separate connections, because separate
+  connections have different shared state, queues, pending lists, and sockets
+
+In other words, the runtime is not asking "which client object should receive
+this frame?" It is asking "which pending request owns this frame?"
+
+## Multi-Stage Operations
+
+Not every user-visible operation maps to exactly one protocol request.
+
+Some operations naturally decompose into multiple stages, for example:
+
+- a metadata-discovery stage
+- an execution stage
+- a cleanup stage
+
+Each stage can have its own request object and therefore its own response
+queue, but those stages still belong to one higher-level operation from the
+caller's point of view.
+
+This matters for understanding the runtime:
+
+- one high-level action may occupy multiple positions on the protocol timeline
+- later stages may depend on metadata learned from earlier stages
+- cleanup may be delayed until the response stream reaches its terminal state
+
+So the abstraction boundary is:
+
+- protocol scheduling happens per request
+- user intent is often expressed per multi-stage operation
+
+## Backpressure And Stream Lifetime
 
 The package relies on a strict invariant:
 
-- a request is not finished until PostgreSQL sends `ReadyForQuery`
+- a request is not complete until PostgreSQL sends `ReadyForQuery`
 
-That means:
+This is why response consumers cannot be abandoned casually.
 
-- `RowStream`
-- `SimpleQueryStream`
-- `CopyOutStream`
+Per-request response queues are intentionally bounded. That means an unfinished
+consumer can stop the socket-owning runtime from making forward progress, which
+in turn can stall later pipelined work.
 
-must either be consumed to `None`, explicitly finished, or explicitly
-detached.
+This is also why some cleanup actions are tied to terminal stream state instead
+of happening immediately: interrupting the active protocol exchange would be
+incorrect.
 
-Why this matters:
+At a conceptual level, a response consumer must do one of three things:
 
-- per-request response queues are bounded
-- unfinished streams can apply backpressure to later pipelined requests
-- temporary prepared statements are often cleaned up only when the stream
-  reaches its terminal state
+- consume to completion
+- synchronously drain to completion
+- delegate the remaining drain to background work
 
-In short: draining streams is not just a convenience, it is part of correct
-protocol progress.
+If none of those happens, protocol progress may stop behind unread messages.
 
-Use the two early-stop APIs like this:
+## Pipelining Rules
 
-- `finish()`
-  Synchronously drain to the terminal `ReadyForQuery` and still surface any
-  final database error to the caller.
-- `detach()`
-  Spawn a background discard drain that keeps protocol progress moving with
-  lower client-side decode cost and swallows terminal database errors locally.
-  After this call, the stream handle itself should be treated as closed.
+The runtime opportunistically pipelines requests when it is safe to do so.
+
+The rule is simple:
+
+- ordinary one-way request/response traffic may be pipelined
+- requests that require tight mid-stream coordination act as barriers
+
+COPY FROM STDIN is the main example of a barrier, because the client must
+continue producing outbound data while also processing inbound backend messages
+for the same logical request.
+
+Graceful shutdown is also a barrier, because once termination is requested the
+runtime must stop accepting normal forward progress and instead converge toward
+closure.
 
 ## Startup And Authentication
 
-Startup is handled separately from the normal request loop in
-`client_startup.mbt`.
+Startup is conceptually separate from the normal request loop.
 
-Order of operations:
+Before the runtime can begin ordinary request scheduling, it must first:
 
-1. open TCP connection
-2. negotiate TLS if requested
-3. send PostgreSQL startup message
+1. open the transport
+2. negotiate TLS if needed
+3. send PostgreSQL startup parameters
 4. complete authentication
-5. collect:
-   - `process_id`
-   - `secret_key`
-   - startup `ParameterStatus` values
-   - initial transaction status
-6. create `Shared`
-7. hand control to the normal `Connection::run` loop
+5. collect backend identity and initial session state
+6. construct the shared runtime state
 
-Supported authentication paths:
-
-- cleartext password
-- MD5 password
-- SCRAM-SHA-256
-
-Unsupported startup auth methods are rejected with `ClientError::Authentication`.
+Only after that handoff does the connection enter its steady-state request loop.
 
 ## Request Encoding
 
-Frontend message encoding lives in `client_wire.mbt`.
+Request construction is intentionally front-loaded.
 
-Main helpers:
+Before a request enters the shared outbound queue, the runtime tries to do as
+much deterministic work as possible:
 
-- `simple_query_bytes`
-- `prepare_bytes`
-- `execute_statement_bytes`
-- `bind_portal_bytes`
-- `execute_portal_bytes`
-- `close_bytes`
-- `terminate_bytes`
+- assemble protocol frames
+- validate parameter counts and type compatibility
+- serialize parameter payloads
+- represent SQL `NULL` explicitly rather than implicitly
 
-Parameter encoding rules:
+This front-loading keeps runtime behavior predictable and makes many failures
+occur before bytes are written to the socket.
 
-- each parameter is checked with `param.accepts(type_)` before serialization
-- each parameter is serialized into an `EncodedParam`
-- `NULL` is represented through `@proto.IsNull`
+## Response Interpretation
 
-The pre-check is important because it gives deterministic `WrongType` errors
-before user codec code runs.
+Inbound processing is split into two layers:
 
-## Response Decoding
+- the connection runtime only decides where each backend frame belongs
+- the request-specific consumer interprets the meaning of those frames
 
-Response queue interpretation is split between:
+That second layer is responsible for things like:
 
-- stream types in `types_row_stream.mbt`, `types_simple_query.mbt`,
-  `types_async_copy.mbt`
-- helper functions in `client_responses.mbt`
-- backend parsers in `types_backend_parsing.mbt`
+- turning row data into user-facing values
+- tracking completion summaries
+- delaying database errors until the terminal ready state
+- detecting impossible protocol states and failing the stream
 
-Design choices:
-
-- database errors are usually recorded when `ErrorResponse` arrives, then raised
-  after the terminal `ReadyForQuery`
-- row streams preserve already-resolved type metadata when a later
-  `RowDescription` arrives
-- `fail_response_stream` closes the queue and re-raises when the stream sees a
-  protocol state it cannot recover from
-
-## Type System And Caching
-
-The package separates PostgreSQL metadata from MoonBit codecs.
-
-PostgreSQL-side metadata:
-
-- `Type`
-- `Kind`
-- `Field`
-
-MoonBit-side codec contracts:
-
-- `ToSql`
-- `FromSql`
-
-Type resolution strategy:
-
-- built-in types are available immediately through `builtin_type`
-- unknown OIDs are represented as `Type::unknown(...)`
-- richer metadata is fetched lazily through catalog queries in
-  `client_type_cache.mbt`
-- resolved types are stored in `Shared.types`
-
-This is why `parse_columns` can work immediately with OIDs while still allowing
-later enrichment into enum/composite/domain/range metadata.
+This separation keeps the routing logic simple and keeps protocol semantics
+close to the consumer that actually cares about them.
 
 ## Async Side Channel
 
-`Connection::run` treats these backend messages as asynchronous:
+Some backend messages are intentionally treated as out-of-band:
 
-- `ParameterStatus`
-- `NoticeResponse`
-- `NotificationResponse`
+- parameter updates
+- notices
+- notifications
 
-They are emitted in two ways:
+These messages do not belong to the current request head in the same way that
+row data or command completion does, so the runtime peels them off first and
+publishes them through a separate side channel.
 
-- immediate callback through `on_async`
-- buffered delivery through `Shared.async_messages` and
-  `Connection::next_message`
+That separation has two benefits:
 
-This keeps request-specific streams simpler because they only need to reason
-about messages that belong to their request.
+- request-specific consumers can stay focused on messages that advance their own
+  protocol state
+- session-wide events remain observable even while ordinary requests are in
+  flight
+
+## Type Metadata And Caching
+
+The package separates two concerns:
+
+- PostgreSQL's own type metadata
+- MoonBit-side encode/decode contracts
+
+The runtime starts with a built-in set of known PostgreSQL types, then enriches
+that picture lazily when later operations need more detail.
+
+This allows early progress with only raw OIDs while still supporting richer
+metadata for enums, composites, domains, ranges, and other server-defined
+types.
+
+The shared cache exists so later operations do not have to rediscover the same
+type information repeatedly.
 
 ## Cancellation
 
-Cancellation uses PostgreSQL's separate cancel-request protocol.
+Cancellation is intentionally out-of-band.
 
-`Client::cancel_token` captures:
+Instead of trying to interrupt the main socket directly, the client keeps the
+backend identity needed to open a separate short-lived control connection and
+send a PostgreSQL cancel request there.
 
-- host/port config
-- backend process ID
-- backend secret key
-
-`CancelToken::cancel` then opens a new short-lived TCP connection and sends the
-cancel request. It does not reuse the main connection socket.
+This matches PostgreSQL's own cancellation model and avoids corrupting the main
+protocol stream.
 
 ## Transactions
 
-Top-level transactions use `BEGIN` / `COMMIT` / `ROLLBACK`.
+Transaction handling is layered on top of the same request machinery.
 
-Nested transactions are implemented with savepoints:
+Top-level transactions use PostgreSQL transaction commands directly. Nested
+transaction scopes are modeled with savepoints.
 
-- `Transaction::transaction()` creates a savepoint-backed child transaction
-- child `commit()` releases the savepoint
-- child `rollback()` rolls back to and then releases the savepoint
+The important runtime property is not the SQL spelling, but the handle
+discipline:
 
-The `finished` flag on `Transaction` is important. Once a transaction or
-savepoint handle has been committed or rolled back, it must not be used again.
+- a transaction scope is single-use
+- once committed or rolled back, that scope must not be reused
+
+That rule prevents later requests from being issued against a logical scope
+that no longer exists on the server.
 
 ## COPY
 
-COPY support is intentionally low-level:
+COPY support stays intentionally low-level.
 
-- `copy_out` returns raw `CopyData` chunks
-- `copy_in` accepts raw input chunks and finish/abort signals
+The package treats COPY as protocol transport rather than as a format parser.
+It therefore moves raw copy payloads and completion states, but leaves CSV,
+text, or binary interpretation to higher layers.
 
-The package does not try to understand CSV, text, or binary COPY content.
-That responsibility stays above the protocol layer.
+COPY is also the clearest example of why the runtime distinguishes between
+ordinary request traffic and barrier-style traffic:
 
-COPY IN is special in the connection loop because it mixes:
+- COPY TO STDOUT is still a streamed response
+- COPY FROM STDIN is a coordinated exchange in both directions
 
-- outbound client-produced `CopyData` / `CopyDone` / `CopyFail`
-- inbound backend responses for the same request
-
-That is why `RequestKind::CopyIn` acts as a pipeline barrier.
+That distinction is part of the runtime scheduler, not just part of the public
+API surface.
 
 ## File Map
 
-- `types_config.mbt`, `types_errors.mbt`
+- `config.mbt`, `errors.mbt`
   Config and public error surface.
-- `types_descriptors.mbt`
+- `descriptors.mbt`
   PostgreSQL type descriptors and builtin-type helpers.
-- `types_traits.mbt`, `types_scalars.mbt`
+- `sqldata.mbt`, `scalars.mbt`
   Codec traits and built-in primitive codecs.
-- `types_rows.mbt`, `types_row_stream.mbt`
-  Rows and extended-query streaming.
-- `types_simple_query.mbt`
+- `rows.mbt`, `row_stream.mbt`
+  Row values and extended-query streaming.
+- `simple_query.mbt`
   Simple-query messages and stream.
-- `types_async_copy.mbt`
-  Async messages and COPY OUT stream.
-- `types_backend_parsing.mbt`
+- `copy.mbt`
+  Async messages plus COPY IN/OUT APIs and streams.
+- `backend_parsing.mbt`
   Shared backend parsing helpers.
-- `client_runtime.mbt`
+- `runtime.mbt`
   Shared runtime structs and internal handle types.
-- `client_connect.mbt`
+- `connect.mbt`
   Public connect/close/cancel APIs.
-- `client_startup.mbt`
+- `startup.mbt`
   TCP/TLS startup and authentication.
-- `client_query.mbt`
+- `query.mbt`
   Prepare/query/execute/bind/portal APIs.
-- `client_copy.mbt`
-  COPY IN/OUT APIs.
-- `client_transactions.mbt`
+- `transactions.mbt`
   Transaction and savepoint APIs.
-- `client_connection_loop.mbt`
+- `connection_loop.mbt`
   Socket-owning event loop and message routing.
-- `client_wire.mbt`
+- `wire.mbt`
   Frontend protocol encoding helpers.
-- `client_responses.mbt`
+- `responses.mbt`
   Backend response interpretation helpers.
-- `client_type_cache.mbt`
+- `type_cache.mbt`
   Lazy catalog-backed type lookup.
-- `client_support.mbt`
-  Smaller shared runtime helpers.
+- `support.mbt`
+  Smaller shared runtime helpers such as request submission and shutdown.
 
 ## Reading Order For New Maintainers
 
 If you are taking over this package, this is a good reading order:
 
 1. [`README.mbt.md`](./README.mbt.md)
-2. `client_runtime.mbt`
-3. `client_connect.mbt`
-4. `client_query.mbt`
-5. `client_connection_loop.mbt`
-6. `client_startup.mbt`
-7. `types_traits.mbt`
-8. `types_row_stream.mbt`
-9. `client_type_cache.mbt`
+2. `runtime.mbt`
+3. `connect.mbt`
+4. `support.mbt`
+5. `query.mbt`
+6. `connection_loop.mbt`
+7. `startup.mbt`
+8. `row_stream.mbt`
+9. `simple_query.mbt`
+10. `copy.mbt`
+11. `type_cache.mbt`
 
-That order gets you from public API shape to socket control flow to codec/type
-machinery with minimal jumping around.
+That order gets you from public API shape to queue ownership to socket control
+flow and finally to codec/type machinery with minimal jumping around.

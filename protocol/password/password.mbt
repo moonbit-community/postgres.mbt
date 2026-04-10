@@ -1,4 +1,11 @@
 ///|
+/// PostgreSQL-compatible password hash helpers used by authentication code.
+///
+/// Primary references:
+/// - https://www.postgresql.org/docs/current/auth-password.html#AUTH-PASSWORD
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
+
+///|
 let scram_default_iterations = 4096
 
 ///|
@@ -6,6 +13,10 @@ let scram_default_salt_len = 16
 
 ///|
 /// Hash password using SCRAM-SHA-256 with a caller-provided salt.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/auth-password.html#AUTH-PASSWORD
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub fn scram_sha_256(
   password : BytesView,
   salt : BytesView,
@@ -15,6 +26,10 @@ pub fn scram_sha_256(
 
 ///|
 /// Hash password using SCRAM-SHA-256 with a provided salt.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/auth-password.html#AUTH-PASSWORD
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub fn scram_sha_256_salt(
   password : BytesView,
   salt : BytesView,
@@ -57,6 +72,9 @@ pub fn scram_sha_256_salt(
 
 ///|
 /// **Not recommended**. Hash password using MD5 with username as salt.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/auth-password.html#AUTH-PASSWORD
 pub fn md5(password : BytesView, username : BytesView) -> Bytes {
   let input = @buffer.new(size_hint=password.length() + username.length())
   input.write_bytesview(password)

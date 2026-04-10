@@ -8,11 +8,15 @@ async fn connect_stream(config : Config) -> Stream {
     Disable => Plain(conn)
     Prefer | Require => {
       let request = @buffer.new()
+      // PostgreSQL SSL negotiation is a one-byte capability probe that happens
+      // before the normal startup packet.
       @frontend.ssl_request(request)
       conn.write(request.to_bytes())
       let response = conn.read_exactly(1)
       match response[0] {
         b'S' => {
+          // Upgrade the existing TCP connection in place so the subsequent
+          // startup/authentication exchange stays on the same transport.
           let tls = @tls.Tls::client(conn, host=config.host) catch {
             err => {
               conn.close()
@@ -53,6 +57,8 @@ priv struct StartupState {
 /// transport stream. Once `ReadyForQuery` arrives, the caller has everything
 /// needed to construct the shared runtime state.
 async fn startup(stream : Stream, config : Config) -> StartupState {
+  // Startup parameters are sent exactly once; afterward the server drives the
+  // rest of the handshake with backend messages.
   let parameters : Array[(BytesView, BytesView)] = [
     (b"user"[:], @proto.utf8_encode(config.user)[:]),
     (b"database"[:], @proto.utf8_encode(config.database)[:]),
@@ -67,6 +73,8 @@ async fn startup(stream : Stream, config : Config) -> StartupState {
   let mut secret_key = 0
   let mut transaction_status = b'I'
   let mut scram : @sasl.ScramSha256? = None
+  // SCRAM authentication spans multiple round trips, so its local state has to
+  // survive across several backend auth messages.
   for msg = read_message(stream) {
     match msg {
       @backend.Message::AuthenticationOk => continue read_message(stream)
@@ -96,16 +104,22 @@ async fn startup(stream : Stream, config : Config) -> StartupState {
         continue read_message(stream)
       }
       @backend.Message::ParameterStatus(body) => {
+        // Capture the initial session parameter snapshot now so steady-state
+        // runtime helpers start with the same view PostgreSQL advertised here.
         status[body.name_str()] = body.value_str()
         continue read_message(stream)
       }
       @backend.Message::BackendKeyData(body) => {
+        // These values are later reused by `CancelToken` on a separate short-
+        // lived control connection.
         process_id = body.process_id
         secret_key = body.secret_key
         continue read_message(stream)
       }
       @backend.Message::NoticeResponse(_) => continue read_message(stream)
       @backend.Message::ReadyForQuery(body) => {
+        // `ReadyForQuery` is the handoff point from startup/authentication into
+        // the ordinary request scheduling loop.
         transaction_status = body.status
         return {
           process_id,
@@ -135,6 +149,8 @@ async fn read_message(stream : Stream) -> @backend.Message {
   let header = stream.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = stream.read_exactly(body_len - 4)
+  // Reassemble the full packet so startup uses the same parser and validation
+  // path as the steady-state connection loop.
   let packet = @buffer.new(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
@@ -187,6 +203,8 @@ async fn begin_scram(
   }
   let password = require_password(password)
   let nonce = @tls.rand_bytes(18)
+  // This client currently uses plain SCRAM-SHA-256 without channel binding and
+  // keeps the nonce locally for later challenge/response rounds.
   let scram = @sasl.ScramSha256::new(
     @proto.utf8_encode(password)[:],
     @sasl.ChannelBinding::unsupported(),
@@ -206,6 +224,8 @@ async fn continue_scram(
   data : BytesView,
 ) -> Unit {
   let scram = require_scram(scram)
+  // Each server challenge mutates the SCRAM state machine before the next
+  // client proof is serialized and written.
   scram.update(data)
   let buf = @buffer.new()
   @frontend.sasl_response(scram.message(), buf)
@@ -243,6 +263,8 @@ fn require_scram(scram : @sasl.ScramSha256?) -> @sasl.ScramSha256 raise {
 /// Return whether the server offered SCRAM-SHA-256.
 fn supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
+  // PostgreSQL may advertise multiple SASL mechanisms; accept as soon as the
+  // standard SCRAM-SHA-256 entry appears.
   for mechanism = mechanisms.next() {
     match mechanism {
       None => break false

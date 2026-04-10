@@ -2,7 +2,8 @@
 /// Shared protocol primitives.
 ///
 /// Primary reference:
-/// - https://www.postgresql.org/docs/current/protocol.html
+/// - https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-OVERVIEW
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 /// Protocol error type used when a packet violates the wire-level invariants
 /// described in PostgreSQL protocol Sections 54.6 and 54.7.
 pub(all) suberror ProtocolError {

@@ -2,8 +2,9 @@
 /// Binary/text value codecs used inside PostgreSQL protocol payloads.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-message-types.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-BIND
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DATAROW
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 /// Value encoders and decoders used inside protocol payloads.
 ///
 /// These helpers do not build full frontend/backend messages. They only encode

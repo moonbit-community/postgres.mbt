@@ -2,8 +2,9 @@
 /// Client-side SCRAM helpers for PostgreSQL SASL authentication.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTHENTICATION
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONSASL
 /// Mechanism name advertised in `AuthenticationSASL` for SCRAM without channel
 /// binding.
 pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
@@ -11,6 +12,9 @@ pub const SCRAM_SHA_256 : Bytes = b"SCRAM-SHA-256"
 ///|
 /// Mechanism name advertised in `AuthenticationSASL` for SCRAM with
 /// `tls-server-end-point` channel binding.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 ///|
@@ -25,7 +29,7 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 /// requires valid UTF-8 input.
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
   let s = @utf8.decode(pass) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
@@ -136,6 +140,9 @@ fn is_tagging(cp : Int) -> Bool {
 
 ///|
 /// SCRAM `Hi()` function, implemented as PBKDF2-HMAC-SHA-256.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub fn hi(
   str : BytesView,
   salt : BytesView,
@@ -172,6 +179,10 @@ fn xor_bytes(a : BytesView, b : BytesView) -> Bytes {
 /// PostgreSQL supports the `tls-server-end-point` binding for
 /// `SCRAM-SHA-256-PLUS`. The enum also carries the two non-binding GS2 headers
 /// used when the client does not request binding.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub enum ChannelBinding {
   Unrequested
   Unsupported
@@ -180,18 +191,28 @@ pub enum ChannelBinding {
 
 ///|
 /// Construct a channel binding mode that was offered but not requested.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub fn ChannelBinding::unrequested() -> ChannelBinding {
   Unrequested
 }
 
 ///|
 /// Construct a channel binding mode for servers without channel binding support.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub fn ChannelBinding::unsupported() -> ChannelBinding {
   Unsupported
 }
 
 ///|
 /// Construct a `tls-server-end-point` channel binding with the given signature.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub fn ChannelBinding::tls_server_end_point(
   signature : Bytes,
 ) -> ChannelBinding {
@@ -223,7 +244,9 @@ fn ChannelBinding::cbind_data(self : ChannelBinding) -> BytesView {
 /// -> `SASLResponse` -> `AuthenticationSASLFinal`.
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-BEGIN
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-CONTINUE
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-END
 enum State {
   Update(nonce~ : Bytes, password~ : Bytes, channel_binding~ : ChannelBinding)
   Finish(salted_password~ : Bytes, auth_message~ : Bytes)
@@ -232,6 +255,9 @@ enum State {
 
 ///|
 /// Client-side SCRAM state machine for PostgreSQL SASL authentication.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub struct ScramSha256 {
   mut message : Bytes
   mut state : State
@@ -241,6 +267,9 @@ pub struct ScramSha256 {
 /// Construct a new SCRAM-SHA-256 exchange from caller-provided random nonce bytes.
 /// The nonce bytes are base64-encoded to a SCRAM-safe ASCII nonce before they
 /// are embedded in the initial client message.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub fn ScramSha256::new(
   password : BytesView,
   channel_binding : ChannelBinding,
@@ -264,7 +293,7 @@ pub fn ScramSha256::new(
 /// 2. client-first-message-bare: `n=,r=<client nonce>`
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
 pub fn ScramSha256::new_inner(
   password : BytesView,
   channel_binding : ChannelBinding,
@@ -302,6 +331,10 @@ fn validate_nonce(nonce : BytesView) -> Unit raise @proto.ProtocolError {
 /// Before `update`, this is the `client-first-message` for
 /// `SASLInitialResponse`. After `update`, it is the `client-final-message` for
 /// `SASLResponse`.
+///
+/// See:
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FIRST
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FINAL
 pub fn ScramSha256::message(
   self : ScramSha256,
 ) -> BytesView raise @proto.ProtocolError {
@@ -327,7 +360,8 @@ pub fn ScramSha256::message(
 /// 3. `,p=<base64 client proof>`
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-SERVER-FIRST
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-CLIENT-FINAL
 pub fn ScramSha256::update(
   self : ScramSha256,
   message : BytesView,
@@ -409,7 +443,7 @@ pub fn ScramSha256::update(
 /// 2. failure: `e=<server error text>`
 ///
 /// See:
-/// - https://www.postgresql.org/docs/current/sasl-authentication.html
+/// - https://www.postgresql.org/docs/current/sasl-authentication.html#SCRAM-SERVER-FINAL
 pub fn ScramSha256::finish(
   self : ScramSha256,
   message : BytesView,

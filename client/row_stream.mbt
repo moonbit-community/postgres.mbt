@@ -51,14 +51,20 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
       | @backend.Message::BindComplete
       | @backend.Message::CloseComplete
       | @backend.Message::ParameterDescription(_) =>
+        // Setup/bookkeeping frames do not carry row payloads once the stream is
+        // active, so readers can skip them transparently.
         continue self.responses.get()
       @backend.Message::NoData => continue self.responses.get()
       @backend.Message::RowDescription(body) => {
+        // Execution may repeat column metadata. Merge it so previously resolved
+        // rich types survive while protocol consistency is still checked.
         self.columns = merge_stream_columns(self.columns, body)
         continue self.responses.get()
       }
       @backend.Message::DataRow(body) => {
         self.row_count += 1
+        // Rows must copy their field bytes now because the backend message
+        // buffer does not outlive this iteration step.
         return Some({ columns: self.columns, values: parse_binary_values(body) })
       }
       @backend.Message::CommandComplete(body) => {
@@ -70,6 +76,8 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
         continue self.responses.get()
       }
       @backend.Message::ErrorResponse(body) => {
+        // PostgreSQL may still send the terminal ready message after an error,
+        // so remember the failure but keep draining until the request ends.
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()
       }
@@ -79,6 +87,8 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
           row_count: self.row_count,
           suspended: self.suspended,
         })
+        // Temporary statements are only safe to close once this request has
+        // fully relinquished ownership of the connection timeline.
         self.run_cleanup()
         return self.raise_terminal_error_or_none()
       }
@@ -149,6 +159,8 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
     Some(cleanup) =>
       if !cleanup.done {
         cleanup.done = true
+        // Deferred cleanup is modeled as an ordinary request so it obeys the
+        // same queueing and pipelining rules as user-visible work.
         let responses = cleanup.client.send_request(
           RequestKind::Messages,
           cleanup.bytes,
@@ -176,8 +188,11 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
           | @backend.Message::CloseComplete
           | @backend.Message::ParameterDescription(_)
           | @backend.Message::NoData
-          | @backend.Message::RowDescription(_)
-          | @backend.Message::DataRow(_) => continue self.responses.get()
+          | @backend.Message::RowDescription(_) => continue self.responses.get()
+          @backend.Message::DataRow(_) =>
+            // Detached drains intentionally skip row decoding because the
+            // caller can no longer observe individual payloads.
+            continue self.responses.get()
           @backend.Message::CommandComplete(body) => {
             self.command_tag = body.tag_str()
             continue self.responses.get()
@@ -196,6 +211,8 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
               row_count: self.row_count,
               suspended: self.suspended,
             })
+            // Detached drains still run cleanup so temporary statements do not
+            // leak on the server after the caller stops waiting.
             self.run_cleanup()
             match self.database_error {
               Some(err) => raise ClientError::Database(err)

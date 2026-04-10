@@ -3,8 +3,8 @@
 /// payloads.
 ///
 /// Primary references:
-/// - https://www.postgresql.org/docs/current/protocol-overview.html
-/// - https://www.postgresql.org/docs/current/protocol-message-types.html
+/// - https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-OVERVIEW
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 fn[T] invalid_utf8() -> T raise ProtocolError {
   raise ProtocolError::InvalidInput("invalid UTF-8")
 }

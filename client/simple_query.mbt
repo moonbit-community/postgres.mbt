@@ -89,12 +89,16 @@ pub async fn SimpleQueryStream::next(
   for response = self.responses.get() {
     match response {
       @backend.Message::RowDescription(body) => {
+        // Each statement inside a simple-query batch can introduce a fresh row
+        // shape, so later `DataRow` frames read from this updated column list.
         self.columns = parse_column_names(body)
         return Some(SimpleQueryMessage::RowDescription(self.columns))
       }
       @backend.Message::DataRow(body) =>
         return Some(SimpleQueryMessage::Row(parse_text_row(body, self.columns)))
       @backend.Message::CommandComplete(body) => {
+        // Command completion also ends the current row shape; a following
+        // statement in the same batch may describe different columns.
         self.columns = []
         return Some(SimpleQueryMessage::CommandComplete(body.tag_str()))
       }
@@ -103,10 +107,13 @@ pub async fn SimpleQueryStream::next(
         return Some(SimpleQueryMessage::CommandComplete(""))
       }
       @backend.Message::ErrorResponse(body) => {
+        // Keep draining until the terminal ready state so the connection and
+        // caller stay synchronized even when one statement fails mid-batch.
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()
       }
       @backend.Message::ReadyForQuery(_) => {
+        // The simple-query batch is complete only after the final ready frame.
         self.finished = true
         return self.raise_terminal_error_or_none()
       }
@@ -172,9 +179,12 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
   for response = self.responses.get() {
     match response {
       @backend.Message::RowDescription(_)
-      | @backend.Message::DataRow(_)
       | @backend.Message::CommandComplete(_)
       | @backend.Message::EmptyQueryResponse => continue self.responses.get()
+      @backend.Message::DataRow(_) =>
+        // Detached drains discard row payloads but still have to consume them
+        // so later statements in the same batch can make progress.
+        continue self.responses.get()
       @backend.Message::ErrorResponse(body) => {
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()

@@ -2,7 +2,8 @@
 /// Helpers for PostgreSQL's repeated `Int32 length + payload` layout.
 ///
 /// Primary reference:
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-BIND
+/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DATAROW
 /// Write one nullable `Int32 + Byte n` field.
 ///
 /// This is the value layout used by `Bind` parameters, `DataRow` columns, and

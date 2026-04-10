@@ -96,6 +96,8 @@ pub async fn Client::query(
 ) -> RowStream {
   ensure_open(self.shared)
   let name = next_name(self.shared, "q")
+  // Use a temporary named statement so the driver can learn PostgreSQL's
+  // resolved parameter and result metadata before execution starts.
   let prepare_responses = self.send_request(
     RequestKind::Messages,
     prepare_bytes(name[:], sql, []),
@@ -105,6 +107,8 @@ pub async fn Client::query(
     prepare_responses,
   )
   guard param_types.length() == params.length() else {
+    // Preparation already created server-side state, so close it even though
+    // execution never begins.
     let _ = close_temporary_statement(self, name) catch { _ => () }
     raise ClientError::Encode(
       "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
@@ -114,6 +118,8 @@ pub async fn Client::query(
     RequestKind::Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
+  // Cleanup is deferred onto the returned stream because closing the temporary
+  // statement early would interleave a second request before this one finishes.
   new_row_stream(
     self.shared.background_group,
     responses,
@@ -134,6 +140,8 @@ pub async fn Client::query_one(
 ) -> Row {
   let stream = self.query(sql, params~)
   let first = stream.next()
+  // Always drain to the terminal ready state so temporary statement cleanup and
+  // row-count validation see the full server outcome.
   let summary = stream.finish()
   match first {
     Some(row) =>
@@ -160,6 +168,8 @@ pub async fn Client::query_opt(
 ) -> Row? {
   let stream = self.query(sql, params~)
   let first = stream.next()
+  // `query_opt` shares the same full-drain requirement as `query_one`; without
+  // it, the temporary statement and final row count would remain unresolved.
   let summary = stream.finish()
   guard summary.row_count <= 1 else {
     raise ClientError::RowCount(
@@ -256,6 +266,8 @@ pub async fn Client::execute(
   params? : Array[&ToSql] = [],
 ) -> Int {
   let statement = self.prepare(sql)
+  // Route through the named-statement path so success and failure share one
+  // close policy and one row-count extraction path.
   let rows = self.execute_raw(statement, params~) catch {
     err => {
       let _ = statement.close() catch { _ => () }
@@ -306,6 +318,8 @@ pub async fn Client::bind(
     bind_portal_bytes(name[:], statement.name[:], statement.params, params),
   )
   let mut columns = statement.columns
+  // PostgreSQL may refine the visible row description at bind time, so start
+  // from the prepared statement's shape and patch it if the server sends one.
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
@@ -326,6 +340,8 @@ pub async fn Client::bind(
             let portal = Portal::{
               client: self,
               name,
+              // Resolve column OIDs lazily here so callers still get enriched
+              // type descriptors even when portals are bound later.
               columns: resolve_columns(self.shared, columns),
               closed: @ref.new(false),
             }
