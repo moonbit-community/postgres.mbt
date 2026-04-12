@@ -110,7 +110,9 @@ pub struct Notification {
 ///
 /// These messages are emitted by the connection loop through the optional
 /// callback passed to `Connection::run` and can also be consumed later via
-/// `Connection::next_message`.
+/// `Connection::next_message`. In practice, pick one primary consumption style:
+/// pass `on_async` when you want push-style handling during `run`, or dedicate
+/// one reader task to `next_message` when you want pull-style handling.
 pub enum AsyncMessage {
   /// Server notice that did not fail the active request.
   Notice(DatabaseError)
@@ -129,8 +131,8 @@ pub enum AsyncMessage {
 pub struct CopyOutStream {
   priv background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   priv responses : @async.Queue[@backend.Message]
-  /// Column format codes reported by PostgreSQL's `CopyOutResponse`.
-  formats : Array[Int]
+  /// Column wire formats reported by PostgreSQL's `CopyOutResponse`.
+  formats : Array[WireFormat]
   priv mut database_error : DatabaseError?
   priv mut detached : Bool
   priv mut finished : Bool

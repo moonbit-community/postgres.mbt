@@ -1,4 +1,6 @@
 ///|
+/// Structured error fields used by the protocol tests.
+/// The wire format exposes many fields, but these tests only keep the ones they assert on directly.
 struct WireDatabaseError {
   severity : String?
   code : String?
@@ -8,6 +10,8 @@ struct WireDatabaseError {
 }
 
 ///|
+/// Connection wrapper used by the protocol tests.
+/// Besides the socket itself, it keeps the backend pid, cancel key, parameter map, and transaction status for later assertions.
 struct WireConnection {
   socket : @socket.Tcp
   mut process_id : Int
@@ -30,6 +34,8 @@ async fn WireConnection::write_buffer(
 }
 
 ///|
+/// Read one full backend packet.
+/// PostgreSQL packets carry their length in the header, so this reads the header first and then the body.
 async fn read_socket_packet(socket : @socket.Tcp) -> Bytes {
   let header = socket.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
@@ -41,6 +47,8 @@ async fn read_socket_packet(socket : @socket.Tcp) -> Bytes {
 }
 
 ///|
+/// Parse one full packet into a backend message.
+/// If a complete packet still cannot be parsed, either the test setup or the protocol implementation is wrong.
 async fn WireConnection::read_message(
   self : WireConnection,
 ) -> @backend.Message {
@@ -52,6 +60,8 @@ async fn WireConnection::read_message(
 }
 
 ///|
+/// Read messages until `ReadyForQuery`.
+/// That lets each test follow a simple pattern: send one batch of frontend messages and collect the full backend response batch.
 async fn WireConnection::collect_until_ready(
   self : WireConnection,
 ) -> Array[@backend.Message] {
@@ -78,6 +88,7 @@ async fn WireConnection::collect_until_ready(
 }
 
 ///|
+/// This helper matches the most common protocol-test pattern: write a buffer, then collect the full response batch.
 async fn WireConnection::send_and_collect(
   self : WireConnection,
   buf : @buffer.Buffer,
@@ -87,6 +98,8 @@ async fn WireConnection::send_and_collect(
 }
 
 ///|
+/// Send one SQL string through the simple-query protocol.
+/// The optional `flush` is mainly used in cases like COPY where an explicit flush matters.
 async fn WireConnection::simple_query(
   self : WireConnection,
   sql : String,
@@ -102,9 +115,11 @@ async fn WireConnection::simple_query(
 }
 
 ///|
+/// Complete the startup handshake at the protocol level and return a connection that can send raw frontend messages.
+/// It supports cleartext and SCRAM authentication so later tests can focus on protocol details.
 async fn wire_connect(
   config : IntegrationConfig,
-  application_name? : String = "moonbit-postgres-wire",
+  application_name~ : String,
 ) -> WireConnection {
   let socket = @socket.Tcp::connect_to_host(config.host, port=config.port)
   let connection = {
@@ -127,7 +142,8 @@ async fn wire_connect(
   @frontend.startup_message(parameters.iter(), buf)
   connection.write_buffer(buf)
 
-  let mut scram : @sasl.ScramSha256? = None
+  // This startup loop drives every authentication branch until the session reaches ReadyForQuery.
+  let mut scram : @auth.ScramSha256? = None
   for message = connection.read_message() {
     match message {
       @backend.Message::AuthenticationOk => continue connection.read_message()
@@ -135,15 +151,10 @@ async fn wire_connect(
         wire_send_password(connection, config.password)
         continue connection.read_message()
       }
-      @backend.Message::AuthenticationMd5Password(body) => {
-        wire_send_md5_password(
-          connection,
-          config.user,
-          config.password,
-          body.salt,
+      @backend.Message::AuthenticationMd5Password(_) =>
+        fail(
+          "protocol integration tests do not support deprecated md5 authentication",
         )
-        continue connection.read_message()
-      }
       @backend.Message::AuthenticationSasl(body) => {
         scram = Some(wire_begin_scram(connection, body, config.password))
         continue connection.read_message()
@@ -182,6 +193,7 @@ async fn wire_connect(
 }
 
 ///|
+/// Send a cleartext password message.
 async fn wire_send_password(
   connection : WireConnection,
   password : String,
@@ -193,47 +205,34 @@ async fn wire_send_password(
 }
 
 ///|
-async fn wire_send_md5_password(
-  connection : WireConnection,
-  user : String,
-  password : String,
-  salt : BytesView,
-) -> Unit {
-  let user_bytes = @proto.utf8_encode(user)
-  let password_bytes = @proto.utf8_encode(password)
-  let digest = @auth.md5_hash(user_bytes[:], password_bytes[:], salt)
-  let buf = @buffer.new()
-  @frontend.password_message(digest[:], buf)
-  connection.write_buffer(buf)
-}
-
-///|
+/// Start the SCRAM exchange and return the state object used by later steps.
 #warnings("-14")
 async fn wire_begin_scram(
   connection : WireConnection,
   body : @backend.AuthenticationSaslBody,
   password : String,
-) -> @sasl.ScramSha256 {
+) -> @auth.ScramSha256 {
   guard wire_supports_scram(body) else {
     fail("server does not offer SCRAM-SHA-256 authentication")
   }
   let password_bytes = @proto.utf8_encode(password)
   let nonce = @tls.rand_bytes(18)
-  let scram = @sasl.ScramSha256::new(
+  let scram = @auth.ScramSha256::new(
     password_bytes[:],
-    @sasl.ChannelBinding::unsupported(),
+    @auth.ChannelBinding::unsupported(),
     nonce[:],
   )
   let buf = @buffer.new()
-  @frontend.sasl_initial_response(@sasl.SCRAM_SHA_256[:], scram.message(), buf)
+  @frontend.sasl_initial_response(@auth.SCRAM_SHA_256[:], scram.message(), buf)
   connection.write_buffer(buf)
   scram
 }
 
 ///|
+/// Continue the SCRAM exchange.
 async fn wire_continue_scram(
   connection : WireConnection,
-  scram : @sasl.ScramSha256?,
+  scram : @auth.ScramSha256?,
   data : BytesView,
 ) -> Unit {
   let scram = wire_require_scram(scram)
@@ -244,15 +243,17 @@ async fn wire_continue_scram(
 }
 
 ///|
+/// Finish the SCRAM exchange and validate the server-final message.
 fn wire_finish_scram(
-  scram : @sasl.ScramSha256?,
+  scram : @auth.ScramSha256?,
   data : BytesView,
 ) -> Unit raise {
   wire_require_scram(scram).finish(data)
 }
 
 ///|
-fn wire_require_scram(scram : @sasl.ScramSha256?) -> @sasl.ScramSha256 raise {
+/// Turn optional SCRAM state into a required value so out-of-order protocol steps fail clearly.
+fn wire_require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
   match scram {
     Some(scram) => scram
     None => fail("missing SCRAM state")
@@ -260,13 +261,14 @@ fn wire_require_scram(scram : @sasl.ScramSha256?) -> @sasl.ScramSha256 raise {
 }
 
 ///|
+/// Check whether the server's advertised SASL mechanisms include SCRAM-SHA-256.
 fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
   for mechanism = mechanisms.next() {
     match mechanism {
       None => break false
       Some(mechanism) =>
-        if mechanism == @sasl.SCRAM_SHA_256 {
+        if mechanism == @auth.SCRAM_SHA_256 {
           break true
         } else {
           continue mechanisms.next()
@@ -276,6 +278,8 @@ fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 }
 
 ///|
+/// Serialize an optional text parameter in the protocol's length-plus-payload format.
+/// `None` becomes SQL `NULL`, encoded as length `-1`.
 fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull {
   match param {
     None => @proto.IsNull::Yes
@@ -287,6 +291,7 @@ fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull 
 }
 
 ///|
+/// Centralize UTF-8 decoding for protocol tests so each test does not repeat the same error handling.
 fn wire_decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
     _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
@@ -294,6 +299,7 @@ fn wire_decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
 }
 
 ///|
+/// Pull the error fields the tests actually care about out of a low-level error response.
 fn parse_wire_database_error(
   fields : @backend.ErrorFields,
 ) -> WireDatabaseError raise @proto.ProtocolError {
@@ -329,6 +335,8 @@ fn parse_wire_database_error(
 }
 
 ///|
+/// Convert each `DataRow` column into an easy-to-assert text array.
+/// `None` is preserved so tests can check NULL encoding directly.
 fn data_row_texts(
   body : @backend.DataRowBody,
 ) -> Array[String?] raise @proto.ProtocolError {
@@ -351,6 +359,7 @@ fn data_row_texts(
 }
 
 ///|
+/// Find a notification response in a message sequence.
 fn find_notification_response(
   messages : Array[@backend.Message],
 ) -> @backend.NotificationResponseBody raise {
@@ -363,6 +372,7 @@ fn find_notification_response(
 }
 
 ///|
+/// Find a notice response in a message sequence.
 fn find_notice_response(
   messages : Array[@backend.Message],
 ) -> @backend.NoticeResponseBody raise {
@@ -375,6 +385,8 @@ fn find_notice_response(
 }
 
 ///|
+/// Wait until the given backend is actually running the target SQL.
+/// The cancel and concurrency tests rely on this sync point so cancellation does not happen too early.
 async fn wait_for_backend_query(
   client : @client.Client,
   backend_pid : Int,
@@ -403,6 +415,8 @@ async fn wait_for_backend_query(
 }
 
 ///|
+/// This verifies the basic SSLRequest round trip.
+/// The test sends only the TLS probe packet and checks for `S`, which means the server advertises TLS support.
 async test "integration protocol ssl request reports tls support" {
   guard integration_config() is Some(config) else { return }
   let socket = @socket.Tcp::connect_to_host(config.host, port=config.port)
@@ -416,8 +430,11 @@ async test "integration protocol ssl request reports tls support" {
 }
 
 ///|
+/// This verifies that the startup authentication packet can be parsed both as a Header and as a full Message.
+/// The test first feeds incomplete slices to make sure the parser does not guess, then checks the full packet tag, length, and SASL mechanisms.
 async test "integration protocol startup packet header parsing" {
   guard integration_config() is Some(config) else { return }
+  // Use a SCRAM account on purpose so the server returns AuthenticationSasl and exposes its mechanism list.
   let scram_config = {
     host: config.host,
     port: config.port,
@@ -473,6 +490,8 @@ async test "integration protocol startup packet header parsing" {
 }
 
 ///|
+/// This verifies how the cancel-request packet works together with the high-level cancel token.
+/// The client produces the pid and secret key, the protocol frontend builds the cancel request, and the database should answer with a cancellation error.
 async test "integration cancel request uses protocol frontend" {
   guard integration_config() is Some(config) else { return }
 
@@ -490,6 +509,7 @@ async test "integration cancel request uses protocol frontend" {
     )
     group.spawn_bg(() => observer_connection.run())
 
+    // The observer connection only confirms that the target query is really running.
     let token = client.cancel_token()
     let backend_pid : Int = client
       .query_one("select pg_backend_pid()::int4 as pid")
@@ -515,6 +535,8 @@ async test "integration cancel request uses protocol frontend" {
 }
 
 ///|
+/// This verifies three basic protocol branches: empty query, statement with no result set, and parameter description.
+/// The test first checks that empty SQL returns `EmptyQueryResponse`, then checks that a statement like `CREATE TABLE` returns `NoData` and parameter metadata.
 async test "integration protocol empty query and no data" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(
@@ -536,6 +558,7 @@ async test "integration protocol empty query and no data" {
     _ => fail("expected CREATE TABLE")
   }
 
+  // Build parse/describe/sync directly to verify that low-level frontend encoding matches the backend description messages.
   let sql_bytes = @proto.utf8_encode(
     "insert into wire_no_data (value) values ($1::int4)",
   )
@@ -560,6 +583,8 @@ async test "integration protocol empty query and no data" {
 }
 
 ///|
+/// This verifies `flush`, data messages, and terminate cleanup in a COPY OUT flow.
+/// The test checks that `CopyOutResponse`, `CopyData`, `CopyDone`, `CommandComplete`, and `ReadyForQuery` all appear.
 async test "integration protocol copy out flush and terminate" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-copy-out")
@@ -581,6 +606,7 @@ async test "integration protocol copy out flush and terminate" {
     }
     _ => fail("expected CopyOutResponse")
   }
+  // Flags make it clear that this test cares about the full message set, not a fragile fixed index for every packet.
   let payload = @buffer.new()
   let mut saw_copy_data = false
   let mut saw_copy_done = false
@@ -618,6 +644,8 @@ async test "integration protocol copy out flush and terminate" {
 }
 
 ///|
+/// This verifies the successful COPY IN path.
+/// The test first waits for `CopyInResponse`, then writes two `CopyData` frames plus `CopyDone`, and finally checks the imported rows with a normal query.
 async test "integration protocol copy in success" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-copy-in")
@@ -670,6 +698,7 @@ async test "integration protocol copy in success" {
 }
 
 ///|
+/// This verifies that after the client sends `CopyFail`, the backend returns an error message and still ends the round in a reusable state.
 async test "integration protocol copy fail surfaces backend error" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-copy-fail")
@@ -707,6 +736,8 @@ async test "integration protocol copy fail surfaces backend error" {
 }
 
 ///|
+/// This verifies that combining parse, describe, and close frontend messages yields complete parameter and row descriptions.
+/// It also covers `CloseComplete`, proving that the named statement was closed successfully.
 async test "integration protocol describe close and parameter description" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-describe")
@@ -751,6 +782,8 @@ async test "integration protocol describe close and parameter description" {
 }
 
 ///|
+/// This verifies text-format binding, result-column description, and the way `DataRow` represents NULL columns.
+/// The test builds the bind packet by hand, then checks both column descriptions and the row encoding where the first column has data and the second is NULL.
 async test "integration protocol bind text formats and null row ranges" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(
@@ -860,6 +893,8 @@ async test "integration protocol bind text formats and null row ranges" {
 }
 
 ///|
+/// This verifies that a portal with a row limit returns part of the result and then emits `PortalSuspended`.
+/// That shows the protocol-level pagination behavior is working instead of draining the full result at once.
 async test "integration protocol portal suspended" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-portal")
@@ -902,6 +937,8 @@ async test "integration protocol portal suspended" {
 }
 
 ///|
+/// This verifies the field accessors for notice and notification messages.
+/// The notice side scans for the `M` message field, and the notification side checks both raw bytes and decoded string accessors.
 async test "integration protocol notice and notification getters" {
   guard integration_config() is Some(config) else { return }
   let wire = wire_connect(config, application_name="moonbit-postgres-notify")

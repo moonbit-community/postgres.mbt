@@ -1,0 +1,22 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/postgres/client/tls/internal/os_string"
+
+import {
+  "moonbit-community/postgres/client/tls/internal/c_buffer",
+}
+
+// Values
+pub fn decode(@c_buffer.Buffer) -> String
+
+pub fn encode(StringView) -> OsString
+
+// Errors
+
+// Types and methods
+type OsString
+pub impl Show for OsString
+
+// Type aliases
+
+// Traits
+

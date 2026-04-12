@@ -6,8 +6,6 @@ import {
 }
 
 // Values
-pub fn md5(BytesView, BytesView) -> Bytes
-
 pub fn scram_sha_256(BytesView, BytesView) -> Bytes raise @protocol.ProtocolError
 
 pub fn scram_sha_256_salt(BytesView, BytesView) -> Bytes raise @protocol.ProtocolError

@@ -296,7 +296,9 @@ pub fn parse(
 ///|
 /// Serialize the context-dependent `PasswordMessage` (`p`) frame.
 ///
-/// During startup this is used for cleartext or MD5 password responses. The
+/// During startup this is used for cleartext password responses. Older
+/// PostgreSQL servers also used the same wire tag for deprecated MD5 password
+/// replies, though this package no longer implements MD5 authentication. The
 /// same wire tag is also reused by GSS and SASL messages, which have dedicated
 /// helpers below.
 ///

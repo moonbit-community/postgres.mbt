@@ -3,7 +3,7 @@
 ///|
 // `Bool` maps directly to PostgreSQL `bool`.
 pub impl ToSql for Bool with accepts(_, type_) {
-  type_.oid == 16U
+  type_.oid == BOOL_OID
 }
 
 ///|
@@ -19,7 +19,7 @@ pub impl ToSql for Bool with to_sql(self, _, buf) {
 
 ///|
 pub impl FromSql for Bool with accepts(type_) {
-  type_.oid == 16U
+  type_.oid == BOOL_OID
 }
 
 ///|
@@ -30,9 +30,8 @@ pub impl FromSql for Bool with moonbit_type_name() {
 ///|
 pub impl FromSql for Bool with from_sql(_, format, raw) {
   match format {
-    0 => decode_utf8(raw) == "t" || decode_utf8(raw) == "true"
-    1 => @types.bool_from_sql(raw)
-    _ => raise ClientError::Decode("unsupported format code for bool")
+    WireFormat::Text => decode_utf8(raw) == "t" || decode_utf8(raw) == "true"
+    WireFormat::Binary => @types.bool_from_sql(raw)
   }
 }
 
@@ -40,8 +39,8 @@ pub impl FromSql for Bool with from_sql(_, format, raw) {
 // `Int` is intentionally limited to PostgreSQL `int2` and `int4`.
 pub impl ToSql for Int with to_sql(self, type_, buf) {
   match type_.oid {
-    21U => @types.int2_to_sql(self, buf)
-    23U => @types.int4_to_sql(self, buf)
+    INT2_OID => @types.int2_to_sql(self, buf)
+    INT4_OID => @types.int4_to_sql(self, buf)
     _ => raise ClientError::Encode("cannot encode Int for type \{type_.name}")
   }
   @proto.IsNull::No
@@ -50,7 +49,7 @@ pub impl ToSql for Int with to_sql(self, type_, buf) {
 ///|
 pub impl ToSql for Int with accepts(_, type_) {
   match type_.oid {
-    21U | 23U => true
+    INT2_OID | INT4_OID => true
     _ => false
   }
 }
@@ -63,21 +62,20 @@ pub impl ToSql for Int with moonbit_type_name(_) {
 ///|
 pub impl FromSql for Int with from_sql(type_, format, raw) {
   match format {
-    0 => @string.parse_int(decode_utf8(raw))
-    1 =>
+    WireFormat::Text => @string.parse_int(decode_utf8(raw))
+    WireFormat::Binary =>
       match type_.oid {
-        21U => @types.int2_from_sql(raw)
-        23U => @types.int4_from_sql(raw)
+        INT2_OID => @types.int2_from_sql(raw)
+        INT4_OID => @types.int4_from_sql(raw)
         _ => raise ClientError::Decode("cannot decode Int from \{type_.name}")
       }
-    _ => raise ClientError::Decode("unsupported format code for int")
   }
 }
 
 ///|
 pub impl FromSql for Int with accepts(type_) {
   match type_.oid {
-    21U | 23U => true
+    INT2_OID | INT4_OID => true
     _ => false
   }
 }
@@ -90,7 +88,7 @@ pub impl FromSql for Int with moonbit_type_name() {
 ///|
 // `Int64` maps to PostgreSQL `int8`.
 pub impl ToSql for Int64 with accepts(_, type_) {
-  type_.oid == 20U
+  type_.oid == INT8_OID
 }
 
 ///|
@@ -106,7 +104,7 @@ pub impl ToSql for Int64 with to_sql(self, _, buf) {
 
 ///|
 pub impl FromSql for Int64 with accepts(type_) {
-  type_.oid == 20U
+  type_.oid == INT8_OID
 }
 
 ///|
@@ -117,16 +115,15 @@ pub impl FromSql for Int64 with moonbit_type_name() {
 ///|
 pub impl FromSql for Int64 with from_sql(_, format, raw) {
   match format {
-    0 => @string.parse_int64(decode_utf8(raw))
-    1 => @types.int8_from_sql(raw)
-    _ => raise ClientError::Decode("unsupported format code for int8")
+    WireFormat::Text => @string.parse_int64(decode_utf8(raw))
+    WireFormat::Binary => @types.int8_from_sql(raw)
   }
 }
 
 ///|
 // `Float` maps to PostgreSQL single precision `float4`.
 pub impl ToSql for Float with accepts(_, type_) {
-  type_.oid == 700U
+  type_.oid == FLOAT4_OID
 }
 
 ///|
@@ -142,7 +139,7 @@ pub impl ToSql for Float with to_sql(self, _, buf) {
 
 ///|
 pub impl FromSql for Float with accepts(type_) {
-  type_.oid == 700U
+  type_.oid == FLOAT4_OID
 }
 
 ///|
@@ -153,16 +150,16 @@ pub impl FromSql for Float with moonbit_type_name() {
 ///|
 pub impl FromSql for Float with from_sql(_, format, raw) {
   match format {
-    0 => Float::from_double(@string.parse_double(decode_utf8(raw)))
-    1 => @types.float4_from_sql(raw)
-    _ => raise ClientError::Decode("unsupported format code for float4")
+    WireFormat::Text =>
+      Float::from_double(@string.parse_double(decode_utf8(raw)))
+    WireFormat::Binary => @types.float4_from_sql(raw)
   }
 }
 
 ///|
 // `Double` maps to PostgreSQL double precision `float8`.
 pub impl ToSql for Double with accepts(_, type_) {
-  type_.oid == 701U
+  type_.oid == FLOAT8_OID
 }
 
 ///|
@@ -178,7 +175,7 @@ pub impl ToSql for Double with to_sql(self, _, buf) {
 
 ///|
 pub impl FromSql for Double with accepts(type_) {
-  type_.oid == 701U
+  type_.oid == FLOAT8_OID
 }
 
 ///|
@@ -189,16 +186,15 @@ pub impl FromSql for Double with moonbit_type_name() {
 ///|
 pub impl FromSql for Double with from_sql(_, format, raw) {
   match format {
-    0 => @string.parse_double(decode_utf8(raw))
-    1 => @types.float8_from_sql(raw)
-    _ => raise ClientError::Decode("unsupported format code for float8")
+    WireFormat::Text => @string.parse_double(decode_utf8(raw))
+    WireFormat::Binary => @types.float8_from_sql(raw)
   }
 }
 
 ///|
 // `UInt` is reserved for PostgreSQL `oid`.
 pub impl ToSql for UInt with accepts(_, type_) {
-  type_.oid == 26U
+  type_.oid == OID_TYPE_OID
 }
 
 ///|
@@ -214,7 +210,7 @@ pub impl ToSql for UInt with to_sql(self, _, buf) {
 
 ///|
 pub impl FromSql for UInt with accepts(type_) {
-  type_.oid == 26U
+  type_.oid == OID_TYPE_OID
 }
 
 ///|
@@ -225,9 +221,8 @@ pub impl FromSql for UInt with moonbit_type_name() {
 ///|
 pub impl FromSql for UInt with from_sql(_, format, raw) {
   match format {
-    0 => @string.parse_uint(decode_utf8(raw))
-    1 => @types.oid_from_sql(raw)
-    _ => raise ClientError::Decode("unsupported format code for oid")
+    WireFormat::Text => @string.parse_uint(decode_utf8(raw))
+    WireFormat::Binary => @types.oid_from_sql(raw)
   }
 }
 
@@ -244,7 +239,7 @@ pub impl ToSql for String with moonbit_type_name(_) {
 
 ///|
 pub impl ToSql for String with format(_, _) {
-  0
+  WireFormat::Text
 }
 
 ///|
@@ -282,8 +277,8 @@ pub impl ToSql for Bytes with moonbit_type_name(_) {
 ///|
 pub impl ToSql for Bytes with to_sql(self, type_, buf) {
   match type_.oid {
-    17U => @types.bytea_to_sql(self[:], buf)
-    2950U => @types.uuid_to_sql(self[:], buf)
+    BYTEA_OID => @types.bytea_to_sql(self[:], buf)
+    UUID_OID => @types.uuid_to_sql(self[:], buf)
     _ => raise ClientError::Encode("cannot encode bytes for type \{type_.name}")
   }
   @proto.IsNull::No
@@ -302,18 +297,17 @@ pub impl FromSql for Bytes with moonbit_type_name() {
 ///|
 pub impl FromSql for Bytes with from_sql(type_, format, raw) {
   match format {
-    0 =>
-      if type_.oid == 17U {
+    WireFormat::Text =>
+      if type_.oid == BYTEA_OID {
         raw.to_bytes()
       } else {
         @proto.utf8_encode(decode_utf8(raw))
       }
-    1 =>
+    WireFormat::Binary =>
       match type_.oid {
-        17U => @types.bytea_from_sql(raw).to_bytes()
-        2950U => @types.uuid_from_sql(raw)
+        BYTEA_OID => @types.bytea_from_sql(raw).to_bytes()
+        UUID_OID => @types.uuid_from_sql(raw)
         _ => raw.to_bytes()
       }
-    _ => raise ClientError::Decode("unsupported format code for bytes")
   }
 }

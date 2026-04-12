@@ -19,8 +19,8 @@ pub struct Column {
   type_size : Int
   /// Type modifier reported by PostgreSQL.
   type_modifier : Int
-  /// Format code used for this column in the current result stream.
-  format : Int
+  /// Wire format used for this column in the current result stream.
+  format : WireFormat
 } derive(Debug, Eq)
 
 ///|

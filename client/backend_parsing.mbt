@@ -22,7 +22,7 @@ fn parse_columns(body : @backend.RowDescriptionBody) -> Array[Column] raise {
           type_: resolve_type(field.type_oid),
           type_size: field.type_size,
           type_modifier: field.type_modifier,
-          format: field.format,
+          format: decode_wire_format(field.format),
         })
         continue fields.next()
       }
@@ -100,14 +100,16 @@ fn parse_column_names(
 }
 
 ///|
-/// Collect column format codes from a COPY response.
-fn parse_copy_formats(formats : @backend.ColumnFormats) -> Array[Int] raise {
-  let out : Array[Int] = []
+/// Collect column wire formats from a COPY response.
+fn parse_copy_formats(
+  formats : @backend.ColumnFormats,
+) -> Array[WireFormat] raise {
+  let out : Array[WireFormat] = []
   for format = formats.next() {
     match format {
       None => break out
       Some(format) => {
-        out.push(format)
+        out.push(decode_wire_format(format))
         continue formats.next()
       }
     }

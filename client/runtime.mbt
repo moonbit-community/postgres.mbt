@@ -7,7 +7,7 @@
 /// generic reader/writer without branching on plain TCP versus TLS again.
 priv enum Stream {
   Plain(@socket.Tcp)
-  Secure(@tls.Tls)
+  Secure(@local_tls.Tls)
 }
 
 ///|

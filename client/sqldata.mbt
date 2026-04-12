@@ -1,18 +1,50 @@
 // Traits and generic helpers for PostgreSQL value encoding and decoding.
 
 ///|
+/// PostgreSQL wire-format selection for parameters and result columns.
+pub(all) enum WireFormat {
+  Text
+  Binary
+} derive(Debug, Eq)
+
+///|
+fn encode_wire_format(format : WireFormat) -> Int {
+  match format {
+    WireFormat::Text => 0
+    WireFormat::Binary => 1
+  }
+}
+
+///|
+fn decode_wire_format(code : Int) -> WireFormat raise {
+  match code {
+    0 => WireFormat::Text
+    1 => WireFormat::Binary
+    _ =>
+      raise ClientError::Protocol(
+        "unsupported wire format code: \{code.to_string()}",
+      )
+  }
+}
+
+///|
 /// Trait implemented by values that can be encoded as query parameters.
 ///
 /// The driver asks three questions before sending a parameter:
 /// 1. `accepts`: does the codec support the PostgreSQL target type?
-/// 2. `format`: should PostgreSQL receive text (`0`) or binary (`1`) data?
+/// 2. `format`: should PostgreSQL receive `WireFormat::Text` or
+///    `WireFormat::Binary` data?
 /// 3. `to_sql`: write the actual payload or mark the value as `NULL`.
 ///
 /// The compatibility check happens before serialization, which keeps failures
 /// deterministic and improves error messages for callers.
+/// A minimal custom text codec usually overrides `format` to return
+/// `WireFormat::Text`,
+/// checks the target OID in `accepts`, writes UTF-8 bytes in `to_sql`, and
+/// returns `IsNull::No`.
 pub(open) trait ToSql {
-  /// Return the PostgreSQL format code to use for this value.
-  format(Self, Type) -> Int = _
+  /// Return the PostgreSQL wire format to use for this value.
+  format(Self, Type) -> WireFormat = _
   /// Return whether this value can be encoded for the provided PostgreSQL type.
   accepts(Self, Type) -> Bool
   /// Human-readable type name used in `WrongTypeError`.
@@ -24,7 +56,7 @@ pub(open) trait ToSql {
 ///|
 /// Default `ToSql` implementations use PostgreSQL binary format.
 impl ToSql with format(_, _) {
-  1
+  WireFormat::Binary
 }
 
 ///|
@@ -32,16 +64,17 @@ impl ToSql with format(_, _) {
 ///
 /// `Row::get` performs the `accepts` check before invoking `from_sql`, so a
 /// decoder can assume it only receives compatible PostgreSQL types unless the
-/// row was constructed manually in tests.
+/// row was constructed manually in tests. For nullable columns, either decode
+/// into `T?` or implement `from_sql_null` directly.
 pub(open) trait FromSql {
   /// Decode a non-NULL value.
-  from_sql(Type, Int, BytesView) -> Self raise Error
+  from_sql(Type, WireFormat, BytesView) -> Self raise Error
   /// Return whether this decoder accepts the PostgreSQL column type.
   accepts(Type) -> Bool
   /// Human-readable type name used in `WrongTypeError`.
   moonbit_type_name() -> String
   /// Decode a `NULL` value. The default implementation rejects `NULL`.
-  from_sql_null(Type, Int) -> Self raise Error = _
+  from_sql_null(Type, WireFormat) -> Self raise Error = _
 }
 
 ///|
@@ -54,7 +87,7 @@ impl FromSql with from_sql_null(type_, _) {
 /// Optional parameters encode `None` as SQL `NULL` and delegate `Some` values.
 pub impl[T : ToSql] ToSql for T? with format(self, type_) {
   match self {
-    None => 1
+    None => WireFormat::Binary
     Some(value) => value.format(type_)
   }
 }

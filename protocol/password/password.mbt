@@ -37,8 +37,8 @@ pub fn scram_sha_256_salt(
   if salt.length() != scram_default_salt_len {
     raise @proto.ProtocolError::InvalidInput("invalid SCRAM salt length")
   }
-  let prepared = @sasl.normalize(password)
-  let salted_password = @sasl.hi(prepared[:], salt, scram_default_iterations)
+  let prepared = @auth.normalize(password)
+  let salted_password = @auth.hi(prepared[:], salt, scram_default_iterations)
   let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
   let stored_key = @crypto.sha256_bytes(client_key[:])
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])
@@ -67,21 +67,5 @@ pub fn scram_sha_256_salt(
   out.write_bytesview(stored_b64[:])
   out.write_bytesview(b":"[:])
   out.write_bytesview(server_b64[:])
-  out.to_bytes()
-}
-
-///|
-/// **Not recommended**. Hash password using MD5 with username as salt.
-///
-/// See:
-/// - https://www.postgresql.org/docs/current/auth-password.html#AUTH-PASSWORD
-pub fn md5(password : BytesView, username : BytesView) -> Bytes {
-  let input = @buffer.new(size_hint=password.length() + username.length())
-  input.write_bytesview(password)
-  input.write_bytesview(username)
-  let digest = @crypto.md5_hex(input.to_bytes()[:])
-  let out = @buffer.new(size_hint=3 + digest.length())
-  out.write_bytesview(b"md5"[:])
-  out.write_bytesview(digest[:])
   out.to_bytes()
 }

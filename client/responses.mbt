@@ -68,7 +68,7 @@ async fn start_copy_out(
     match res {
       @backend.Message::CopyOutResponse(body) =>
         // The stream is valid only after PostgreSQL explicitly enters COPY OUT
-        // mode and advertises the per-column format codes.
+        // mode and advertises the per-column wire formats.
         return {
           background_group,
           responses,

@@ -1,0 +1,9 @@
+import {
+  "moonbitlang/core/encoding/utf8",
+  "moonbit-community/postgres/client/tls/internal/c_buffer",
+}
+
+options(
+  "native-stub": [ "stub.c" ],
+  targets: { "os_string.mbt": [ "native" ] },
+)

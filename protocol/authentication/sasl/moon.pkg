@@ -1,8 +1,0 @@
-import {
-  "moonbit-community/postgres/protocol" @proto,
-  "moonbit-community/postgres/protocol/crypto" @crypto,
-  "tonyfettes/unicode/normalization" @unicode_normalization,
-  "moonbitlang/x/codec/base64" @base64,
-  "moonbitlang/core/buffer",
-  "moonbitlang/core/encoding/utf8",
-}

@@ -1,7 +1,7 @@
 import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbit-community/postgres/protocol/crypto" @crypto,
-  "moonbit-community/postgres/protocol/authentication/sasl" @sasl,
+  "moonbit-community/postgres/protocol/authentication" @auth,
   "moonbitlang/x/codec/base64" @base64,
   "moonbitlang/core/buffer",
 }

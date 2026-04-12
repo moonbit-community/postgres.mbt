@@ -37,6 +37,12 @@ pub async fn CancelToken::cancel(Self) -> Unit
 pub fn CancelToken::process_id(Self) -> Int
 pub fn CancelToken::secret_key(Self) -> Int
 
+pub(all) enum ChannelBinding {
+  Disable
+  Prefer
+  Require
+} derive(Eq, @debug.Debug)
+
 type Client
 pub async fn Client::batch_execute(Self, String) -> Unit
 pub async fn Client::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
@@ -70,19 +76,27 @@ pub struct Column {
   type_ : Type
   type_size : Int
   type_modifier : Int
-  format : Int
+  format : WireFormat
 } derive(Eq, @debug.Debug)
 
 pub struct Config {
   host : String
+  hostaddr : String?
   port : Int
   user : String
   database : String
   password : String?
   ssl_mode : SslMode
+  ssl_root_cert : String?
+  channel_binding : ChannelBinding
   application_name : String
+  options : String?
+  connect_timeout_ms : Int?
+  keepalives : Bool?
+  keepalives_idle_s : Int?
 } derive(Eq, @debug.Debug)
-pub fn Config::new(String, user~ : String, database? : String, password? : String, port? : Int, ssl_mode? : SslMode, application_name? : String) -> Self
+pub fn Config::from_parts(String, String?, Int, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int?, Bool?, Int?) -> Self
+pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
 
 type Connection
 pub async fn Connection::next_message(Self) -> AsyncMessage?
@@ -95,7 +109,7 @@ pub async fn CopyInSink::finish(Self) -> Int
 pub async fn CopyInSink::send(Self, BytesView) -> Unit
 
 pub struct CopyOutStream {
-  formats : Array[Int]
+  formats : Array[WireFormat]
   // private fields
 }
 pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
@@ -190,14 +204,11 @@ pub fn SimpleQueryStream::detach(Self) -> Unit
 pub async fn SimpleQueryStream::finish(Self) -> Unit
 pub async fn SimpleQueryStream::next(Self) -> SimpleQueryMessage?
 
-pub enum SslMode {
+pub(all) enum SslMode {
   Disable
-  Prefer
-  Require
+  VerifyCa
+  VerifyFull
 } derive(Eq, @debug.Debug)
-pub fn SslMode::disable() -> Self
-pub fn SslMode::prefer() -> Self
-pub fn SslMode::require() -> Self
 
 pub struct Statement {
   params : Array[Type]
@@ -211,10 +222,14 @@ pub async fn Transaction::batch_execute(Self, String) -> Unit
 pub async fn Transaction::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
 pub async fn Transaction::commit(Self) -> Unit
 pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
+pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
 pub async fn Transaction::prepare(Self, String) -> Statement
+pub async fn Transaction::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
 pub fn Transaction::query_portal(Self, Portal, Int) -> RowStream raise
+pub fn Transaction::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream raise
 pub async fn Transaction::rollback(Self) -> Unit
+pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
 
 type TransactionBuilder
@@ -261,6 +276,11 @@ pub fn Type::uuid_array() -> Self
 pub fn Type::varchar() -> Self
 pub fn Type::varchar_array() -> Self
 
+pub(all) enum WireFormat {
+  Text
+  Binary
+} derive(Eq, @debug.Debug)
+
 pub struct WrongTypeError {
   moonbit_type : String
   postgres_type : Type
@@ -270,10 +290,10 @@ pub struct WrongTypeError {
 
 // Traits
 pub(open) trait FromSql {
-  from_sql(Type, Int, BytesView) -> Self raise
+  from_sql(Type, WireFormat, BytesView) -> Self raise
   accepts(Type) -> Bool
   moonbit_type_name() -> String
-  from_sql_null(Type, Int) -> Self raise = _
+  from_sql_null(Type, WireFormat) -> Self raise = _
 }
 pub impl FromSql for Bool
 pub impl FromSql for Int
@@ -286,7 +306,7 @@ pub impl[T : FromSql] FromSql for T?
 pub impl FromSql for Bytes
 
 pub(open) trait ToSql {
-  format(Self, Type) -> Int = _
+  format(Self, Type) -> WireFormat = _
   accepts(Self, Type) -> Bool
   moonbit_type_name(Self) -> String
   to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
