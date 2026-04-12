@@ -5,7 +5,7 @@ struct OnlyInt8Value {
 
 ///|
 impl FromSql for OnlyInt8Value with accepts(type_) {
-  type_.oid == 20U
+  type_.oid == INT8_OID
 }
 
 ///|
@@ -28,7 +28,7 @@ fn make_text_row(type_ : Type, value : String) -> Row {
       type_,
       type_size: -1,
       type_modifier: -1,
-      format: 0,
+      format: WireFormat::Text,
     },
   ]
   let values : Array[Bytes?] = [Some(@proto.utf8_encode(value))]

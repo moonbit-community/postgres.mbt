@@ -1,5 +1,61 @@
 #!/usr/bin/env node
 
+/**
+ * PostgreSQL integration test runner.
+ *
+ * Environment variables that change this script's behavior:
+ *
+ * - `PGPORT`
+ *   Preferred port for the temporary PostgreSQL cluster. Defaults to `55432`.
+ *   If that port is already in use, the script probes upward until it finds a
+ *   free port.
+ *
+ * - `TEST_FILTER`
+ *   Filter passed to `moon test --filter`. Defaults to `integration*`.
+ *
+ * - `REPO_ROOT`
+ *   Repository root used when invoking `moon` commands from the inner
+ *   `--inside-pg-virtualenv` phase. The outer phase sets this automatically to
+ *   the current repository root, so overriding it is mainly useful when
+ *   debugging the inner phase directly.
+ *
+ * Variables used only by the inner `--inside-pg-virtualenv` phase:
+ *
+ * - `PG_CLUSTER_CONF_ROOT`
+ *   Required. Root directory of the temporary cluster configuration created by
+ *   `pg_virtualenv`. Used to locate `pg_hba.conf` before the script prepends
+ *   authentication rules for the test database.
+ *
+ * - `PGVERSION`
+ *   Required. PostgreSQL major version for the temporary cluster. Used for
+ *   both `pg_conftool` / `pg_ctlcluster` and the config path under
+ *   `PG_CLUSTER_CONF_ROOT`.
+ *
+ * - `TLS_CA_CERT_FILE`
+ *   Required. CA certificate trusted by the successful TLS test cases. The
+ *   outer phase generates this file automatically.
+ *
+ * - `TLS_BAD_CA_CERT_FILE`
+ *   Required. CA certificate used only by the negative TLS test case that
+ *   verifies certificate validation failures. The outer phase generates this
+ *   file automatically.
+ *
+ * - `TLS_SERVER_CERT_FILE`
+ *   Required. Server certificate configured onto the temporary PostgreSQL
+ *   cluster. The outer phase generates this file automatically.
+ *
+ * - `TLS_SERVER_KEY_FILE`
+ *   Required. Private key matching `TLS_SERVER_CERT_FILE`. The outer phase
+ *   generates this file automatically.
+ *
+ * The script also injects connection-related variables such as
+ * `RUN_POSTGRES_INTEGRATION`, `POSTGRES_HOST`, `POSTGRES_PORT`,
+ * `POSTGRES_DB`, `POSTGRES_PASSWORD`, `POSTGRES_USER`,
+ * `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, and
+ * `POSTGRES_TLS_EXPECT_FAILURE` into the child `moon test` processes. Those
+ * values are produced by this script rather than read from the caller.
+ */
+
 import { spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
@@ -16,21 +72,17 @@ const setupSql = `
 create database moondb;
 set password_encryption = 'scram-sha-256';
 create role moon_scram login password $$moonpass$$;
-set password_encryption = 'md5';
-create role moon_md5 login password $$moonpass$$;
 set password_encryption = 'scram-sha-256';
 create role moon_password login password $$moonpass$$;
-grant all privileges on database moondb to moon_scram, moon_md5, moon_password;
+grant all privileges on database moondb to moon_scram, moon_password;
 `.trimStart()
 const hbaPrefix = [
   'host    moondb          moon_password   127.0.0.1/32            password',
-  'host    moondb          moon_md5        127.0.0.1/32            md5',
   'host    moondb          moon_scram      127.0.0.1/32            scram-sha-256',
   '',
 ].join('\n')
 const authSuites = [
   ['scram-sha-256', 'moon_scram'],
-  ['md5', 'moon_md5'],
   ['password', 'moon_password'],
 ]
 const integrationPackages = ['tests/baseline']

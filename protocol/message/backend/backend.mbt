@@ -295,10 +295,11 @@ pub fn Message::parse(
 }
 
 ///|
-/// Body of `AuthenticationMD5Password`.
+/// Legacy body of `AuthenticationMD5Password`.
 ///
-/// The server provides a 4-byte salt that the frontend must mix into the MD5
-/// password response.
+/// The server provides a 4-byte salt that the frontend would have mixed into
+/// the deprecated MD5 password response. The client package still parses this
+/// message so it can reject MD5 authentication explicitly.
 ///
 /// See:
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP

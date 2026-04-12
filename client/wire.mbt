@@ -90,9 +90,9 @@ fn execute_portal_bytes(portal_name : BytesView, max_rows : Int) -> Bytes raise 
 }
 
 ///|
-/// Serialized parameter payload plus its chosen format code.
+/// Serialized parameter payload plus its chosen wire format.
 priv struct EncodedParam {
-  format : Int
+  format : WireFormat
   value : Bytes?
 }
 
@@ -142,7 +142,7 @@ fn write_bind(
   for index, param in params {
     encoded_params.push(encode_param(param, param_types[index]))
   }
-  let formats = encoded_params.map(param => param.format)
+  let formats = encoded_params.map(param => encode_wire_format(param.format))
   @frontend.bind(
     portal,
     statement,

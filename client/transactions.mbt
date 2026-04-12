@@ -122,8 +122,51 @@ pub async fn Transaction::prepare(
   self : Transaction,
   sql : String,
 ) -> Statement {
+  self.prepare_typed(sql, [])
+}
+
+///|
+/// Prepare a statement with explicit parameter types while the transaction is open.
+pub async fn Transaction::prepare_typed(
+  self : Transaction,
+  sql : String,
+  types : Array[Type],
+) -> Statement {
   self.assert_open()
-  self.client.prepare(sql)
+  self.client.prepare_typed(sql, types)
+}
+
+///|
+/// Create a named savepoint while the transaction is open.
+pub async fn Transaction::savepoint(
+  self : Transaction,
+  name : String,
+) -> Transaction {
+  self.assert_open()
+  self.client.batch_execute("SAVEPOINT \{name}")
+  { client: self.client, savepoint: Some(name), finished: @ref.new(false) }
+}
+
+///|
+/// Execute a previously prepared statement within this transaction scope.
+pub fn Transaction::query_statement(
+  self : Transaction,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> RowStream raise {
+  self.assert_open()
+  self.client.query_statement(statement, params~)
+}
+
+///|
+/// Execute a previously prepared statement and return its affected row count.
+pub async fn Transaction::execute_raw(
+  self : Transaction,
+  statement : Statement,
+  params? : Array[&ToSql] = [],
+) -> Int {
+  self.assert_open()
+  self.client.execute_raw(statement, params~)
 }
 
 ///|

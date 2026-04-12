@@ -1,0 +1,25 @@
+import {
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/cmp",
+  "moonbitlang/async/io",
+  "moonbitlang/async/semaphore",
+  "moonbit-community/postgres/client/tls/internal/bytes_util",
+  "moonbit-community/postgres/client/tls/internal/c_buffer",
+  "moonbit-community/postgres/client/tls/internal/io_buffer",
+  "moonbit-community/postgres/client/tls/internal/os_string",
+  "moonbitlang/async/os_error",
+}
+
+warnings = "-alert_internal"
+
+options(
+  "native-stub": [ "openssl.c", "schannel.c" ],
+  targets: {
+    "crypto_util.mbt": [ "native" ],
+    "openssl.mbt": [ "native" ],
+    "openssl_loader.mbt": [ "native" ],
+    "schannel.mbt": [ "native" ],
+    "tls.mbt": [ "native" ],
+    "transport.mbt": [ "native" ],
+  },
+)

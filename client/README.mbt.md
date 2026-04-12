@@ -19,12 +19,12 @@ This is the smallest complete usage pattern:
 async fn _quick_start() -> Unit {
   @async.with_task_group(group => {
     let config = @client.Config::new(
-      "127.0.0.1",
+      "localhost",
       user="postgres",
       database="app",
       password="secret",
       port=5432,
-      ssl_mode=@client.SslMode::disable(),
+      ssl_mode=@client.SslMode::VerifyFull,
       application_name="my-service",
     )
     let (client, connection) = @client.connect(config)
@@ -70,12 +70,12 @@ Create a config with `Config::new`:
 ///|
 fn _config_example() -> @client.Config {
   @client.Config::new(
-    "127.0.0.1",
+    "localhost",
     user="postgres",
     database="app",
     password="secret",
     port=5432,
-    ssl_mode=@client.SslMode::prefer(),
+    ssl_mode=@client.SslMode::VerifyFull,
     application_name="my-service",
   )
 }
@@ -84,18 +84,188 @@ fn _config_example() -> @client.Config {
 `Config` stores:
 
 - `host`: PostgreSQL host name or IP
+- `hostaddr`: optional concrete socket address when TCP routing should differ from certificate identity
 - `port`: PostgreSQL port, default `5432`
 - `user`: login role
 - `database`: database name, default is the same as `user`
 - `password`: optional password
-- `ssl_mode`: `SslMode::Disable`, `SslMode::Prefer`, or `SslMode::Require`
+- `ssl_mode`: `SslMode::Disable`, `SslMode::VerifyCa`, or `SslMode::VerifyFull`
+- `ssl_root_cert`: custom CA file, or `"system"` for the platform trust store
+- `channel_binding`: SCRAM channel-binding policy for SCRAM authentication
 - `application_name`: value visible in PostgreSQL session metadata
+- `options`: optional PostgreSQL startup `options` string
+- `connect_timeout_ms`: optional end-to-end connect timeout
+- `keepalives`, `keepalives_idle_s`: TCP keepalive settings
 
-Use the `SslMode` helpers when you want a constructor-style API:
+Use the `SslMode` constructors directly:
 
-- `SslMode::disable()`: never attempt TLS
-- `SslMode::prefer()`: try TLS first, but fall back to plain TCP if the server says no
-- `SslMode::require()`: fail the connection if TLS cannot be established
+- `SslMode::Disable`: never attempt TLS
+- `SslMode::VerifyCa`: require TLS and verify the certificate chain, but not the hostname or IP
+- `SslMode::VerifyFull`: require TLS, verify the certificate chain, and verify the hostname or IP
+
+## TLS Configuration
+
+The client now keeps only three TLS modes:
+
+- `Disable`: explicit plaintext. No encryption, no certificate validation, no server identity check.
+- `VerifyCa`: TLS is mandatory. Certificate-chain validation is required, but hostname or IP validation is skipped.
+- `VerifyFull`: TLS is mandatory. Certificate-chain validation and hostname or IP validation are both required.
+
+The removed `prefer` and `require` modes were easy to misread as "safe enough"
+while still leaving room for confusing downgrade and identity-checking behavior.
+The current surface keeps plaintext opt-in and makes the verification model
+visible in the API.
+
+Threat-model difference:
+
+- `VerifyCa` protects against an untrusted or forged certificate chain, but it
+  still accepts any certificate from a trusted CA, even if it was issued for a
+  different hostname.
+- `VerifyFull` adds endpoint identity checking, so the certificate must match
+  the requested hostname or IP address. This is the default and recommended
+  mode.
+
+`sslrootcert=system` follows libpq's stricter system-trust-store behavior in
+this package: it selects the platform trust store and requires
+`ssl_mode = SslMode::VerifyFull`. We reject weaker modes instead of silently
+accepting a configuration that looks stronger than it is.
+
+Additional TLS fields:
+
+- `ssl_root_cert`: custom CA file, or `"system"` for the platform trust store
+
+Default behavior:
+
+- `VerifyFull` requires an explicit `host` or `hostaddr`. If both are absent,
+  the connection fails before the TLS handshake starts.
+
+Windows notes:
+
+- `Disable`, `VerifyCa`, and `VerifyFull` still work.
+- `sslrootcert` with a custom file is rejected explicitly on the Schannel path.
+- The package reports these cases as unsupported instead of silently ignoring
+  them.
+
+External references:
+
+- Aembit, "The Strange World of Postgres TLS":
+  <https://aembit.io/blog/the-strange-world-of-postgres-tls>
+- PostgreSQL `sslmode`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLMODE>
+- PostgreSQL certificate verification semantics:
+  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBQ-SSL-CERTIFICATES>
+- PostgreSQL TLS protection matrix:
+  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-PROTECTION>
+- PostgreSQL `sslrootcert`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLROOTCERT>
+
+Currently unsupported libpq TLS parameters:
+
+- `sslcert`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLCERT>
+- `sslkey`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLKEY>
+- `sslpassword`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLPASSWORD>
+- `sslcrl`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLCRL>
+- `sslcrldir`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLCRLDIR>
+- `sslsni`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLSNI>
+- `ssl_min_protocol_version`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSL-MIN-PROTOCOL-VERSION>
+- `ssl_max_protocol_version`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSL-MAX-PROTOCOL-VERSION>
+- `sslnegotiation`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION>
+- `sslcertmode`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLCERTMODE>
+- `sslkeylogfile`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLKEYLOGFILE>
+- `sslcompression`:
+  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLCOMPRESSION>
+
+## TLS Migration
+
+- Replace `prefer` with `verify_full` when you want authenticated TLS, or with
+  `disable` when plaintext is intentional.
+- Replace `require` with `verify_full` when the server certificate should match
+  the target hostname or IP. Use `verify_ca` only when hostname validation is
+  intentionally not part of the deployment model.
+- URL configuration now accepts only `disable`, `verify-ca`, and
+  `verify-full`.
+- `VerifyFull` now requires an explicit `host` or `hostaddr`. Old code paths
+  that relied on an implicit local default host become configuration errors.
+
+Examples:
+
+```mbt check
+///|
+fn _tls_examples() -> (@client.Config, @client.Config) {
+  let direct = @client.Config::new(
+    "db.example",
+    user="postgres",
+    database="app",
+    password="secret",
+    ssl_mode=@client.SslMode::VerifyFull,
+    application_name="my-service",
+  )
+  let routed = @client.Config::new(
+    "db.example",
+    hostaddr="10.0.0.15",
+    user="postgres",
+    database="app",
+    password="secret",
+    ssl_mode=@client.SslMode::VerifyFull,
+    ssl_root_cert="/etc/postgres/root.crt",
+    application_name="my-service",
+  )
+  (direct, routed)
+}
+```
+
+## SCRAM Channel Binding
+
+`channel_binding` controls SCRAM behavior only. It does not enable TLS on its
+own, and it does not change non-SCRAM authentication methods.
+
+MD5 password authentication is deprecated by PostgreSQL and is not supported by
+this client. If the server requests `AuthenticationMD5Password`, `connect`
+fails during startup with `ClientError::Authentication`.
+
+This is not the same setting as TLS `sslmode`. The repository still does not
+support the removed libpq-style TLS aliases `sslmode=prefer` and
+`sslmode=require`. The `Prefer` and `Require` here belong only to SCRAM channel
+binding.
+
+- `ChannelBinding::Disable`: always use plain `SCRAM-SHA-256`
+- `ChannelBinding::Prefer`: use `SCRAM-SHA-256-PLUS` when TLS exposes a binding
+  PostgreSQL can use, otherwise fall back to plain `SCRAM-SHA-256`
+- `ChannelBinding::Require`: fail unless `SCRAM-SHA-256-PLUS` is available
+
+Use `Prefer` when you want stronger SCRAM when the deployment supports it but
+do not want to reject older servers yet. Use `Require` when the deployment is
+already standardized on TLS plus SCRAM channel binding and a silent fallback
+would be the wrong outcome.
+
+```mbt check
+///|
+fn _channel_binding_example() -> @client.Config {
+  @client.Config::new(
+    "db.example",
+    user="postgres",
+    database="app",
+    password="secret",
+    ssl_mode=@client.SslMode::VerifyFull,
+    channel_binding=@client.ChannelBinding::Prefer,
+    application_name="my-service",
+  )
+}
+```
+
+The pool package accepts the same setting through declarative config and through
+URL parsing via the separate parameter `channel_binding=disable|prefer|require`.
 
 Connection lifecycle APIs:
 
@@ -135,6 +305,35 @@ async fn _connection_run_example(config : @client.Config) -> Unit {
 task or timeout handler. `CancelToken::cancel()` opens PostgreSQL's separate
 cancellation connection and asks the server to interrupt the current backend
 operation.
+
+For `LISTEN` / `NOTIFY` and notices, pick one ownership model per connection:
+
+- pass `on_async=...` to `Connection::run(...)` when you want push-style handling
+- read `Connection::next_message()` from one dedicated task when you want a
+  pull-style loop
+
+Here is the pull-style pattern:
+
+```mbt check
+///|
+async fn _listen_notify_example(config : @client.Config) -> Unit {
+  @async.with_task_group(group => {
+    let (listener, listener_connection) = @client.connect(config)
+    let (publisher, publisher_connection) = @client.connect(config)
+    group.spawn_bg(() => listener_connection.run())
+    group.spawn_bg(() => publisher_connection.run())
+
+    listener.batch_execute("LISTEN jobs")
+    publisher.batch_execute("NOTIFY jobs, 'ready'")
+
+    let message = listener_connection.next_message()
+    ignore(message)
+
+    publisher.close()
+    listener.close()
+  })
+}
+```
 
 `Client::clear_type_cache()` is rarely needed in ordinary CRUD code. It is the
 escape hatch for sessions that create or alter PostgreSQL types at runtime and
@@ -190,7 +389,7 @@ Use `Row` and `Column` like this:
 - `Row::get_text(index)` / `Row::get_text_name(name)`: shorthand for nullable text access
 - `Row::len()` / `Row::index_of(name)`: inspect row shape
 - `Row.columns`: full `Column` metadata for each field
-- `Column.name`, `Column.table_oid`, `Column.column_id`, `Column.type_`, `Column.type_size`, `Column.type_modifier`, `Column.format`: inspect where a column came from and how PostgreSQL encoded it
+- `Column.name`, `Column.table_oid`, `Column.column_id`, `Column.type_`, `Column.type_size`, `Column.type_modifier`, `Column.format`: inspect where a column came from and which wire format PostgreSQL used
 
 If you want to stream rows incrementally:
 
@@ -224,6 +423,79 @@ or `finish()` calls raise `Closed`.
 
 Both options release backpressure and let the driver close temporary
 server-side resources created by helpers such as `query`.
+
+### Custom codecs
+
+Use a custom `ToSql` / `FromSql` implementation when the built-in codecs are not
+enough but the PostgreSQL wire value still maps cleanly to one application type.
+
+The direct pattern is:
+
+1. decide which PostgreSQL OIDs the codec accepts
+2. choose `WireFormat::Text` or `WireFormat::Binary`
+3. write bytes in `to_sql`
+4. decode bytes in `from_sql`
+5. implement `from_sql_null` only when SQL `NULL` should decode into the type
+
+This is a minimal text codec that round-trips a wrapper around `text` /
+`varchar`:
+
+```mbt check
+///|
+struct EmailText {
+  value : String
+} derive(Debug, Eq)
+
+///|
+impl @client.ToSql for EmailText with format(_, _) {
+  @client.WireFormat::Text
+}
+
+///|
+impl @client.ToSql for EmailText with accepts(_, type_) {
+  type_.oid == @client.Type::text().oid ||
+  type_.oid == @client.Type::varchar().oid
+}
+
+///|
+impl @client.ToSql for EmailText with moonbit_type_name(_) {
+  "EmailText"
+}
+
+///|
+impl @client.ToSql for EmailText with to_sql(self, _, buf) {
+  buf.write_bytes(@proto.utf8_encode(self.value))
+  @proto.IsNull::No
+}
+
+///|
+impl @client.FromSql for EmailText with accepts(type_) {
+  type_.oid == @client.Type::text().oid ||
+  type_.oid == @client.Type::varchar().oid
+}
+
+///|
+impl @client.FromSql for EmailText with moonbit_type_name() {
+  "EmailText"
+}
+
+///|
+impl @client.FromSql for EmailText with from_sql(_, _, raw) {
+  { value: @utf8.decode(raw) }
+}
+
+///|
+async fn _custom_codec_example(client : @client.Client) -> Unit {
+  let email : EmailText = { value: "moonbit@example.com" }
+  let params : Array[&@client.ToSql] = [email as &@client.ToSql]
+  let row = client.query_one("select $1::text as email", params~)
+  let decoded : EmailText = row.get_name("email")
+  ignore(decoded)
+}
+```
+
+If the column may be `NULL`, decode as `EmailText?` or implement
+`FromSql::from_sql_null(...)` yourself.
 
 ## Next APIs To Learn
 
@@ -434,7 +706,7 @@ Use `copy_out(sql)` for bulk export with `COPY ... TO STDOUT`. It returns a
 - `CopyOutStream::collect()`: read the rest into memory
 - `CopyOutStream::finish()`: drain the stream when you stop early
 - `CopyOutStream::detach()`: abandon the rest and drain in the background
-- `CopyOutStream.formats`: PostgreSQL format codes for each output column
+- `CopyOutStream.formats`: PostgreSQL wire formats for each output column
 
 Warning: if you intend to discard a `CopyOutStream` before it reaches the
 terminal state, call `detach()` first. Dropping it early can block later
@@ -508,10 +780,10 @@ type, method, or enum variant is for.
 ### Top-Level, TLS, And Config
 
 - `connect(config)`: open a PostgreSQL session and return `(Client, Connection)`.
-- `SslMode::Disable`, `SslMode::Prefer`, `SslMode::Require`: TLS negotiation policies.
-- `SslMode::disable()`, `SslMode::prefer()`, `SslMode::require()`: convenience constructors for those policies.
-- `Config { host, port, user, database, password, ssl_mode, application_name }`: immutable connection settings kept both for startup and later cancellation.
-- `Config::new(host, user~, database?, password?, port?, ssl_mode?, application_name?)`: build a config with defaults that fit local development.
+- `SslMode::Disable`, `SslMode::VerifyCa`, `SslMode::VerifyFull`: TLS negotiation policies.
+- `ChannelBinding::Disable`, `ChannelBinding::Prefer`, `ChannelBinding::Require`: SCRAM channel-binding policies.
+- `Config { host, hostaddr, port, user, database, password, ssl_mode, ssl_root_cert, channel_binding, application_name, options, connect_timeout_ms, keepalives, keepalives_idle_s }`: immutable connection settings kept both for startup and later cancellation.
+- `Config::new(host, hostaddr?, user~, database?, password?, port?, ssl_mode?, ssl_root_cert?, channel_binding?, application_name~, options?, connect_timeout_ms?, keepalives?, keepalives_idle_s?)`: build a config with secure defaults and an explicit PostgreSQL `application_name`.
 
 ### Client And Connection
 
@@ -607,7 +879,8 @@ type, method, or enum variant is for.
 - `CopyInSink::send(bytes_view)`: send one raw `COPY FROM STDIN` chunk.
 - `CopyInSink::finish()`: complete the copy and return PostgreSQL's inserted row count.
 - `CopyInSink::abort(message?)`: abort the copy and drain PostgreSQL's completion sequence.
-- `CopyOutStream { formats }`: stream of raw `COPY TO STDOUT` chunks plus PostgreSQL column format codes.
+- `CopyOutStream { formats }`: stream of raw `COPY TO STDOUT` chunks plus PostgreSQL column wire formats.
+- `WireFormat::Text`, `WireFormat::Binary`: PostgreSQL's text and binary wire formats.
 - `CopyOutStream::collect()`: collect the remaining chunks.
 - `CopyOutStream::detach()`: abandon the remaining chunks and drain in the background.
 - `CopyOutStream::finish()`: drain the copy stream when you stop early.
@@ -633,7 +906,7 @@ type, method, or enum variant is for.
 - `Type::bool_array()`, `Type::bytea_array()`, `Type::int2_array()`, `Type::int4_array()`, `Type::int8_array()`, `Type::text_array()`, `Type::varchar_array()`, `Type::float4_array()`, `Type::float8_array()`, `Type::timestamp_array()`, `Type::date_array()`, `Type::uuid_array()`: built-in array descriptors.
 - `Type::unknown(oid, name?)`: create a placeholder descriptor when only the OID is known.
 - `ToSql`: implement this trait for custom query parameter types.
-- `ToSql::format(self, type_)`: choose text (`0`) or binary (`1`) wire format; the default is binary.
+- `ToSql::format(self, type_)`: choose `WireFormat::Text` or `WireFormat::Binary`; the default is binary.
 - `ToSql::accepts(self, type_)`: declare whether the encoder supports the PostgreSQL target type.
 - `ToSql::moonbit_type_name(self)`: provide the MoonBit-side type name for diagnostics.
 - `ToSql::to_sql(self, type_, buf)`: write the encoded payload or mark it as `NULL`.
@@ -641,7 +914,7 @@ type, method, or enum variant is for.
 - `FromSql::from_sql(type_, format, raw)`: decode a non-NULL field payload.
 - `FromSql::accepts(type_)`: declare which PostgreSQL types the decoder accepts.
 - `FromSql::moonbit_type_name()`: provide the decoder's MoonBit-side type name for diagnostics.
-- `FromSql::from_sql_null(type_, format)`: decode SQL `NULL`; by default this raises `ClientError::Decode`.
+- `FromSql::from_sql_null(type_, format)`: decode SQL `NULL`; `format` is a `WireFormat`, and the default implementation raises `ClientError::Decode`.
 - Built-in codec implementations exist for `Bool`, `Int`, `Int64`, `UInt`, `Float`, `Double`, `String`, `Bytes`, and `T?`.
 
 ### Errors

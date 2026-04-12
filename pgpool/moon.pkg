@@ -1,0 +1,12 @@
+import {
+  "moonbit-community/postgres/client" @client,
+  "moonbitlang/async" @async,
+  "moonbitlang/core/debug" @debug,
+  "moonbitlang/core/random" @random,
+  "moonbitlang/core/ref" @ref,
+  "moonbitlang/core/string",
+}
+
+import {
+  "moonbitlang/core/debug",
+} for "wbtest"

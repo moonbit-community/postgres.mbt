@@ -66,7 +66,9 @@ pub async fn Connection::run(
 ///|
 /// Receive the next asynchronous message buffered by the connection loop.
 ///
-/// Returns `None` after the async-message queue is closed.
+/// Returns `None` after the async-message queue is closed. This is usually read
+/// from one dedicated task that owns async notices / notifications for the
+/// connection.
 pub async fn Connection::next_message(self : Connection) -> AsyncMessage? {
   Some(self.shared.async_messages.get()) catch {
     _ => None

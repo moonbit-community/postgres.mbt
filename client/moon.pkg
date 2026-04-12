@@ -1,7 +1,6 @@
 import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbit-community/postgres/protocol/authentication" @auth,
-  "moonbit-community/postgres/protocol/authentication/sasl" @sasl,
   "moonbit-community/postgres/protocol/message/backend" @backend,
   "moonbit-community/postgres/protocol/message/frontend" @frontend,
   "moonbit-community/postgres/protocol/types" @types,
@@ -13,7 +12,7 @@ import {
   "moonbitlang/async/aqueue" @aqueue,
   "moonbitlang/async/io",
   "moonbitlang/async/socket",
-  "moonbitlang/async/tls",
+  "moonbit-community/postgres/client/tls" @local_tls,
 }
 
 import {

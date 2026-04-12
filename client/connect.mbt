@@ -7,8 +7,22 @@
 /// `Connection` is actively driven by calling `Connection::run` in another task.
 /// This split keeps request submission cheap and makes backpressure explicit.
 pub async fn connect(config : Config) -> (Client, Connection) {
-  let stream = connect_stream(config)
-  let startup = startup(stream, config)
+  match config.connect_timeout_ms {
+    Some(timeout_ms) =>
+      @async.with_timeout(
+        timeout_ms,
+        () => connect_inner(config),
+        error=ClientError::Protocol("connection timed out"),
+      )
+    None => connect_inner(config)
+  }
+}
+
+///|
+/// Establish a fully initialized client runtime for one concrete target.
+async fn connect_inner(config : Config) -> (Client, Connection) {
+  let setup = connect_stream(config)
+  let startup = startup(setup, config)
   let types : Map[@proto.Oid, Type] = {}
   let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(None)
   seed_builtin_types(types)
@@ -26,7 +40,7 @@ pub async fn connect(config : Config) -> (Client, Connection) {
     closing: @ref.new(false),
     next_id: @ref.new(0),
   }
-  ({ shared, }, { shared, stream })
+  ({ shared, }, { shared, stream: setup.stream })
 }
 
 ///|
@@ -132,7 +146,7 @@ pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
     return
   }
   let conn = @socket.Tcp::connect_to_host(
-    self.config.host,
+    self.config.connect_host(),
     port=self.config.port,
   )
   defer conn.close()

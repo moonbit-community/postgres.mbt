@@ -1,4 +1,6 @@
 ///|
+/// Helper assertion for successful authentication.
+/// It requires not only that `connect` succeeds, but also that the server reports the expected `current_user`.
 async fn assert_auth_ok(
   config : IntegrationConfig,
   user : String,
@@ -6,7 +8,12 @@ async fn assert_auth_ok(
 ) -> Unit {
   @async.with_task_group(group => {
     let (client, connection) = @client.connect(
-      auth_client_config(config, user, password=Some(password)),
+      auth_client_config(
+        config,
+        user,
+        password=Some(password),
+        application_name="moonbit-postgres",
+      ),
     )
     group.spawn_bg(() => connection.run())
 
@@ -20,30 +27,46 @@ async fn assert_auth_ok(
 }
 
 ///|
+/// Missing passwords should fail immediately during connection setup with an authentication error.
 async fn assert_missing_password(
   config : IntegrationConfig,
   user : String,
 ) -> Unit {
   let message = expect_authentication_error(
-    try? @client.connect(auth_client_config(config, user, password=None)),
+    try? @client.connect(
+      auth_client_config(
+        config,
+        user,
+        password=None,
+        application_name="moonbit-postgres",
+      ),
+    ),
   )
   assert_eq(message, "server requires a password")
 }
 
 ///|
+/// Wrong passwords should surface PostgreSQL's standard authentication failure code `28P01`.
 async fn assert_wrong_password(
   config : IntegrationConfig,
   user : String,
 ) -> Unit {
   let err = expect_database_error(
     try? @client.connect(
-      auth_client_config(config, user, password=Some("wrongpass")),
+      auth_client_config(
+        config,
+        user,
+        password=Some("wrongpass"),
+        application_name="moonbit-postgres",
+      ),
     ),
   )
   assert_eq(err.code, Some("28P01"))
 }
 
 ///|
+/// Collect messages from the driver's async channel.
+/// Parameter-status updates are not the point of these tests, so they are skipped and only notice or notification messages are kept.
 async fn collect_driver_async_messages(
   connection : @client.Connection,
   expected : Int,
@@ -62,6 +85,8 @@ async fn collect_driver_async_messages(
 }
 
 ///|
+/// Poll until a background task finishes.
+/// These concurrency tests need to distinguish between "already finished" and "should still be pending", so they do not wait forever.
 async fn[T] wait_for_task_or_fail(
   task : @async.Task[T],
   message : String,
@@ -81,6 +106,8 @@ async fn[T] wait_for_task_or_fail(
 }
 
 ///|
+/// Assert that a task stays pending for the whole observation window.
+/// This is mainly used to prove that some stream or session still holds protocol execution rights.
 async fn[T] assert_task_stays_pending(
   task : @async.Task[T],
   message : String,
@@ -99,24 +126,43 @@ async fn[T] assert_task_stays_pending(
 }
 
 ///|
-async fn assert_tls_query_ok(
-  config : IntegrationConfig,
-  ssl_mode : @client.SslMode,
-  application_name : String,
+/// Wait until the pool's waiter count reaches the expected value.
+/// This is only used by the few client-side concurrency tests that inspect pool state directly.
+async fn wait_for_pool_waiters_or_fail(
+  pool : @pgpool.Pool,
+  expected : Int,
+  message : String,
+  polls? : Int = 500,
 ) -> Unit {
+  let mut remaining = polls
+  while remaining > 0 {
+    if pool.status().waiting == expected {
+      return
+    }
+    remaining -= 1
+    @async.sleep(10)
+  }
+  fail(message)
+}
+
+///|
+/// Verify that a TLS connection was established and remains usable for follow-up queries.
+/// The check looks at both the client's cached startup parameters and `pg_stat_ssl` on the server side to confirm the session is really using TLS.
+async fn assert_tls_query_ok(config : @client.Config) -> Unit {
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
-      as_client_config(config, ssl_mode~, application_name~),
-    )
+    let (client, connection) = @client.connect(config)
     group.spawn_bg(() => connection.run())
 
-    assert_eq(client.parameter("application_name"), Some(application_name))
+    assert_eq(
+      client.parameter("application_name"),
+      Some(config.application_name),
+    )
     let negotiated_application_name : String = client
       .query_one(
         "select current_setting('application_name')::text as application_name",
       )
       .get_name("application_name")
-    assert_eq(negotiated_application_name, application_name)
+    assert_eq(negotiated_application_name, config.application_name)
     let backend_pid : Int = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
@@ -136,6 +182,8 @@ async fn assert_tls_query_ok(
 }
 
 ///|
+/// Verify the three basic read-write paths for one scalar type.
+/// The same value must round-trip through a literal read, a bound parameter, and a `query_typed` read.
 async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_roundtrip(
   client : @client.Client,
   sql_type : String,
@@ -163,6 +211,7 @@ async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_roundtrip(
 }
 
 ///|
+/// `NaN` cannot be compared with ordinary equality, so float4 gets a dedicated round-trip check that uses `is_nan()`.
 async fn assert_float_nan_roundtrip(client : @client.Client) -> Unit {
   let from_literal : Float = client
     .query_one("select 'NaN'::real as value")
@@ -184,6 +233,7 @@ async fn assert_float_nan_roundtrip(client : @client.Client) -> Unit {
 }
 
 ///|
+/// The `double precision` version of the NaN round-trip test.
 async fn assert_double_nan_roundtrip(client : @client.Client) -> Unit {
   let from_literal : Double = client
     .query_one("select 'NaN'::double precision as value")
@@ -209,10 +259,14 @@ async fn assert_double_nan_roundtrip(client : @client.Client) -> Unit {
 }
 
 ///|
+/// This verifies basic connection setup, background connection driving, and column-based decoding.
+/// One query returns text, integer, and boolean values together so the test covers common typed reads by column name.
 async test "integration connect and typed query" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let row = client.query_one(
@@ -232,28 +286,37 @@ async test "integration connect and typed query" {
 }
 
 ///|
-async test "integration tls prefer connects and queries" {
+/// This verifies the successful TLS path for `verify_ca`.
+/// The helper checks the handshake details. This test just exercises that configuration branch.
+async test "integration tls verify_ca connects and queries" {
   guard integration_config() is Some(config) else { return }
   guard !integration_tls_failure_expected() else { return }
   assert_tls_query_ok(
-    config,
-    @client.SslMode::prefer(),
-    "moonbit-postgres-tls-prefer",
+    as_client_config(
+      config,
+      ssl_mode=@client.SslMode::VerifyCa,
+      application_name="moonbit-postgres-tls-verify-ca",
+    ),
   )
 }
 
 ///|
-async test "integration tls require connects and queries" {
+/// This verifies the successful TLS path for `verify_full`.
+async test "integration tls verify_full connects and queries" {
   guard integration_config() is Some(config) else { return }
   guard !integration_tls_failure_expected() else { return }
   assert_tls_query_ok(
-    config,
-    @client.SslMode::require(),
-    "moonbit-postgres-tls-require",
+    as_client_config(
+      config,
+      ssl_mode=@client.SslMode::VerifyFull,
+      application_name="moonbit-postgres-tls-verify-full",
+    ),
   )
 }
 
 ///|
+/// This verifies that an untrusted server certificate fails during TLS setup.
+/// The assertion only captures the certificate-verification meaning and does not tie itself to one exact TLS-library error string.
 async test "integration tls rejects untrusted server certificate" {
   guard integration_config() is Some(config) else { return }
   guard integration_tls_failure_expected() else { return }
@@ -262,7 +325,7 @@ async test "integration tls rejects untrusted server certificate" {
     try? @client.connect(
       as_client_config(
         config,
-        ssl_mode=@client.SslMode::require(),
+        ssl_mode=@client.SslMode::VerifyFull,
         application_name="moonbit-postgres-tls-untrusted",
       ),
     ),
@@ -276,64 +339,168 @@ async test "integration tls rejects untrusted server certificate" {
 }
 
 ///|
+/// This verifies that `verify_ca` checks the certificate chain but not the hostname.
+/// The test intentionally mismatches `host` against the certificate name while still connecting to the real address through `hostaddr`.
+async test "integration tls verify_ca ignores hostname mismatch" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  assert_tls_query_ok(
+    as_client_config(
+      config,
+      host="db.invalid",
+      hostaddr=config.host,
+      ssl_mode=@client.SslMode::VerifyCa,
+      application_name="moonbit-postgres-tls-verify-ca-host-mismatch",
+    ),
+  )
+}
+
+///|
+/// This verifies that `verify_full` treats a hostname mismatch as an error.
+/// The setup is similar to the previous test, but this time the connection must fail.
+async test "integration tls verify_full rejects hostname mismatch" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  let message = expect_ssl_error(
+    try? @client.connect(
+      as_client_config(
+        config,
+        host="db.invalid",
+        hostaddr=config.host,
+        ssl_mode=@client.SslMode::VerifyFull,
+        application_name="moonbit-postgres-tls-verify-full-host-mismatch",
+      ),
+    ),
+  )
+  assert_true(
+    message.contains("hostname") ||
+    message.contains("IP") ||
+    message.contains("host") ||
+    message.contains("verify"),
+  )
+}
+
+///|
+/// This verifies that `verify_full` can use an explicit `hostaddr` as the identity target when there is no DNS hostname.
+async test "integration tls verify_full accepts explicit hostaddr identity" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  assert_tls_query_ok(
+    as_client_config(
+      config,
+      host="",
+      hostaddr=config.host,
+      ssl_mode=@client.SslMode::VerifyFull,
+      application_name="moonbit-postgres-tls-verify-full-hostaddr",
+    ),
+  )
+}
+
+///|
+/// This verifies the local config precondition for `verify_full`.
+/// If neither `host` nor `hostaddr` is available for identity checks, the client should reject the config before attempting the connection.
+async test "integration tls verify_full requires explicit host or hostaddr" {
+  guard integration_config() is Some(config) else { return }
+  let message = expect_ssl_error(
+    try? @client.connect(
+      @client.Config::new(
+        "",
+        user=config.user,
+        database=config.database,
+        password=config.password,
+        port=config.port,
+        ssl_mode=@client.SslMode::VerifyFull,
+        application_name="moonbit-postgres-tls-verify-full-missing-host",
+      ),
+    ),
+  )
+  assert_eq(message, "sslmode=verify-full requires explicit host or hostaddr")
+}
+
+///|
+/// This verifies that `sslrootcert=system` is only valid together with `verify_full`.
+async test "integration tls sslrootcert system requires verify_full" {
+  guard integration_config() is Some(config) else { return }
+  let message = expect_ssl_error(
+    try? @client.connect(
+      as_client_config(
+        config,
+        ssl_mode=@client.SslMode::VerifyCa,
+        ssl_root_cert="system",
+        application_name="moonbit-postgres-tls-system-root-invalid",
+      ),
+    ),
+  )
+  assert_eq(message, "sslrootcert=system requires sslmode=verify-full")
+}
+
+///|
+/// This verifies the successful path for `sslrootcert=system` together with `verify_full`.
+async test "integration tls sslrootcert system works with verify_full" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  assert_tls_query_ok(
+    as_client_config(
+      config,
+      ssl_mode=@client.SslMode::VerifyFull,
+      ssl_root_cert="system",
+      application_name="moonbit-postgres-tls-system-root",
+    ),
+  )
+}
+
+///|
+/// This covers the missing-password error path for cleartext password authentication.
+/// The helper owns the connection setup and the error extraction. This test only selects the cleartext account case.
 async test "integration plain password missing" {
   guard integration_config() is Some(config) else { return }
   assert_missing_password(config, "moon_password")
 }
 
 ///|
+/// This verifies that cleartext password authentication returns the standard auth failure for a wrong password.
 async test "integration plain password wrong" {
   guard integration_config() is Some(config) else { return }
   assert_wrong_password(config, "moon_password")
 }
 
 ///|
+/// This verifies the successful path for cleartext password authentication.
 async test "integration plain password ok" {
   guard integration_config() is Some(config) else { return }
   assert_auth_ok(config, "moon_password", "moonpass")
 }
 
 ///|
-async test "integration md5 password missing" {
-  guard integration_config() is Some(config) else { return }
-  assert_missing_password(config, "moon_md5")
-}
-
-///|
-async test "integration md5 password wrong" {
-  guard integration_config() is Some(config) else { return }
-  assert_wrong_password(config, "moon_md5")
-}
-
-///|
-async test "integration md5 password ok" {
-  guard integration_config() is Some(config) else { return }
-  assert_auth_ok(config, "moon_md5", "moonpass")
-}
-
-///|
+/// This covers the missing-password error path for SCRAM authentication.
 async test "integration scram password missing" {
   guard integration_config() is Some(config) else { return }
   assert_missing_password(config, "moon_scram")
 }
 
 ///|
+/// This covers the wrong-password error path for SCRAM authentication.
 async test "integration scram password wrong" {
   guard integration_config() is Some(config) else { return }
   assert_wrong_password(config, "moon_scram")
 }
 
 ///|
+/// This verifies the successful path for SCRAM authentication.
 async test "integration scram password ok" {
   guard integration_config() is Some(config) else { return }
   assert_auth_ok(config, "moon_scram", "moonpass")
 }
 
 ///|
+/// This verifies that `check_connection` only performs a health check and does not damage the connection state.
+/// A normal query runs afterward to prove that the connection is still usable.
 async test "integration check connection" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.check_connection()
@@ -347,10 +514,14 @@ async test "integration check connection" {
 }
 
 ///|
+/// This verifies that both the client and the background connection task can see the parameters negotiated at startup.
+/// The point is to confirm that those parameters are cached and exposed through the public accessors.
 async test "integration exposes startup parameters" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     assert_eq(client.parameter("client_encoding"), Some("UTF8"))
@@ -366,10 +537,14 @@ async test "integration exposes startup parameters" {
 }
 
 ///|
+/// This verifies the parameterized execution path after an explicit prepare.
+/// The test prepares a statement, sends two parameters, and reads the result back by column name.
 async test "integration prepare and parameterized execute" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let statement = client.prepare(
@@ -395,15 +570,20 @@ async test "integration prepare and parameterized execute" {
 }
 
 ///|
+/// This verifies that temporary prepared statements created inside convenience APIs like `query_one` are closed promptly.
+/// The test counts `pg_prepared_statements` before and after repeated parameterized queries so temporary server-side statements do not accumulate.
 async test "integration raw query closes temporary prepared statements" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let before : Int = client
       .query_one("select count(*)::int4 as count from pg_prepared_statements")
       .get_name("count")
+    // Repeat convenience queries with parameters to cover the path that creates and then auto-cleans temporary statements.
     for value in 0..<5 {
       let params : Array[&@client.ToSql] = [value as &@client.ToSql]
       let row = client.query_one("select $1::int4 as value", params~)
@@ -420,16 +600,21 @@ async test "integration raw query closes temporary prepared statements" {
 }
 
 ///|
+/// This verifies that after a row stream is detached early, the driver cleans up its temporary prepared statement.
+/// The test reads one row, detaches the stream, and then immediately checks the prepared-statement count on the server.
 async test "integration row stream detach closes temporary prepared statements" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let before : Int = client
       .query_one("select count(*)::int4 as count from pg_prepared_statements")
       .get_name("count")
 
+    // Read only the first row and leave the rest for the cleanup path that runs after detach.
     let stream = client.query(
       "select generate_series(1, 16)::int4 as value order by value",
     )
@@ -458,10 +643,14 @@ async test "integration row stream detach closes temporary prepared statements" 
 }
 
 ///|
+/// This verifies that simple query can produce multiple result sets in sequence.
+/// The test reads the column descriptions, data rows, and command tags for both `SELECT` statements in message order.
 async test "integration simple query supports multiple result sets" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.simple_query(
@@ -503,10 +692,14 @@ async test "integration simple query supports multiple result sets" {
 }
 
 ///|
+/// This verifies that simple-query result streams support pipelining.
+/// The test consumes only part of the first result, then starts another ordinary query and checks that the driver can still move later work forward.
 async test "integration simple query supports pipelining" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.simple_query(
@@ -522,6 +715,7 @@ async test "integration simple query supports pipelining" {
     }
     assert_eq(try! row.get_name("value"), Some("1"))
 
+    // If the simple-query stream held the connection until full completion, this concurrent query would stay blocked.
     let task = group.spawn(no_wait=true, () => {
       let result : Int = client
         .query_one("select 9::int4 as value")
@@ -542,10 +736,14 @@ async test "integration simple query supports pipelining" {
 }
 
 ///|
+/// This verifies that a simple-query stream gives protocol execution back to later requests after `detach`.
+/// The test first shows that the next query blocks before detach, then shows that it resumes afterward, and also checks the explicit error on repeated detach.
 async test "integration simple query detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.simple_query(
@@ -590,10 +788,14 @@ async test "integration simple query detach unblocks later requests" {
 }
 
 ///|
+/// This verifies that simple-query `detach` swallows database errors that would appear later in the stream.
+/// That lets callers explicitly abandon the remaining results and continue using the same connection.
 async test "integration simple query detach swallows trailing database error" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.simple_query("select 'ok'::text as value; select 1 / 0")
@@ -619,10 +821,14 @@ async test "integration simple query detach swallows trailing database error" {
 }
 
 ///|
+/// This verifies portal-based pagination.
+/// The test binds a portal inside a transaction, fetches three times, and checks that the batches are 2 rows, then 1 row, then empty.
 async test "integration portal pagination" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -631,6 +837,7 @@ async test "integration portal pagination" {
     client.batch_execute(
       "insert into moon_driver_portal (name) values ('alice'), ('bob'), ('charlie')",
     )
+    // A portal has a stable lifetime only inside a transaction, so the test starts one explicitly.
     let statement = client.prepare(
       "select id, name from moon_driver_portal order by id",
     )
@@ -664,10 +871,14 @@ async test "integration portal pagination" {
 }
 
 ///|
+/// This verifies that row streams returned by extended queries also support pipelining.
+/// The pattern matches the simple-query case: consume one row, start another query concurrently, then finish the stream and check its summary.
 async test "integration row stream supports pipelining" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.query(
@@ -702,10 +913,14 @@ async test "integration row stream supports pipelining" {
 }
 
 ///|
+/// This verifies that row streams do not buffer forever behind the scenes.
+/// While the result set is still not fully consumed, later queries should remain blocked. They should resume only after the stream is drained.
 async test "integration row stream backpressures after bounded buffering" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.query(
@@ -736,10 +951,14 @@ async test "integration row stream backpressures after bounded buffering" {
 }
 
 ///|
+/// This verifies that a row stream terminates itself after `detach` and hands the connection back to later requests.
+/// It also covers repeated detach calls and the explicit error message they return.
 async test "integration row stream detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.query(
@@ -778,10 +997,14 @@ async test "integration row stream detach unblocks later requests" {
 }
 
 ///|
+/// This verifies that writes made inside a transaction become visible to later queries in the same session after commit.
+/// The test inserts one row in a transaction, commits it, and then checks the temp table outside the transaction.
 async test "integration transaction commit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let tx = client.transaction()
@@ -811,10 +1034,14 @@ async test "integration transaction commit" {
 }
 
 ///|
+/// This verifies that rollback discards the writes performed earlier in the transaction.
+/// It mirrors the commit test, but rolls back at the end and checks that the table stays empty.
 async test "integration transaction rollback" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -842,10 +1069,14 @@ async test "integration transaction rollback" {
 }
 
 ///|
+/// This verifies that the transaction builder carries isolation level, read-only, and deferrable options into the transaction.
+/// The test reads the settings back with `show`, then performs a write and commits to prove the transaction object itself still works.
 async test "integration transaction builder" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -890,6 +1121,8 @@ async test "integration transaction builder" {
 }
 
 ///|
+/// This verifies that a cancel token can interrupt a running ordinary client query.
+/// The observer connection first confirms that the target query reached `pg_sleep`, then cancellation is triggered, and finally the connection is checked for reuse.
 async test "integration cancel token cancels running query" {
   guard integration_config() is Some(config) else { return }
 
@@ -910,6 +1143,7 @@ async test "integration cancel token cancels running query" {
     )
     group.spawn_bg(() => observer_connection.run())
 
+    // The observer connection exists only to provide a reliable "the query is really running" sync point.
     let token = client.cancel_token()
     let backend_pid : Int = client
       .query_one("select pg_backend_pid()::int4 as pid")
@@ -933,10 +1167,14 @@ async test "integration cancel token cancels running query" {
 }
 
 ///|
+/// This verifies that PostgreSQL notices and notifications surface through the driver's async message channel.
+/// The test emits two notices and two notifications, then consumes the messages in order and checks their fields.
 async test "integration notice and notification surface as async messages" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute("set client_min_messages = notice")
@@ -950,6 +1188,7 @@ async test "integration notice and notification surface as async messages" {
     client.batch_execute("notify moon_driver_notification, 'hello'")
     client.batch_execute("notify moon_driver_notification, 'world'")
 
+    // Filter out parameter-status messages first so the test can focus only on notice and notification payloads.
     let messages = collect_driver_async_messages(connection, 4)
     guard messages[0] is @client.AsyncMessage::Notice(first_notice) else {
       fail("expected first notice")
@@ -975,10 +1214,14 @@ async test "integration notice and notification surface as async messages" {
 }
 
 ///|
+/// This verifies the basic read path for COPY OUT.
+/// The test joins all chunks back into one buffer and then checks both the format codes and the final text payload.
 async test "integration copy out" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1002,7 +1245,9 @@ async test "integration copy out" {
         }
       }
     }
-    assert_eq(stream.formats, [0, 0])
+    assert_true(
+      stream.formats == [@client.WireFormat::Text, @client.WireFormat::Text],
+    )
     assert_true(chunks.length() >= 1)
     assert_eq(payload.contents(), b"1\tjim\n2\tjoe\n")
 
@@ -1011,10 +1256,14 @@ async test "integration copy out" {
 }
 
 ///|
+/// This verifies that a COPY OUT stream still allows later queries to be pipelined before the stream is fully consumed.
+/// The test reads one chunk, starts a normal query, and then calls `finish` to cleanly drain the stream.
 async test "integration copy out supports pipelining" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1026,7 +1275,9 @@ async test "integration copy out supports pipelining" {
     let stream = client.copy_out(
       "copy moon_driver_copy_out_finish (id, name) to stdout",
     )
-    assert_eq(stream.formats, [0, 0])
+    assert_true(
+      stream.formats == [@client.WireFormat::Text, @client.WireFormat::Text],
+    )
     guard stream.next() is Some(chunk) else { fail("expected copy chunk") }
     assert_true(chunk.length() > 0)
 
@@ -1050,10 +1301,14 @@ async test "integration copy out supports pipelining" {
 }
 
 ///|
+/// This verifies that a COPY OUT stream hands the connection back to later requests after `detach`.
+/// The test again shows blocking before detach, recovery after detach, and the explicit error on repeated detach.
 async test "integration copy out detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let stream = client.copy_out(
@@ -1091,10 +1346,14 @@ async test "integration copy out detach unblocks later requests" {
 }
 
 ///|
+/// This verifies the basic write path for COPY IN.
+/// The test sends two text rows into the sink, finishes the copy, and then checks both row count and row contents in the temp table.
 async test "integration copy in" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1123,10 +1382,14 @@ async test "integration copy in" {
 }
 
 ///|
+/// This verifies that COPY IN still works when a large amount of data is sent in batches.
+/// The test splits 10000 rows across three writes to cover large buffers and repeated `send` calls together.
 async test "integration copy in large" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1135,6 +1398,7 @@ async test "integration copy in large" {
     let sink = client.copy_in(
       "copy moon_driver_copy_in_large (id, name) from stdin",
     )
+    // Send in three chunks on purpose to cover the repeated-write path on the sink.
     sink.send(b"0\tname0\n")
 
     let first = @buffer.new()
@@ -1164,10 +1428,13 @@ async test "integration copy in large" {
 }
 
 ///|
+/// This verifies that aborting COPY IN rolls back the import instead of leaving partial rows behind.
 async test "integration copy in abort rolls back copy" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1189,10 +1456,14 @@ async test "integration copy in abort rolls back copy" {
 }
 
 ///|
+/// This verifies the three result branches of `query_one`.
+/// Zero rows should be an error, exactly one row should succeed, and more than one row should be a row-count error.
 async test "integration query one" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute("create temp table moon_driver_query_one (name text)")
@@ -1223,10 +1494,14 @@ async test "integration query one" {
 }
 
 ///|
+/// This verifies that `query_opt` differs from `query_one` only in the zero-row case.
+/// Zero rows should return `None`, while one row still succeeds and multiple rows still fail.
 async test "integration query opt" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute("create temp table moon_driver_query_opt (name text)")
@@ -1258,10 +1533,14 @@ async test "integration query opt" {
 }
 
 ///|
+/// This verifies that a deferred unique constraint fires at commit time instead of insert time.
+/// The test inserts duplicate values in one transaction, gets the unique-constraint error on commit, and then checks that the whole transaction rolled back.
 async test "integration deferred constraint" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1290,10 +1569,14 @@ async test "integration deferred constraint" {
 }
 
 ///|
+/// This verifies that `query_typed` still works with explicit parameter types even without an explicit transaction.
+/// The test first runs a query with text and integer parameters, then runs an `update` with no rows returned so both branches are covered.
 async test "integration query typed without transaction" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     client.batch_execute(
@@ -1345,10 +1628,14 @@ async test "integration query typed without transaction" {
 }
 
 ///|
+/// This verifies round-trip consistency for common scalar types between the client and PostgreSQL.
+/// Each type goes through literal reads, bound parameters, and typed queries so both encoding and decoding paths are covered.
 async test "integration scalar type roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     assert_roundtrip(client, "bool", @client.Type::bool(), "true", true)
@@ -1401,10 +1688,14 @@ async test "integration scalar type roundtrips" {
 }
 
 ///|
+/// This verifies that floating-point special values and ordinary numeric values all round-trip correctly.
+/// Infinity, -Infinity, and NaN are split out because NaN has to be checked with `is_nan()`.
 async test "integration float roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     assert_roundtrip(
@@ -1458,12 +1749,17 @@ async test "integration float roundtrips" {
 }
 
 ///|
+/// This verifies edge behavior for binary and fixed-width character types.
+/// `bytea` and `uuid` cover raw byte round trips, while `char(5)` focuses on PostgreSQL's right-padding rule and NULL handling.
 async test "integration bytea and bpchar roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
+    // First check that raw byte types are not corrupted by any text encoding path.
     let bytea_value = Bytes::from_array([
       b'\x00', b'\x01', b'\x02', b'\x03', b'\xfe', b'\xff',
     ])
@@ -1487,6 +1783,7 @@ async test "integration bytea and bpchar roundtrips" {
       uuid_value,
     )
 
+    // Then check fixed-width character padding semantics together with nullable parameters.
     client.batch_execute(
       "create temp table moon_driver_bpchar (id serial primary key, b char(5))",
     )
@@ -1523,12 +1820,17 @@ async test "integration bytea and bpchar roundtrips" {
 }
 
 ///|
+/// This verifies that the client can resolve custom type metadata on demand.
+/// The test covers enum, composite, domain, and range types, and checks that after clearing the type cache the reloaded kind information is correct.
 async test "integration resolves custom type metadata" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
+    // Create temporary custom types first, then clear the cache so the client has to reload metadata from the catalogs.
     client.batch_execute(
       "create type pg_temp.moon_driver_mood as enum ('sad', 'happy')",
     )
@@ -1586,10 +1888,14 @@ async test "integration resolves custom type metadata" {
 }
 
 ///|
+/// This verifies that database errors surface as structured error objects.
+/// The test triggers a simple division-by-zero error and checks the SQLSTATE code.
 async test "integration database errors surface" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(as_client_config(config))
+    let (client, connection) = @client.connect(
+      as_client_config(config, application_name="moonbit-postgres"),
+    )
     group.spawn_bg(() => connection.run())
 
     let err = expect_database_error(try? client.query_one("select 1 / 0"))

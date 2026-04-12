@@ -52,187 +52,191 @@ pub struct Type {
 ///|
 /// Return the built-in PostgreSQL `bool` type descriptor.
 pub fn Type::bool() -> Type {
-  { oid: 16U, name: "bool", kind: Kind::Simple }
+  { oid: BOOL_OID, name: "bool", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bytea` type descriptor.
 pub fn Type::bytea() -> Type {
-  { oid: 17U, name: "bytea", kind: Kind::Simple }
+  { oid: BYTEA_OID, name: "bytea", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `char` type descriptor.
 pub fn Type::char() -> Type {
-  { oid: 18U, name: "char", kind: Kind::Simple }
+  { oid: CHAR_OID, name: "char", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `name` type descriptor.
 pub fn Type::name_type() -> Type {
-  { oid: 19U, name: "name", kind: Kind::Simple }
+  { oid: NAME_OID, name: "name", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int8` type descriptor.
 pub fn Type::int8() -> Type {
-  { oid: 20U, name: "int8", kind: Kind::Simple }
+  { oid: INT8_OID, name: "int8", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int2` type descriptor.
 pub fn Type::int2() -> Type {
-  { oid: 21U, name: "int2", kind: Kind::Simple }
+  { oid: INT2_OID, name: "int2", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int4` type descriptor.
 pub fn Type::int4() -> Type {
-  { oid: 23U, name: "int4", kind: Kind::Simple }
+  { oid: INT4_OID, name: "int4", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `text` type descriptor.
 pub fn Type::text() -> Type {
-  { oid: 25U, name: "text", kind: Kind::Simple }
+  { oid: TEXT_OID, name: "text", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `oid` type descriptor.
 pub fn Type::oid_type() -> Type {
-  { oid: 26U, name: "oid", kind: Kind::Simple }
+  { oid: OID_TYPE_OID, name: "oid", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float4` type descriptor.
 pub fn Type::float4() -> Type {
-  { oid: 700U, name: "float4", kind: Kind::Simple }
+  { oid: FLOAT4_OID, name: "float4", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float8` type descriptor.
 pub fn Type::float8() -> Type {
-  { oid: 701U, name: "float8", kind: Kind::Simple }
+  { oid: FLOAT8_OID, name: "float8", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `varchar` type descriptor.
 pub fn Type::varchar() -> Type {
-  { oid: 1043U, name: "varchar", kind: Kind::Simple }
+  { oid: VARCHAR_OID, name: "varchar", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `date` type descriptor.
 pub fn Type::date() -> Type {
-  { oid: 1082U, name: "date", kind: Kind::Simple }
+  { oid: DATE_OID, name: "date", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `time` type descriptor.
 pub fn Type::time() -> Type {
-  { oid: 1083U, name: "time", kind: Kind::Simple }
+  { oid: TIME_OID, name: "time", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamp` type descriptor.
 pub fn Type::timestamp() -> Type {
-  { oid: 1114U, name: "timestamp", kind: Kind::Simple }
+  { oid: TIMESTAMP_OID, name: "timestamp", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamptz` type descriptor.
 pub fn Type::timestamptz() -> Type {
-  { oid: 1184U, name: "timestamptz", kind: Kind::Simple }
+  { oid: TIMESTAMPTZ_OID, name: "timestamptz", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `uuid` type descriptor.
 pub fn Type::uuid() -> Type {
-  { oid: 2950U, name: "uuid", kind: Kind::Simple }
+  { oid: UUID_OID, name: "uuid", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `json` type descriptor.
 pub fn Type::json() -> Type {
-  { oid: 114U, name: "json", kind: Kind::Simple }
+  { oid: JSON_OID, name: "json", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `jsonb` type descriptor.
 pub fn Type::jsonb() -> Type {
-  { oid: 3802U, name: "jsonb", kind: Kind::Simple }
+  { oid: JSONB_OID, name: "jsonb", kind: Kind::Simple }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bool[]` type descriptor.
 pub fn Type::bool_array() -> Type {
-  { oid: 1000U, name: "_bool", kind: Kind::Array(16U) }
+  { oid: BOOL_ARRAY_OID, name: "_bool", kind: Kind::Array(BOOL_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bytea[]` type descriptor.
 pub fn Type::bytea_array() -> Type {
-  { oid: 1001U, name: "_bytea", kind: Kind::Array(17U) }
+  { oid: BYTEA_ARRAY_OID, name: "_bytea", kind: Kind::Array(BYTEA_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int2[]` type descriptor.
 pub fn Type::int2_array() -> Type {
-  { oid: 1005U, name: "_int2", kind: Kind::Array(21U) }
+  { oid: INT2_ARRAY_OID, name: "_int2", kind: Kind::Array(INT2_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int4[]` type descriptor.
 pub fn Type::int4_array() -> Type {
-  { oid: 1007U, name: "_int4", kind: Kind::Array(23U) }
+  { oid: INT4_ARRAY_OID, name: "_int4", kind: Kind::Array(INT4_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `text[]` type descriptor.
 pub fn Type::text_array() -> Type {
-  { oid: 1009U, name: "_text", kind: Kind::Array(25U) }
+  { oid: TEXT_ARRAY_OID, name: "_text", kind: Kind::Array(TEXT_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `varchar[]` type descriptor.
 pub fn Type::varchar_array() -> Type {
-  { oid: 1015U, name: "_varchar", kind: Kind::Array(1043U) }
+  { oid: VARCHAR_ARRAY_OID, name: "_varchar", kind: Kind::Array(VARCHAR_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int8[]` type descriptor.
 pub fn Type::int8_array() -> Type {
-  { oid: 1016U, name: "_int8", kind: Kind::Array(20U) }
+  { oid: INT8_ARRAY_OID, name: "_int8", kind: Kind::Array(INT8_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float4[]` type descriptor.
 pub fn Type::float4_array() -> Type {
-  { oid: 1021U, name: "_float4", kind: Kind::Array(700U) }
+  { oid: FLOAT4_ARRAY_OID, name: "_float4", kind: Kind::Array(FLOAT4_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float8[]` type descriptor.
 pub fn Type::float8_array() -> Type {
-  { oid: 1022U, name: "_float8", kind: Kind::Array(701U) }
+  { oid: FLOAT8_ARRAY_OID, name: "_float8", kind: Kind::Array(FLOAT8_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamp[]` type descriptor.
 pub fn Type::timestamp_array() -> Type {
-  { oid: 1115U, name: "_timestamp", kind: Kind::Array(1114U) }
+  {
+    oid: TIMESTAMP_ARRAY_OID,
+    name: "_timestamp",
+    kind: Kind::Array(TIMESTAMP_OID),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `date[]` type descriptor.
 pub fn Type::date_array() -> Type {
-  { oid: 1182U, name: "_date", kind: Kind::Array(1082U) }
+  { oid: DATE_ARRAY_OID, name: "_date", kind: Kind::Array(DATE_OID) }
 }
 
 ///|
 /// Return the built-in PostgreSQL `uuid[]` type descriptor.
 pub fn Type::uuid_array() -> Type {
-  { oid: 2951U, name: "_uuid", kind: Kind::Array(2950U) }
+  { oid: UUID_ARRAY_OID, name: "_uuid", kind: Kind::Array(UUID_OID) }
 }
 
 ///|
@@ -252,37 +256,37 @@ pub fn Type::unknown(oid : @proto.Oid, name? : String = "unknown") -> Type {
 /// ships first-class codecs for.
 fn builtin_type(oid : @proto.Oid) -> Type? {
   match oid {
-    16U => Some(Type::bool())
-    17U => Some(Type::bytea())
-    18U => Some(Type::char())
-    19U => Some(Type::name_type())
-    20U => Some(Type::int8())
-    21U => Some(Type::int2())
-    23U => Some(Type::int4())
-    25U => Some(Type::text())
-    26U => Some(Type::oid_type())
-    114U => Some(Type::json())
-    700U => Some(Type::float4())
-    701U => Some(Type::float8())
-    1000U => Some(Type::bool_array())
-    1001U => Some(Type::bytea_array())
-    1005U => Some(Type::int2_array())
-    1007U => Some(Type::int4_array())
-    1009U => Some(Type::text_array())
-    1015U => Some(Type::varchar_array())
-    1016U => Some(Type::int8_array())
-    1021U => Some(Type::float4_array())
-    1022U => Some(Type::float8_array())
-    1043U => Some(Type::varchar())
-    1082U => Some(Type::date())
-    1083U => Some(Type::time())
-    1114U => Some(Type::timestamp())
-    1115U => Some(Type::timestamp_array())
-    1182U => Some(Type::date_array())
-    1184U => Some(Type::timestamptz())
-    2950U => Some(Type::uuid())
-    2951U => Some(Type::uuid_array())
-    3802U => Some(Type::jsonb())
+    BOOL_OID => Some(Type::bool())
+    BYTEA_OID => Some(Type::bytea())
+    CHAR_OID => Some(Type::char())
+    NAME_OID => Some(Type::name_type())
+    INT8_OID => Some(Type::int8())
+    INT2_OID => Some(Type::int2())
+    INT4_OID => Some(Type::int4())
+    TEXT_OID => Some(Type::text())
+    OID_TYPE_OID => Some(Type::oid_type())
+    JSON_OID => Some(Type::json())
+    FLOAT4_OID => Some(Type::float4())
+    FLOAT8_OID => Some(Type::float8())
+    BOOL_ARRAY_OID => Some(Type::bool_array())
+    BYTEA_ARRAY_OID => Some(Type::bytea_array())
+    INT2_ARRAY_OID => Some(Type::int2_array())
+    INT4_ARRAY_OID => Some(Type::int4_array())
+    TEXT_ARRAY_OID => Some(Type::text_array())
+    VARCHAR_ARRAY_OID => Some(Type::varchar_array())
+    INT8_ARRAY_OID => Some(Type::int8_array())
+    FLOAT4_ARRAY_OID => Some(Type::float4_array())
+    FLOAT8_ARRAY_OID => Some(Type::float8_array())
+    VARCHAR_OID => Some(Type::varchar())
+    DATE_OID => Some(Type::date())
+    TIME_OID => Some(Type::time())
+    TIMESTAMP_OID => Some(Type::timestamp())
+    TIMESTAMP_ARRAY_OID => Some(Type::timestamp_array())
+    DATE_ARRAY_OID => Some(Type::date_array())
+    TIMESTAMPTZ_OID => Some(Type::timestamptz())
+    UUID_OID => Some(Type::uuid())
+    UUID_ARRAY_OID => Some(Type::uuid_array())
+    JSONB_OID => Some(Type::jsonb())
     _ => None
   }
 }
@@ -310,7 +314,7 @@ fn wrong_type_error(moonbit_type : String, postgres_type : Type) -> ClientError 
 /// extension types that are naturally represented as strings in user code.
 fn is_text_type(type_ : Type) -> Bool {
   match type_.oid {
-    19U | 25U | 1043U => true
+    NAME_OID | TEXT_OID | VARCHAR_OID => true
     _ =>
       match type_.name {
         "bpchar" | "citext" | "lquery" | "ltree" | "ltxtquery" | "unknown" =>
@@ -324,7 +328,7 @@ fn is_text_type(type_ : Type) -> Bool {
 /// Return whether the built-in `Bytes` codec should accept this PostgreSQL type.
 fn is_bytes_type(type_ : Type) -> Bool {
   match type_.oid {
-    17U | 2950U => true
+    BYTEA_OID | UUID_OID => true
     _ => false
   }
 }
