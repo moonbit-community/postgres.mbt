@@ -1,0 +1,11 @@
+import {
+  "moonbit-community/postgres/benchmark/support" @perf,
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+}
+
+supported_targets = "+native"
+
+options(
+  "is-main": true,
+)

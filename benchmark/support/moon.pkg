@@ -1,0 +1,10 @@
+import {
+  "moonbit-community/postgres/client" @client,
+  "moonbit-community/postgres/pgpool" @pgpool,
+  "moonbitlang/async" @async,
+  "moonbitlang/core/bench" @bench,
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/ref" @ref,
+  "moonbitlang/core/string",
+}

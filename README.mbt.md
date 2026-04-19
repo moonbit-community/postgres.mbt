@@ -81,9 +81,18 @@ References:
 
 - Run PostgreSQL integration tests: `node scripts/pg_integration_test.mjs`
 - Run PostgreSQL integration coverage tests: `node scripts/pg_integration_test.mjs --enable-coverage`
+- Run synchronous microbenchmarks: `moon bench --target native --release`
+- Run PostgreSQL performance benchmarks: `node scripts/pg_perf_bench.mjs`
+- Compare a fresh benchmark run with a previous JSON export:
+  `node scripts/pg_perf_bench.mjs --export-json benchlog/current.json --compare benchlog/baseline.json`
 
 MD5 password authentication is deprecated by PostgreSQL and is not supported by this client. If the server sends `AuthenticationMD5Password`, connection startup fails with a client authentication error; configure `scram-sha-256` or `password` instead.
 
 The integration tests only execute when `RUN_POSTGRES_INTEGRATION=1`. The script above starts a temporary PostgreSQL cluster with `pg_virtualenv`, picks a high local port, creates a `moondb` database plus `moon_scram` and `moon_password` users, and runs the `integration*` test suite against those two authentication modes.
 
 When `--enable-coverage` is set, the same script runs `moon test --enable-coverage` for each authentication mode, merges the resulting traces, and then prints caret-style line-level coverage details for all instrumented packages.
+
+`scripts/pg_perf_bench.mjs` is intentionally manual for now. It reuses the same
+temporary PostgreSQL setup, defaults to `moon_scram` with
+`ssl_mode = disable`, and benchmarks the short-query and pool-cache paths
+without adding noisy PR gating.

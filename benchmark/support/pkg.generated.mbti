@@ -1,0 +1,40 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/postgres/benchmark/support"
+
+// Values
+pub fn build_result(String, CliOptions, Int, Int, Double, Array[Double]) -> PerfResult
+
+pub fn parse_cli(ArrayView[String]) -> CliOptions
+
+pub async fn run_selected(CliOptions) -> Array[PerfResult]
+
+// Errors
+
+// Types and methods
+pub struct CliOptions {
+  scenario : String
+  iterations : Int
+  warmup : Int
+  workers : Int
+}
+
+pub struct PerfResult {
+  scenario : String
+  mode : String
+  iterations : Int
+  warmup : Int
+  workers : Int
+  operations : Int
+  total_us : Double
+  mean_us : Double
+  p50_us : Double
+  p95_us : Double
+  max_us : Double
+  ops_per_sec : Double
+}
+pub impl ToJson for PerfResult
+
+// Type aliases
+
+// Traits
+
