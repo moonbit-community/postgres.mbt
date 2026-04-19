@@ -88,7 +88,7 @@ async fn query_oid_catalog(
   let client : Client = { shared, }
   // Reuse the ordinary query pipeline so the type cache does not maintain its
   // own special-purpose protocol machinery.
-  let params : Array[&ToSql] = [oid as &ToSql]
+  let params : Array[&ToSql] = [oid]
   let stream = client.query_typed(sql, [Type::oid_type()], params~)
   stream.collect()
 }
