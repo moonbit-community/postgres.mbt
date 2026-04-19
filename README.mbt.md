@@ -1,5 +1,7 @@
 ## Postgres.mbt
 
+A secure, easy-to-use PostgreSQL client library for MoonBit with an included connection pool.
+
 ### Packages
 
 - `moonbit-community/postgres/client`: low-level PostgreSQL client
@@ -8,6 +10,9 @@
 The `pgpool` package is meant for connection reuse and PostgreSQL session
 isolation. It is useful when multiple async tasks share one MoonBit event loop
 but should not all queue behind the same database connection.
+
+[client doc](./client/README.mbt.md)
+[pgpool doc](./pgpool/README.mbt.md)
 
 ### TLS
 

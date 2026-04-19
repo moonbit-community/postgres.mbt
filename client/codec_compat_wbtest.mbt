@@ -47,29 +47,25 @@ fn assert_encode_format(
 
 ///|
 test "built-in ToSql compatibility remains stable" {
-  assert_encode_ok(true , Type::bool())
-  assert_encode_ok(1 , Type::int2())
-  assert_encode_ok(1 , Type::int4())
-  assert_encode_wrong_type(1 , Type::int8())
-  assert_encode_ok(1L , Type::int8())
-  assert_encode_ok(1U , Type::oid_type())
-  assert_encode_ok(Float::from_double(1.5) , Type::float4())
-  assert_encode_ok(1.5 , Type::float8())
-  assert_encode_ok("moonbit" , Type::text())
-  assert_encode_ok("moonbit" , Type::varchar())
-  assert_encode_ok(b"abc" , Type::bytea())
-  assert_encode_ok(b"1234567890abcdef" , Type::uuid())
+  assert_encode_ok(true, Type::bool())
+  assert_encode_ok(1, Type::int2())
+  assert_encode_ok(1, Type::int4())
+  assert_encode_wrong_type(1, Type::int8())
+  assert_encode_ok(1L, Type::int8())
+  assert_encode_ok(1U, Type::oid_type())
+  assert_encode_ok(Float::from_double(1.5), Type::float4())
+  assert_encode_ok(1.5, Type::float8())
+  assert_encode_ok("moonbit", Type::text())
+  assert_encode_ok("moonbit", Type::varchar())
+  assert_encode_ok(b"abc", Type::bytea())
+  assert_encode_ok(b"1234567890abcdef", Type::uuid())
 }
 
 ///|
 test "built-in wire formats remain stable" {
-  assert_encode_format(true , Type::bool(), WireFormat::Binary)
-  assert_encode_format("moonbit" , Type::text(), WireFormat::Text)
-  assert_encode_format(
-    (None : String?) ,
-    Type::text(),
-    WireFormat::Binary,
-  )
+  assert_encode_format(true, Type::bool(), WireFormat::Binary)
+  assert_encode_format("moonbit", Type::text(), WireFormat::Text)
+  assert_encode_format((None : String?), Type::text(), WireFormat::Binary)
 }
 
 ///|

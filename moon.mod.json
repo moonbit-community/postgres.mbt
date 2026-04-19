@@ -10,6 +10,6 @@
   "repository": "",
   "license": "Apache-2.0",
   "keywords": [],
-  "description": "",
+  "description": "A secure, easy-to-use PostgreSQL client library for MoonBit with an included connection pool.",
   "preferred-target": "native"
 }
