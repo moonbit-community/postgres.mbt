@@ -11,8 +11,8 @@ The `pgpool` package is meant for connection reuse and PostgreSQL session
 isolation. It is useful when multiple async tasks share one MoonBit event loop
 but should not all queue behind the same database connection.
 
-[client doc](./client/README.mbt.md)
-[pgpool doc](./pgpool/README.mbt.md)
+- [client doc](./client/README.mbt.md)
+- [pgpool doc](./pgpool/README.mbt.md)
 
 ### TLS
 
