@@ -1,13 +1,13 @@
 {
   "name": "moonbit-community/postgres",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "deps": {
     "moonbitlang/async": "0.17.0",
     "moonbitlang/x": "0.4.41",
     "tonyfettes/unicode": "0.3.0"
   },
   "readme": "README.md",
-  "repository": "",
+  "repository": "https://github.com/moonbit-community/postgres.mbt",
   "license": "Apache-2.0",
   "keywords": [],
   "description": "A secure, easy-to-use PostgreSQL client library for MoonBit with an included connection pool.",
