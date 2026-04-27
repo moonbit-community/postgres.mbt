@@ -34,16 +34,19 @@ let openssl_loaded : Ref[Bool] = Ref::new(false)
 
 ///|
 #cfg(not(platform="windows"))
+let bio_method_initialized : Ref[Bool] = Ref::new(false)
+
+///|
+#cfg(not(platform="windows"))
 fn load_openssl() -> Unit {
   if openssl_loaded.val {
     return
   }
-  openssl_loaded.val = true
   let major = Ref::new(0)
   let minor = Ref::new(0)
   let fix = Ref::new(0)
   match load_openssl_ffi(major, minor, fix) {
-    0 => ()
+    0 => openssl_loaded.val = true
     1 => abort("failed to load OpenSSL")
     2 => abort("failed to get OpenSSL version")
     3 =>
@@ -55,8 +58,12 @@ fn load_openssl() -> Unit {
 
 ///|
 #cfg(not(platform="windows"))
-fn init {
+fn init_openssl() -> Unit {
   load_openssl()
+  if bio_method_initialized.val {
+    return
+  }
+  bio_method_initialized.val = true
   init_bio_method((bio, dst, len) => bio.read(dst, len), (bio, src, len) => {
     bio.write(src, len)
   })

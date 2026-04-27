@@ -341,7 +341,7 @@ async fn begin_scram(
   transport_binding : TlsChannelBinding,
 ) -> @auth.ScramSha256 {
   let password = require_password(password)
-  let nonce = @local_tls.rand_bytes(18)
+  let nonce = secure_random_bytes(18)
   let (mechanism, scram_binding) = choose_scram_binding(
     body, channel_binding, transport_binding,
   )

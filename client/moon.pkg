@@ -18,3 +18,7 @@ import {
 import {
   "moonbitlang/core/debug",
 } for "wbtest"
+
+options(
+  "native-stub": [ "secure_random.c" ],
+)
