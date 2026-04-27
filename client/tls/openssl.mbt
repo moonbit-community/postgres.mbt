@@ -51,11 +51,23 @@ extern "C" fn SSL_CTX::set_min_protocol_version(
 
 ///|
 #cfg(not(platform="windows"))
-let server_ctx : SSL_CTX = {
-  load_openssl()
-  let ctx = SSL_CTX::server()
-  guard !ctx.is_null() else { abort("failed to initialize SSL server context") }
-  ctx
+let server_ctx : Ref[SSL_CTX?] = Ref::new(None)
+
+///|
+#cfg(not(platform="windows"))
+fn get_server_ctx() -> SSL_CTX {
+  match server_ctx.val {
+    Some(ctx) => ctx
+    None => {
+      load_openssl()
+      let ctx = SSL_CTX::server()
+      guard !ctx.is_null() else {
+        abort("failed to initialize SSL server context")
+      }
+      server_ctx.val = Some(ctx)
+      ctx
+    }
+  }
 }
 
 ///|
@@ -409,6 +421,7 @@ pub async fn[R : @io.Reader, W : @io.Writer] Tls::client_from_pair_with_options(
   w : W,
   options : ClientOptions,
 ) -> Tls {
+  init_openssl()
   let ctx = configure_client_ctx(options)
   let self = Tls::from_pair(ctx, r, w, Some(ctx), host=options.verify_host)
   try {
@@ -471,9 +484,10 @@ pub async fn[R : @io.Reader, W : @io.Writer] Tls::server_from_pair(
   certificate_file~ : String,
   certificate_type~ : X509FileType,
 ) -> Tls {
+  init_openssl()
   let private_key_file = @utf8.encode(private_key_file)
   let certificate_file = @utf8.encode(certificate_file)
-  let self = Tls::from_pair(server_ctx, r, w, None, host=None)
+  let self = Tls::from_pair(get_server_ctx(), r, w, None, host=None)
   try {
     if self.ssl.use_certificate_file(certificate_file, certificate_type) != 1 {
       raise TlsError(err_get_error())
