@@ -915,7 +915,8 @@ type, method, or enum variant is for.
 - `FromSql::accepts(type_)`: declare which PostgreSQL types the decoder accepts.
 - `FromSql::moonbit_type_name()`: provide the decoder's MoonBit-side type name for diagnostics.
 - `FromSql::from_sql_null(type_, format)`: decode SQL `NULL`; `format` is a `WireFormat`, and the default implementation raises `ClientError::Decode`.
-- Built-in codec implementations exist for `Bool`, `Int`, `Int64`, `UInt`, `Float`, `Double`, `String`, `Bytes`, `Json`, and `T?`. The `Json` codec supports PostgreSQL `json` and `jsonb`; parameters are sent in text format, while result decoding accepts text `json`/`jsonb` and binary `jsonb`.
+- Built-in codec implementations exist for `Bool`, `Int`, `Int64`, `UInt`, `Float`, `Double`, `String`, `Bytes`, `Json`, `T?`, and one-dimensional `Array[T]` over supported built-in element codecs. `Array[T?]` supports SQL `NULL` elements; `Array[T]` rejects them during decoding. Array parameters and rows use PostgreSQL binary array format, and text array result decoding is intentionally not supported yet.
+- The `Json` codec supports PostgreSQL `json` and `jsonb`; parameters are sent in text format, while result decoding accepts text `json`/`jsonb` and binary `jsonb`.
 
 ### Errors
 

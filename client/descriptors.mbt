@@ -355,3 +355,23 @@ fn is_json_type(type_ : Type) -> Bool {
     _ => false
   }
 }
+
+///|
+/// Return the built-in element descriptor for a supported PostgreSQL array.
+fn array_element_type(type_ : Type) -> Type? {
+  match type_.oid {
+    BOOL_ARRAY_OID => Some(Type::bool())
+    BYTEA_ARRAY_OID => Some(Type::bytea())
+    INT2_ARRAY_OID => Some(Type::int2())
+    INT4_ARRAY_OID => Some(Type::int4())
+    TEXT_ARRAY_OID => Some(Type::text())
+    VARCHAR_ARRAY_OID => Some(Type::varchar())
+    INT8_ARRAY_OID => Some(Type::int8())
+    FLOAT4_ARRAY_OID => Some(Type::float4())
+    FLOAT8_ARRAY_OID => Some(Type::float8())
+    UUID_ARRAY_OID => Some(Type::uuid())
+    JSON_ARRAY_OID => Some(Type::json())
+    JSONB_ARRAY_OID => Some(Type::jsonb())
+    _ => None
+  }
+}
