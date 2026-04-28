@@ -31,6 +31,9 @@ const OID_TYPE_OID : @proto.Oid = 26U
 const JSON_OID : @proto.Oid = 114U
 
 ///|
+const JSON_ARRAY_OID : @proto.Oid = 199U
+
+///|
 const FLOAT4_OID : @proto.Oid = 700U
 
 ///|
@@ -56,6 +59,9 @@ const UUID_OID : @proto.Oid = 2950U
 
 ///|
 const JSONB_OID : @proto.Oid = 3802U
+
+///|
+const JSONB_ARRAY_OID : @proto.Oid = 3807U
 
 ///|
 const BOOL_ARRAY_OID : @proto.Oid = 1000U

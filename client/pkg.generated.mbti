@@ -261,7 +261,9 @@ pub fn Type::int4_array() -> Self
 pub fn Type::int8() -> Self
 pub fn Type::int8_array() -> Self
 pub fn Type::json() -> Self
+pub fn Type::json_array() -> Self
 pub fn Type::jsonb() -> Self
+pub fn Type::jsonb_array() -> Self
 pub fn Type::name_type() -> Self
 pub fn Type::oid_type() -> Self
 pub fn Type::text() -> Self
@@ -304,6 +306,7 @@ pub impl FromSql for Double
 pub impl FromSql for String
 pub impl[T : FromSql] FromSql for T?
 pub impl FromSql for Bytes
+pub impl FromSql for Json
 
 pub(open) trait ToSql {
   format(Self, Type) -> WireFormat = _
@@ -320,4 +323,5 @@ pub impl ToSql for Double
 pub impl ToSql for String
 pub impl[T : ToSql] ToSql for T?
 pub impl ToSql for Bytes
+pub impl ToSql for Json
 

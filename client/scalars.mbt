@@ -311,3 +311,55 @@ pub impl FromSql for Bytes with from_sql(type_, format, raw) {
       }
   }
 }
+
+///|
+// `Json` is sent as text so the same codec covers PostgreSQL `json` and `jsonb`.
+pub impl ToSql for Json with accepts(_, type_) {
+  is_json_type(type_)
+}
+
+///|
+pub impl ToSql for Json with moonbit_type_name(_) {
+  "Json"
+}
+
+///|
+pub impl ToSql for Json with format(_, _) {
+  WireFormat::Text
+}
+
+///|
+pub impl ToSql for Json with to_sql(self, _, buf) {
+  buf.write_bytes(@proto.utf8_encode(self.stringify()))
+  @proto.IsNull::No
+}
+
+///|
+pub impl FromSql for Json with accepts(type_) {
+  is_json_type(type_)
+}
+
+///|
+pub impl FromSql for Json with moonbit_type_name() {
+  "Json"
+}
+
+///|
+pub impl FromSql for Json with from_sql(type_, format, raw) {
+  match format {
+    WireFormat::Text => @json.parse(decode_utf8(raw)[:])
+    WireFormat::Binary =>
+      match type_.oid {
+        JSONB_OID => decode_jsonb_binary(raw)
+        _ => @json.parse(decode_utf8(raw)[:])
+      }
+  }
+}
+
+///|
+fn decode_jsonb_binary(raw : BytesView) -> Json raise Error {
+  match raw {
+    [b'\x01', .. payload] => @json.parse(decode_utf8(payload)[:])
+    _ => raise ClientError::Decode("jsonb version 1 only supported")
+  }
+}

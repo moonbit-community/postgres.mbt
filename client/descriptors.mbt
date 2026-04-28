@@ -158,9 +158,21 @@ pub fn Type::json() -> Type {
 }
 
 ///|
+/// Return the built-in PostgreSQL `json[]` type descriptor.
+pub fn Type::json_array() -> Type {
+  { oid: JSON_ARRAY_OID, name: "_json", kind: Kind::Array(JSON_OID) }
+}
+
+///|
 /// Return the built-in PostgreSQL `jsonb` type descriptor.
 pub fn Type::jsonb() -> Type {
   { oid: JSONB_OID, name: "jsonb", kind: Kind::Simple }
+}
+
+///|
+/// Return the built-in PostgreSQL `jsonb[]` type descriptor.
+pub fn Type::jsonb_array() -> Type {
+  { oid: JSONB_ARRAY_OID, name: "_jsonb", kind: Kind::Array(JSONB_OID) }
 }
 
 ///|
@@ -266,6 +278,7 @@ fn builtin_type(oid : @proto.Oid) -> Type? {
     TEXT_OID => Some(Type::text())
     OID_TYPE_OID => Some(Type::oid_type())
     JSON_OID => Some(Type::json())
+    JSON_ARRAY_OID => Some(Type::json_array())
     FLOAT4_OID => Some(Type::float4())
     FLOAT8_OID => Some(Type::float8())
     BOOL_ARRAY_OID => Some(Type::bool_array())
@@ -287,6 +300,7 @@ fn builtin_type(oid : @proto.Oid) -> Type? {
     UUID_OID => Some(Type::uuid())
     UUID_ARRAY_OID => Some(Type::uuid_array())
     JSONB_OID => Some(Type::jsonb())
+    JSONB_ARRAY_OID => Some(Type::jsonb_array())
     _ => None
   }
 }
@@ -329,6 +343,15 @@ fn is_text_type(type_ : Type) -> Bool {
 fn is_bytes_type(type_ : Type) -> Bool {
   match type_.oid {
     BYTEA_OID | UUID_OID => true
+    _ => false
+  }
+}
+
+///|
+/// Return whether a PostgreSQL type is one of the built-in JSON scalar types.
+fn is_json_type(type_ : Type) -> Bool {
+  match type_.oid {
+    JSON_OID | JSONB_OID => true
     _ => false
   }
 }
