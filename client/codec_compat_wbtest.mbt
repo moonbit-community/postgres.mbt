@@ -145,6 +145,86 @@ test "built-in FromSql compatibility remains stable" {
 }
 
 ///|
+test "built-in Array codecs support binary arrays" {
+  let ints = [1, 2, 3]
+  assert_encode_format(ints, Type::int4_array(), WireFormat::Binary)
+  let encoded_ints = encode_param(ints, Type::int4_array())
+  guard encoded_ints.value is Some(int_bytes) else {
+    fail("expected encoded int array bytes")
+  }
+  let decoded_ints : Array[Int] = make_row(
+    Type::int4_array(),
+    int_bytes,
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(decoded_ints, ints)
+
+  let texts = ["moon", "bit"]
+  let encoded_texts = encode_param(texts, Type::text_array())
+  guard encoded_texts.value is Some(text_bytes) else {
+    fail("expected encoded text array bytes")
+  }
+  let decoded_texts : Array[String] = make_row(
+    Type::text_array(),
+    text_bytes,
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(decoded_texts, texts)
+
+  let nullable : Array[String?] = [Some("a"), None, Some("b")]
+  let encoded_nullable = encode_param(nullable, Type::text_array())
+  guard encoded_nullable.value is Some(nullable_bytes) else {
+    fail("expected encoded nullable array bytes")
+  }
+  let decoded_nullable : Array[String?] = make_row(
+    Type::text_array(),
+    nullable_bytes,
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(decoded_nullable, nullable)
+
+  let json_values = [
+    Json::object({ "lang": Json::string("moonbit") }),
+    Json::null(),
+  ]
+  let encoded_json = encode_param(json_values, Type::json_array())
+  guard encoded_json.value is Some(json_bytes) else {
+    fail("expected encoded json array bytes")
+  }
+  let decoded_json : Array[Json] = make_row(
+    Type::json_array(),
+    json_bytes,
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(decoded_json, json_values)
+
+  let encoded_jsonb = encode_param(json_values, Type::jsonb_array())
+  guard encoded_jsonb.value is Some(jsonb_bytes) else {
+    fail("expected encoded jsonb array bytes")
+  }
+  let decoded_jsonb : Array[Json] = make_row(
+    Type::jsonb_array(),
+    jsonb_bytes,
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(decoded_jsonb, json_values)
+}
+
+///|
+test "built-in Array codecs reject unsupported and mismatched arrays" {
+  let ints = [1, 2]
+  assert_encode_wrong_type(ints, Type::text_array())
+
+  let text_array_result : Result[Array[String], Error] = try? make_row(
+    Type::text_array(),
+    b"{moon,bit}",
+  ).get(0)
+  guard text_array_result is Err(ClientError::Decode(_)) else {
+    fail("expected text array decode failure")
+  }
+}
+
+///|
 test "built-in FromSql rejects unsupported types before decoding" {
   let int_result : Result[Int, Error] = try? make_row(Type::int8(), b"1").get(0)
   guard int_result is Err(ClientError::WrongType(_)) else {

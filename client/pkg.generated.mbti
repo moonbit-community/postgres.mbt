@@ -306,6 +306,7 @@ pub impl FromSql for Double
 pub impl FromSql for String
 pub impl[T : FromSql] FromSql for T?
 pub impl FromSql for Bytes
+pub impl[T : FromSql] FromSql for Array[T]
 pub impl FromSql for Json
 
 pub(open) trait ToSql {
@@ -323,5 +324,6 @@ pub impl ToSql for Double
 pub impl ToSql for String
 pub impl[T : ToSql] ToSql for T?
 pub impl ToSql for Bytes
+pub impl[T : ToSql] ToSql for Array[T]
 pub impl ToSql for Json
 

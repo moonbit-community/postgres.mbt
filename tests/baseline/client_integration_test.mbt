@@ -266,6 +266,50 @@ async fn assert_json_roundtrip(
 }
 
 ///|
+/// Verify JSON arrays across literal reads, inferred parameters, and explicit parameter typing.
+async fn assert_json_array_roundtrip(
+  client : @client.Client,
+  sql_type : String,
+  param_type : @client.Type,
+) -> Unit {
+  let expected = [
+    Json::object({ "lang": Json::string("moonbit") }),
+    Json::null(),
+    Json::array([Json::number(1.0), Json::boolean(true)]),
+  ]
+  let literal = "array['{\"lang\":\"moonbit\"}'::\{sql_type},'null'::\{sql_type},'[1,true]'::\{sql_type}]"
+  assert_array_roundtrip(client, "\{sql_type}[]", param_type, literal, expected)
+}
+
+///|
+/// Verify one-dimensional built-in arrays across literal reads, inferred parameters, and explicit parameter typing.
+async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_array_roundtrip(
+  client : @client.Client,
+  sql_type : String,
+  param_type : @client.Type,
+  literal : String,
+  value : Array[T],
+) -> Unit {
+  let from_literal : Array[T] = client
+    .query_one("select \{literal}::\{sql_type} as value")
+    .get_name("value")
+  assert_eq(from_literal, value)
+
+  let params : Array[&@client.ToSql] = [value as &@client.ToSql]
+  let from_param : Array[T] = client
+    .query_one("select $1::\{sql_type} as value", params~)
+    .get_name("value")
+  assert_eq(from_param, value)
+
+  let typed_rows = client
+    .query_typed("select $1::\{sql_type} as value", [param_type], params~)
+    .collect()
+  assert_eq(typed_rows.length(), 1)
+  let from_typed : Array[T] = typed_rows[0].get_name("value")
+  assert_eq(from_typed, value)
+}
+
+///|
 /// The `double precision` version of the NaN round-trip test.
 async fn assert_double_nan_roundtrip(client : @client.Client) -> Unit {
   let from_literal : Double = client
@@ -1717,6 +1761,29 @@ async test "integration scalar type roundtrips" {
     )
     assert_json_roundtrip(client, "json", @client.Type::json())
     assert_json_roundtrip(client, "jsonb", @client.Type::jsonb())
+    assert_json_array_roundtrip(client, "json", @client.Type::json_array())
+    assert_json_array_roundtrip(client, "jsonb", @client.Type::jsonb_array())
+    assert_array_roundtrip(
+      client,
+      "int4[]",
+      @client.Type::int4_array(),
+      "array[1,2,3]",
+      [1, 2, 3],
+    )
+    assert_array_roundtrip(
+      client,
+      "text[]",
+      @client.Type::text_array(),
+      "array['moon','bit']",
+      ["moon", "bit"],
+    )
+    assert_array_roundtrip(
+      client,
+      "text[]",
+      @client.Type::text_array(),
+      "array['moon',null,'bit']",
+      [Some("moon"), None, Some("bit")],
+    )
 
     client.close()
   })
