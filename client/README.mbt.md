@@ -903,7 +903,7 @@ type, method, or enum variant is for.
 - `Kind::Unknown`: placeholder shape when only the OID is known.
 - `Field { name, type_oid }`: one field inside `Kind::Composite`.
 - `Type::bool()`, `Type::bytea()`, `Type::char()`, `Type::name_type()`, `Type::int2()`, `Type::int4()`, `Type::int8()`, `Type::oid_type()`, `Type::text()`, `Type::varchar()`, `Type::float4()`, `Type::float8()`, `Type::date()`, `Type::time()`, `Type::timestamp()`, `Type::timestamptz()`, `Type::uuid()`, `Type::json()`, `Type::jsonb()`: built-in scalar descriptors to use for explicit parameter typing or metadata inspection.
-- `Type::bool_array()`, `Type::bytea_array()`, `Type::int2_array()`, `Type::int4_array()`, `Type::int8_array()`, `Type::text_array()`, `Type::varchar_array()`, `Type::float4_array()`, `Type::float8_array()`, `Type::timestamp_array()`, `Type::date_array()`, `Type::uuid_array()`: built-in array descriptors.
+- `Type::bool_array()`, `Type::bytea_array()`, `Type::int2_array()`, `Type::int4_array()`, `Type::int8_array()`, `Type::text_array()`, `Type::varchar_array()`, `Type::float4_array()`, `Type::float8_array()`, `Type::timestamp_array()`, `Type::date_array()`, `Type::uuid_array()`, `Type::json_array()`, `Type::jsonb_array()`: built-in array descriptors.
 - `Type::unknown(oid, name?)`: create a placeholder descriptor when only the OID is known.
 - `ToSql`: implement this trait for custom query parameter types.
 - `ToSql::format(self, type_)`: choose `WireFormat::Text` or `WireFormat::Binary`; the default is binary.
@@ -915,7 +915,7 @@ type, method, or enum variant is for.
 - `FromSql::accepts(type_)`: declare which PostgreSQL types the decoder accepts.
 - `FromSql::moonbit_type_name()`: provide the decoder's MoonBit-side type name for diagnostics.
 - `FromSql::from_sql_null(type_, format)`: decode SQL `NULL`; `format` is a `WireFormat`, and the default implementation raises `ClientError::Decode`.
-- Built-in codec implementations exist for `Bool`, `Int`, `Int64`, `UInt`, `Float`, `Double`, `String`, `Bytes`, and `T?`.
+- Built-in codec implementations exist for `Bool`, `Int`, `Int64`, `UInt`, `Float`, `Double`, `String`, `Bytes`, `Json`, and `T?`. The `Json` codec supports PostgreSQL `json` and `jsonb`; parameters are sent in text format, while result decoding accepts text `json`/`jsonb` and binary `jsonb`.
 
 ### Errors
 

@@ -59,12 +59,22 @@ test "built-in ToSql compatibility remains stable" {
   assert_encode_ok("moonbit", Type::varchar())
   assert_encode_ok(b"abc", Type::bytea())
   assert_encode_ok(b"1234567890abcdef", Type::uuid())
+  assert_encode_ok(
+    Json::object({ "lang": Json::string("moonbit") }),
+    Type::json(),
+  )
+  assert_encode_ok(
+    Json::object({ "lang": Json::string("moonbit") }),
+    Type::jsonb(),
+  )
 }
 
 ///|
 test "built-in wire formats remain stable" {
   assert_encode_format(true, Type::bool(), WireFormat::Binary)
   assert_encode_format("moonbit", Type::text(), WireFormat::Text)
+  assert_encode_format(Json::null(), Type::json(), WireFormat::Text)
+  assert_encode_format(Json::null(), Type::jsonb(), WireFormat::Text)
   assert_encode_format((None : String?), Type::text(), WireFormat::Binary)
 }
 
@@ -110,6 +120,28 @@ test "built-in FromSql compatibility remains stable" {
     format=WireFormat::Binary,
   ).get(0)
   @debug.assert_eq(uuid_value, b"1234567890abcdef")
+
+  let json_value : Json = make_row(
+    Type::json(),
+    b"{\"lang\":\"moonbit\",\"ok\":true}",
+  ).get(0)
+  @debug.assert_eq(
+    json_value,
+    Json::object({ "lang": Json::string("moonbit"), "ok": Json::boolean(true) }),
+  )
+
+  let jsonb_payload = @buffer.new()
+  jsonb_payload.write_byte(b'\x01')
+  jsonb_payload.write_bytes(b"{\"lang\":\"moonbit\",\"ok\":true}")
+  let jsonb_value : Json = make_row(
+    Type::jsonb(),
+    jsonb_payload.to_bytes(),
+    format=WireFormat::Binary,
+  ).get(0)
+  @debug.assert_eq(
+    jsonb_value,
+    Json::object({ "lang": Json::string("moonbit"), "ok": Json::boolean(true) }),
+  )
 }
 
 ///|
@@ -131,6 +163,13 @@ test "built-in FromSql rejects unsupported types before decoding" {
   )
   guard bytes_result is Err(ClientError::WrongType(_)) else {
     fail("expected bytes wrong type")
+  }
+
+  let json_result : Result[Json, Error] = try? make_row(Type::text(), b"{}").get(
+    0,
+  )
+  guard json_result is Err(ClientError::WrongType(_)) else {
+    fail("expected json wrong type")
   }
 }
 

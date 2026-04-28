@@ -233,6 +233,39 @@ async fn assert_float_nan_roundtrip(client : @client.Client) -> Unit {
 }
 
 ///|
+/// Verify JSON values across literal reads, inferred parameters, and explicit parameter typing.
+async fn assert_json_roundtrip(
+  client : @client.Client,
+  sql_type : String,
+  param_type : @client.Type,
+) -> Unit {
+  let expected = Json::object({
+    "lang": Json::string("moonbit"),
+    "ok": Json::boolean(true),
+    "count": Json::number(2.0),
+  })
+  let literal = "'{\"lang\":\"moonbit\",\"ok\":true,\"count\":2}'"
+
+  let from_literal : Json = client
+    .query_one("select \{literal}::\{sql_type} as value")
+    .get_name("value")
+  assert_eq(from_literal, expected)
+
+  let params : Array[&@client.ToSql] = [expected as &@client.ToSql]
+  let from_param : Json = client
+    .query_one("select $1::\{sql_type} as value", params~)
+    .get_name("value")
+  assert_eq(from_param, expected)
+
+  let typed_rows = client
+    .query_typed("select $1::\{sql_type} as value", [param_type], params~)
+    .collect()
+  assert_eq(typed_rows.length(), 1)
+  let from_typed : Json = typed_rows[0].get_name("value")
+  assert_eq(from_typed, expected)
+}
+
+///|
 /// The `double precision` version of the NaN round-trip test.
 async fn assert_double_nan_roundtrip(client : @client.Client) -> Unit {
   let from_literal : Double = client
@@ -1682,6 +1715,8 @@ async test "integration scalar type roundtrips" {
       "'hello world'",
       "hello world",
     )
+    assert_json_roundtrip(client, "json", @client.Type::json())
+    assert_json_roundtrip(client, "jsonb", @client.Type::jsonb())
 
     client.close()
   })

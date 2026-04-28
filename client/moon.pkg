@@ -5,6 +5,7 @@ import {
   "moonbit-community/postgres/protocol/message/frontend" @frontend,
   "moonbit-community/postgres/protocol/types" @types,
   "moonbitlang/core/buffer",
+  "moonbitlang/core/json",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/ref" @ref,
   "moonbitlang/core/string",
