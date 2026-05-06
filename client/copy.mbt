@@ -58,7 +58,7 @@ pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
   guard !self.finished.val else {
     raise ClientError::Closed("copy sink already finished")
   }
-  self.input.put(CopyInAction::Data(data.to_bytes()))
+  self.input.put(CopyInAction::Data(data.to_owned()))
 }
 
 ///|

@@ -299,15 +299,15 @@ pub impl FromSql for Bytes with from_sql(type_, format, raw) {
   match format {
     WireFormat::Text =>
       if type_.oid == BYTEA_OID {
-        raw.to_bytes()
+        raw.to_owned()
       } else {
         @proto.utf8_encode(decode_utf8(raw))
       }
     WireFormat::Binary =>
       match type_.oid {
-        BYTEA_OID => @types.bytea_from_sql(raw).to_bytes()
+        BYTEA_OID => @types.bytea_from_sql(raw).to_owned()
         UUID_OID => @types.uuid_from_sql(raw)
-        _ => raw.to_bytes()
+        _ => raw.to_owned()
       }
   }
 }

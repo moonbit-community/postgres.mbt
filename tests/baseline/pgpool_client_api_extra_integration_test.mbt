@@ -750,10 +750,10 @@ async test "integration pool with_simple_query collect keeps connection reusable
       fail("expected second command tag")
     }
     assert_eq(left_columns, ["side"])
-    assert_eq(try! left_row.get_name("side"), Some("left"))
+    @debug.assert_eq(try! left_row.get_name("side"), Some("left"))
     assert_eq(left_tag, "SELECT 1")
     assert_eq(right_columns, ["side"])
-    assert_eq(try! right_row.get_name("side"), Some("right"))
+    @debug.assert_eq(try! right_row.get_name("side"), Some("right"))
     assert_eq(right_tag, "SELECT 1")
 
     let probe : Int = pool.with_client(client => {
@@ -790,7 +790,7 @@ async test "integration pool with_simple_query detach cleanup survives callback 
           guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
             fail("expected first row")
           }
-          assert_eq(try! row.get_name("value"), Some("1"))
+          @debug.assert_eq(try! row.get_name("value"), Some("1"))
           stream.detach()
           stream.detach()
           ignore(stream.next())

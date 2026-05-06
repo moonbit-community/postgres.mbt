@@ -12,12 +12,12 @@ async test "integration copy in startup error keeps connection reusable" {
     let err = expect_database_error(
       try? client.copy_in("copy moon_missing_copy_input from stdin"),
     )
-    assert_eq(err.code, Some("42P01"))
+    @debug.assert_eq(err.code, Some("42P01"))
 
     let probe : Int = client
       .query_one("select 17::int4 as value")
       .get_name("value")
-    assert_eq(probe, 17)
+    @debug.assert_eq(probe, 17)
 
     client.close()
   })
@@ -38,17 +38,17 @@ async test "integration copy in finish closes sink and commits rows" {
 
     let sink = client.copy_in("copy moon_copy_finish from stdin")
     sink.send(b"1\n2\n"[:])
-    assert_eq(sink.finish(), 2)
+    @debug.assert_eq(sink.finish(), 2)
 
     let send_closed = expect_closed_error(try? sink.send(b"3\n"[:]))
-    assert_eq(send_closed, "copy sink already finished")
+    @debug.assert_eq(send_closed, "copy sink already finished")
     let finish_closed = expect_closed_error(try? sink.finish())
-    assert_eq(finish_closed, "copy sink already finished")
+    @debug.assert_eq(finish_closed, "copy sink already finished")
 
     let count : Int = client
       .query_one("select count(*)::int4 as value from moon_copy_finish")
       .get_name("value")
-    assert_eq(count, 2)
+    @debug.assert_eq(count, 2)
 
     client.close()
   })
@@ -73,7 +73,7 @@ async test "integration copy out collect keeps connection reusable" {
     let probe : Int = client
       .query_one("select 23::int4 as value")
       .get_name("value")
-    assert_eq(probe, 23)
+    @debug.assert_eq(probe, 23)
 
     client.close()
   })
@@ -99,7 +99,7 @@ async test "integration copy out finish drains large payload and keeps connectio
     let probe : Int = client
       .query_one("select 29::int4 as value")
       .get_name("value")
-    assert_eq(probe, 29)
+    @debug.assert_eq(probe, 29)
 
     client.close()
   })

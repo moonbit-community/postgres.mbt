@@ -140,15 +140,15 @@ test "backend parsing extracts columns and names from row descriptions" {
   ])
 
   let columns = parse_columns(body)
-  assert_eq(columns.length(), 2)
-  assert_eq(columns[0].name, "answer")
-  assert_eq(columns[0].table_oid, 7U)
-  assert_eq(columns[0].column_id, 1)
+  @debug.assert_eq(columns.length(), 2)
+  @debug.assert_eq(columns[0].name, "answer")
+  @debug.assert_eq(columns[0].table_oid, 7U)
+  @debug.assert_eq(columns[0].column_id, 1)
   assert_true(columns[0].type_ == Type::int4())
   assert_true(columns[0].format == WireFormat::Text)
   assert_true(columns[1].type_ == Type::unknown(99999U, name="oid_99999"))
   assert_true(columns[1].format == WireFormat::Binary)
-  assert_eq(parse_column_names(body), ["answer", "mystery"])
+  @debug.assert_eq(parse_column_names(body), ["answer", "mystery"])
 }
 
 ///|
@@ -156,7 +156,7 @@ test "backend parsing decodes data rows, copy formats, and invalid utf8" {
   let binary = parse_binary_values(
     make_data_row_body([Some(bytes_of([1, 2])), None, Some(b"moon")]),
   )
-  assert_eq(binary, [Some(bytes_of([1, 2])), None, Some(b"moon")])
+  @debug.assert_eq(binary, [Some(bytes_of([1, 2])), None, Some(b"moon")])
 
   let text = parse_text_row(
     make_data_row_body([
@@ -176,7 +176,7 @@ test "backend parsing decodes data rows, copy formats, and invalid utf8" {
   guard invalid_utf8 is Err(@proto.ProtocolError::InvalidInput(message)) else {
     fail("expected invalid UTF-8 error")
   }
-  assert_eq(message, "invalid UTF-8")
+  @debug.assert_eq(message, "invalid UTF-8")
 
   assert_true(parse_copy_formats(make_copy_formats([0, 1])) == [Text, Binary])
   let invalid_format : Result[Array[WireFormat], Error] = try? parse_copy_formats(
@@ -185,7 +185,7 @@ test "backend parsing decodes data rows, copy formats, and invalid utf8" {
   guard invalid_format is Err(ClientError::Protocol(message)) else {
     fail("expected unsupported wire format error")
   }
-  assert_eq(message, "unsupported wire format code: 2")
+  @debug.assert_eq(message, "unsupported wire format code: 2")
 }
 
 ///|
@@ -200,17 +200,17 @@ test "backend parsing collects database errors and defaults missing message" {
       (b'X', b"ignored"),
     ]),
   )
-  assert_eq(err.severity, Some("ERROR"))
-  assert_eq(err.code, Some("23505"))
-  assert_eq(err.message, "duplicate key")
-  assert_eq(err.detail, Some("detail text"))
-  assert_eq(err.hint, Some("hint text"))
+  @debug.assert_eq(err.severity, Some("ERROR"))
+  @debug.assert_eq(err.code, Some("23505"))
+  @debug.assert_eq(err.message, "duplicate key")
+  @debug.assert_eq(err.detail, Some("detail text"))
+  @debug.assert_eq(err.hint, Some("hint text"))
 
   let default_message = parse_database_error(
     make_error_fields([(b'S', b"ERROR")]),
   )
-  assert_eq(default_message.message, "database error")
-  assert_eq(default_message.severity, Some("ERROR"))
+  @debug.assert_eq(default_message.message, "database error")
+  @debug.assert_eq(default_message.severity, Some("ERROR"))
 
   let invalid_utf8 : Result[DatabaseError, Error] = try? parse_database_error(
     make_error_fields([(b'M', bytes_of([b'\xC2']))]),
@@ -218,7 +218,7 @@ test "backend parsing collects database errors and defaults missing message" {
   guard invalid_utf8 is Err(@proto.ProtocolError::InvalidInput(message)) else {
     fail("expected invalid UTF-8 error")
   }
-  assert_eq(message, "invalid UTF-8")
+  @debug.assert_eq(message, "invalid UTF-8")
 }
 
 ///|
@@ -249,8 +249,8 @@ test "backend parsing merges stream columns and reports mismatches" {
     },
   ]
   let merged = merge_stream_columns(resolved, body)
-  assert_eq(merged[0].name, "value")
-  assert_eq(merged[0].table_oid, 11U)
+  @debug.assert_eq(merged[0].name, "value")
+  @debug.assert_eq(merged[0].table_oid, 11U)
   assert_true(merged[0].type_ == Type::unknown(23U, name="resolved_int4"))
   assert_true(merged[0].format == WireFormat::Text)
 
@@ -261,7 +261,9 @@ test "backend parsing merges stream columns and reports mismatches" {
   guard mismatch_count is Err(ClientError::Protocol(message)) else {
     fail("expected column count mismatch")
   }
-  assert_eq(message, "row description column count mismatch: expected 2, got 1")
+  @debug.assert_eq(
+    message, "row description column count mismatch: expected 2, got 1",
+  )
 
   let mismatch_oid : Result[Array[Column], Error] = try? merge_stream_columns(
     [{ ..resolved[0], type_: Type::unknown(25U, name="text") }],
@@ -270,7 +272,7 @@ test "backend parsing merges stream columns and reports mismatches" {
   guard mismatch_oid is Err(ClientError::Protocol(message)) else {
     fail("expected column oid mismatch")
   }
-  assert_eq(
+  @debug.assert_eq(
     message, "row description type mismatch at column 0: expected oid 25, got 23",
   )
 }
@@ -285,11 +287,11 @@ async test "backend parsing fail_response_stream closes queue with error" {
   guard result is Err(ClientError::UnexpectedMessage(message)) else {
     fail("expected fail_response_stream to re-raise the error")
   }
-  assert_eq(message, "boom")
+  @debug.assert_eq(message, "boom")
 
   let drained : Result[Int, Error] = try? responses.get()
   guard drained is Err(ClientError::UnexpectedMessage(message)) else {
     fail("expected closed queue to surface the same error")
   }
-  assert_eq(message, "boom")
+  @debug.assert_eq(message, "boom")
 }

@@ -17,7 +17,7 @@ async fn env_var(name : String) -> String? {
   if code != 0 {
     return None
   }
-  Some(output.text().trim().to_string())
+  Some(output.text().trim().to_owned())
 }
 
 ///|

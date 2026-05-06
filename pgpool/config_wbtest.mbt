@@ -11,19 +11,19 @@ test "pool config new builds defaults and appended hosts" {
     pool=PoolConfig::new(2),
   )
   let targets = config.get_connection_targets()
-  assert_eq(targets.length(), 2)
-  assert_eq(targets[0].host, "primary.db")
-  assert_eq(targets[1].host, "replica.db")
-  assert_eq(targets[0].port, 5432)
-  assert_eq(targets[1].port, 5432)
+  @debug.assert_eq(targets.length(), 2)
+  @debug.assert_eq(targets[0].host, "primary.db")
+  @debug.assert_eq(targets[1].host, "replica.db")
+  @debug.assert_eq(targets[0].port, 5432)
+  @debug.assert_eq(targets[1].port, 5432)
   assert_true(targets[0].ssl_mode == @client.SslMode::VerifyFull)
   assert_true(targets[0].channel_binding == @client.ChannelBinding::Disable)
   assert_true(
     config.target_session_attrs == Some(TargetSessionAttrs::read_write()),
   )
   assert_true(config.load_balance_hosts == Some(LoadBalanceHosts::Random))
-  assert_eq(targets[0].application_name, "pool-config-test")
-  assert_eq(targets[1].application_name, "pool-config-test")
+  @debug.assert_eq(targets[0].application_name, "pool-config-test")
+  @debug.assert_eq(targets[1].application_name, "pool-config-test")
 }
 
 ///|
@@ -39,12 +39,12 @@ test "pool config broadcasts explicit ports" {
     pool=PoolConfig::new(1),
   )
   let targets = config.get_connection_targets()
-  assert_eq(targets.length(), 2)
-  assert_eq(targets[0].host, "db.example")
-  assert_eq(targets[1].host, "replica.example")
-  assert_eq(targets[0].port, 7000)
-  assert_eq(targets[1].port, 7000)
-  assert_eq(targets[0].password, Some("secret"))
+  @debug.assert_eq(targets.length(), 2)
+  @debug.assert_eq(targets[0].host, "db.example")
+  @debug.assert_eq(targets[1].host, "replica.example")
+  @debug.assert_eq(targets[0].port, 7000)
+  @debug.assert_eq(targets[1].port, 7000)
+  @debug.assert_eq(targets[0].password, Some("secret"))
   assert_true(targets[0].ssl_mode == @client.SslMode::VerifyFull)
 }
 
@@ -61,7 +61,7 @@ test "pool config keeps explicit tls settings" {
   )
   let target = config.get_connection_targets()[0]
   assert_true(target.ssl_mode == @client.SslMode::VerifyCa)
-  assert_eq(target.ssl_root_cert, Some("/tmp/root.crt"))
+  @debug.assert_eq(target.ssl_root_cert, Some("/tmp/root.crt"))
 }
 
 ///|
@@ -76,8 +76,8 @@ test "pool config broadcasts hostaddr to every host" {
     pool=PoolConfig::new(1),
   )
   let targets = config.get_connection_targets()
-  assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
-  assert_eq(targets[1].hostaddr, Some("10.0.0.1"))
+  @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
+  @debug.assert_eq(targets[1].hostaddr, Some("10.0.0.1"))
 }
 
 ///|
@@ -228,7 +228,9 @@ test "pool config requires explicit host for verify_full" {
   guard result is Err(ConfigError::InvalidConfig(message)) else {
     fail("expected verify-full host validation error")
   }
-  assert_eq(message, "sslmode=verify-full requires explicit host or hostaddr")
+  @debug.assert_eq(
+    message, "sslmode=verify-full requires explicit host or hostaddr",
+  )
 }
 
 ///|
@@ -245,7 +247,7 @@ test "pool config rejects sslrootcert system without verify_full" {
   guard result is Err(ConfigError::InvalidConfig(message)) else {
     fail("expected sslrootcert validation error")
   }
-  assert_eq(message, "sslrootcert=system requires sslmode=verify-full")
+  @debug.assert_eq(message, "sslrootcert=system requires sslmode=verify-full")
 }
 
 ///|
@@ -268,10 +270,10 @@ async test "pool builder updates status and manager config without connecting" {
       .queue_mode(QueueMode::lifo())
       .build()
     let timeouts = pool.timeouts()
-    assert_eq(pool.status().max_size, 3)
-    assert_eq(timeouts.wait_ms, Some(11))
-    assert_eq(timeouts.create_ms, Some(22))
-    assert_eq(timeouts.recycle_ms, Some(33))
+    @debug.assert_eq(pool.status().max_size, 3)
+    @debug.assert_eq(timeouts.wait_ms, Some(11))
+    @debug.assert_eq(timeouts.create_ms, Some(22))
+    @debug.assert_eq(timeouts.recycle_ms, Some(33))
     assert_true(
       pool.manager().config().recycling_method == RecyclingMethod::verified(),
     )

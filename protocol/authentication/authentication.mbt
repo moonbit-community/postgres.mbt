@@ -615,7 +615,7 @@ fn Parser::server_first_message(
   self.eat(b',')
   let iteration_count = self.iteration_count()
   self.eof()
-  { nonce: nonce.to_bytes(), salt: salt.to_bytes(), iteration_count }
+  { nonce: nonce.to_owned(), salt: salt.to_owned(), iteration_count }
 }
 
 ///|
@@ -629,14 +629,14 @@ fn Parser::server_final_message(
       let err = self.buf[self.idx:]
       self.idx = self.buf.length()
       self.eof()
-      ServerFinalMessage::Error(err.to_bytes())
+      ServerFinalMessage::Error(err.to_owned())
     }
     _ => {
       self.eat(b'v')
       self.eat(b'=')
       let v = self.base64()
       self.eof()
-      ServerFinalMessage::Verifier(v.to_bytes())
+      ServerFinalMessage::Verifier(v.to_owned())
     }
   }
 }

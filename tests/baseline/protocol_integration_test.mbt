@@ -480,10 +480,10 @@ async test "integration protocol startup packet header parsing" {
   match parsed.message {
     @backend.Message::AuthenticationSasl(body) => {
       let mechanisms = body.mechanisms()
-      assert_eq(try! mechanisms.next_str(), Some("SCRAM-SHA-256"))
-      assert_eq(try! mechanisms.next(), None)
-      assert_eq(try! mechanisms.next(), None)
-      assert_eq(try! mechanisms.next_str(), None)
+      @debug.assert_eq(try! mechanisms.next_str(), Some("SCRAM-SHA-256"))
+      @debug.assert_eq(try! mechanisms.next(), None)
+      @debug.assert_eq(try! mechanisms.next(), None)
+      @debug.assert_eq(try! mechanisms.next_str(), None)
     }
     _ => fail("expected AuthenticationSasl")
   }
@@ -523,7 +523,7 @@ async test "integration cancel request uses protocol frontend" {
     @frontend.cancel_request(token.process_id(), token.secret_key(), buf)
     cancel.write(buf.to_bytes())
     let err = expect_database_error(task.wait())
-    assert_eq(err.code, Some("57014"))
+    @debug.assert_eq(err.code, Some("57014"))
     let ping : Int = client
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -554,7 +554,7 @@ async test "integration protocol empty query and no data" {
   )
   match create[0] {
     @backend.Message::CommandComplete(body) =>
-      assert_eq(body.tag_bytes().to_bytes(), b"CREATE TABLE")
+      assert_eq(body.tag_bytes().to_owned(), b"CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
 
@@ -572,9 +572,9 @@ async test "integration protocol empty query and no data" {
   match messages[1] {
     @backend.Message::ParameterDescription(body) => {
       let parameters = body.parameters()
-      assert_eq(try! parameters.next(), Some(23U))
-      assert_eq(try! parameters.next(), None)
-      assert_eq(try! parameters.next(), None)
+      @debug.assert_eq(try! parameters.next(), Some(23U))
+      @debug.assert_eq(try! parameters.next(), None)
+      @debug.assert_eq(try! parameters.next(), None)
     }
     _ => fail("expected ParameterDescription")
   }
@@ -600,9 +600,9 @@ async test "integration protocol copy out flush and terminate" {
     @backend.Message::CopyOutResponse(body) => {
       assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
-      assert_eq(try! formats.next(), Some(0))
-      assert_eq(try! formats.next(), None)
-      assert_eq(try! formats.next(), None)
+      @debug.assert_eq(try! formats.next(), Some(0))
+      @debug.assert_eq(try! formats.next(), None)
+      @debug.assert_eq(try! formats.next(), None)
     }
     _ => fail("expected CopyOutResponse")
   }
@@ -667,9 +667,9 @@ async test "integration protocol copy in success" {
     @backend.Message::CopyInResponse(body) => {
       assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
-      assert_eq(try! formats.next(), Some(0))
-      assert_eq(try! formats.next(), None)
-      assert_eq(try! formats.next(), None)
+      @debug.assert_eq(try! formats.next(), Some(0))
+      @debug.assert_eq(try! formats.next(), None)
+      @debug.assert_eq(try! formats.next(), None)
     }
     _ => fail("expected CopyInResponse")
   }
@@ -692,7 +692,7 @@ async test "integration protocol copy in success" {
   )
   match verify[1] {
     @backend.Message::DataRow(body) =>
-      assert_eq(data_row_texts(body), [Some("alpha,beta")])
+      @debug.assert_eq(data_row_texts(body), [Some("alpha,beta")])
     _ => fail("expected DataRow")
   }
 }
@@ -724,7 +724,7 @@ async test "integration protocol copy fail surfaces backend error" {
   match fail_messages[0] {
     @backend.Message::ErrorResponse(body) => {
       let err = parse_wire_database_error(body.fields())
-      assert_eq(err.severity, Some("ERROR"))
+      @debug.assert_eq(err.severity, Some("ERROR"))
       assert_true(err.code is Some(_))
       assert_true(err.message.contains("integration copy failure"))
       assert_true(err.detail is None)
@@ -755,8 +755,8 @@ async test "integration protocol describe close and parameter description" {
   match messages[1] {
     @backend.Message::ParameterDescription(body) => {
       let parameters = body.parameters()
-      assert_eq(try! parameters.next(), Some(23U))
-      assert_eq(try! parameters.next(), None)
+      @debug.assert_eq(try! parameters.next(), Some(23U))
+      @debug.assert_eq(try! parameters.next(), None)
     }
     _ => fail("expected ParameterDescription")
   }
@@ -797,7 +797,7 @@ async test "integration protocol bind text formats and null row ranges" {
   )
   match create[0] {
     @backend.Message::CommandComplete(body) =>
-      assert_eq(body.tag_bytes().to_bytes(), b"CREATE TABLE")
+      assert_eq(body.tag_bytes().to_owned(), b"CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
 
@@ -806,7 +806,7 @@ async test "integration protocol bind text formats and null row ranges" {
   )
   match insert[0] {
     @backend.Message::CommandComplete(body) =>
-      assert_eq(body.tag_bytes().to_bytes(), b"INSERT 0 1")
+      assert_eq(body.tag_bytes().to_owned(), b"INSERT 0 1")
     _ => fail("expected INSERT command complete")
   }
 
@@ -886,7 +886,7 @@ async test "integration protocol bind text formats and null row ranges" {
   }
   match messages[4] {
     @backend.Message::CommandComplete(body) =>
-      assert_eq(body.tag_bytes().to_bytes(), b"SELECT 1")
+      assert_eq(body.tag_bytes().to_owned(), b"SELECT 1")
     _ => fail("expected SELECT command complete")
   }
   assert_true(messages[5] is @backend.Message::ReadyForQuery(_))
@@ -928,7 +928,7 @@ async test "integration protocol portal suspended" {
   match messages[3] {
     @backend.Message::DataRow(body) => {
       assert_true(body.storage.length() > 0)
-      assert_eq(data_row_texts(body), [Some("1")])
+      @debug.assert_eq(data_row_texts(body), [Some("1")])
     }
     _ => fail("expected DataRow")
   }
@@ -975,8 +975,8 @@ async test "integration protocol notice and notification getters" {
   let notify_messages = wire.simple_query("notify wire_channel, 'payload'")
   let notification = find_notification_response(notify_messages)
   assert_true(notification.process_id > 0)
-  assert_eq(notification.channel_bytes().to_bytes(), b"wire_channel")
+  assert_eq(notification.channel_bytes().to_owned(), b"wire_channel")
   assert_eq(try! notification.channel_str(), "wire_channel")
-  assert_eq(notification.message_bytes().to_bytes(), b"payload")
+  assert_eq(notification.message_bytes().to_owned(), b"payload")
   assert_eq(try! notification.message_str(), "payload")
 }
