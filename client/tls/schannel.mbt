@@ -438,7 +438,7 @@ pub fn Tls::channel_binding(self : Tls) -> ChannelBinding raise {
   if len == 0 {
     NoBinding
   } else {
-    TlsServerEndPoint(digest.unsafe_reinterpret_as_bytes()[:len].to_bytes())
+    TlsServerEndPoint(digest.unsafe_reinterpret_as_bytes()[:len].to_owned())
   }
 }
 

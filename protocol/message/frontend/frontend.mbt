@@ -177,7 +177,7 @@ pub struct CopyData {
 pub fn CopyData::new(buf : BytesView) -> CopyData raise @proto.ProtocolError {
   let len = buf.length() + 4
   let _ = @proto.checked_i32(len)
-  { buf: buf.to_bytes(), len }
+  { buf: buf.to_owned(), len }
 }
 
 ///|

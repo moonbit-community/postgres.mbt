@@ -115,17 +115,17 @@ async test "connect captures startup state and close enqueues terminate request"
     )
     defer connection.stream.close()
 
-    assert_eq(client.is_closed(), false)
-    assert_eq(client.parameter("client_encoding"), Some("UTF8"))
-    assert_eq(client.parameter("missing"), None)
-    assert_eq(
+    @debug.assert_eq(client.is_closed(), false)
+    @debug.assert_eq(client.parameter("client_encoding"), Some("UTF8"))
+    @debug.assert_eq(client.parameter("missing"), None)
+    @debug.assert_eq(
       connection.parameter("application_name"),
       Some("moonbit-postgres-connect-wbtest"),
     )
 
     let token = client.cancel_token()
-    assert_eq(token.process_id(), 321)
-    assert_eq(token.secret_key(), 654)
+    @debug.assert_eq(token.process_id(), 321)
+    @debug.assert_eq(token.secret_key(), 654)
 
     client.shared.types[99999U] = Type::unknown(99999U, name="tmp")
     client.clear_type_cache()
@@ -136,7 +136,7 @@ async test "connect captures startup state and close enqueues terminate request"
     let request = client.shared.requests.try_get() catch { _ => None }
     guard request is Some(request) else { fail("expected terminate request") }
     assert_true(request.kind is RequestKind::Terminate)
-    assert_eq(request.bytes, terminate_bytes())
+    @debug.assert_eq(request.bytes, terminate_bytes())
 
     client.close()
     let extra = client.shared.requests.try_get() catch { _ => None }
@@ -172,7 +172,7 @@ async test "connect timeout surfaces protocol timeout" {
     guard result is Err(ClientError::Protocol(message)) else {
       fail("expected timeout error")
     }
-    assert_eq(message, "connection timed out")
+    @debug.assert_eq(message, "connection timed out")
   })
 }
 
@@ -183,8 +183,8 @@ async test "client close handles closed request queue and check_connection rejec
 
   shared.requests.close()
   client.close()
-  assert_eq(shared.closed.val, true)
-  assert_eq(shared.closing.val, true)
+  @debug.assert_eq(shared.closed.val, true)
+  @debug.assert_eq(shared.closing.val, true)
 
   let closed_shared = make_shared(closed=true)
   let closed_client : Client = { shared: closed_shared }
@@ -192,7 +192,7 @@ async test "client close handles closed request queue and check_connection rejec
   guard result is Err(ClientError::Closed(message)) else {
     fail("expected closed connection error")
   }
-  assert_eq(message, "connection is closed")
+  @debug.assert_eq(message, "connection is closed")
 }
 
 ///|
@@ -201,6 +201,6 @@ async test "cancel token returns early when connection is already closed" {
   let client : Client = { shared, }
   let token = client.cancel_token()
   token.cancel()
-  assert_eq(token.process_id(), 321)
-  assert_eq(token.secret_key(), 654)
+  @debug.assert_eq(token.process_id(), 321)
+  @debug.assert_eq(token.secret_key(), 654)
 }

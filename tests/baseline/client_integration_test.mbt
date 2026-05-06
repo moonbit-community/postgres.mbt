@@ -61,7 +61,7 @@ async fn assert_wrong_password(
       ),
     ),
   )
-  assert_eq(err.code, Some("28P01"))
+  @debug.assert_eq(err.code, Some("28P01"))
 }
 
 ///|
@@ -153,7 +153,7 @@ async fn assert_tls_query_ok(config : @client.Config) -> Unit {
     let (client, connection) = @client.connect(config)
     group.spawn_bg(() => connection.run())
 
-    assert_eq(
+    @debug.assert_eq(
       client.parameter("application_name"),
       Some(config.application_name),
     )
@@ -184,7 +184,7 @@ async fn assert_tls_query_ok(config : @client.Config) -> Unit {
 ///|
 /// Verify the three basic read-write paths for one scalar type.
 /// The same value must round-trip through a literal read, a bound parameter, and a `query_typed` read.
-async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_roundtrip(
+async fn[T : @client.ToSql + @client.FromSql + Eq + @debug.Debug] assert_roundtrip(
   client : @client.Client,
   sql_type : String,
   param_type : @client.Type,
@@ -194,20 +194,20 @@ async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_roundtrip(
   let from_literal : T = client
     .query_one("select \{literal}::\{sql_type} as value")
     .get_name("value")
-  assert_eq(from_literal, value)
+  @debug.assert_eq(from_literal, value)
 
   let params : Array[&@client.ToSql] = [value as &@client.ToSql]
   let from_param : T = client
     .query_one("select $1::\{sql_type} as value", params~)
     .get_name("value")
-  assert_eq(from_param, value)
+  @debug.assert_eq(from_param, value)
 
   let typed_rows = client
     .query_typed("select $1::\{sql_type} as value", [param_type], params~)
     .collect()
   assert_eq(typed_rows.length(), 1)
   let from_typed : T = typed_rows[0].get_name("value")
-  assert_eq(from_typed, value)
+  @debug.assert_eq(from_typed, value)
 }
 
 ///|
@@ -283,7 +283,7 @@ async fn assert_json_array_roundtrip(
 
 ///|
 /// Verify one-dimensional built-in arrays across literal reads, inferred parameters, and explicit parameter typing.
-async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_array_roundtrip(
+async fn[T : @client.ToSql + @client.FromSql + Eq + @debug.Debug] assert_array_roundtrip(
   client : @client.Client,
   sql_type : String,
   param_type : @client.Type,
@@ -293,20 +293,20 @@ async fn[T : @client.ToSql + @client.FromSql + Eq + Show] assert_array_roundtrip
   let from_literal : Array[T] = client
     .query_one("select \{literal}::\{sql_type} as value")
     .get_name("value")
-  assert_eq(from_literal, value)
+  @debug.assert_eq(from_literal, value)
 
   let params : Array[&@client.ToSql] = [value as &@client.ToSql]
   let from_param : Array[T] = client
     .query_one("select $1::\{sql_type} as value", params~)
     .get_name("value")
-  assert_eq(from_param, value)
+  @debug.assert_eq(from_param, value)
 
   let typed_rows = client
     .query_typed("select $1::\{sql_type} as value", [param_type], params~)
     .collect()
   assert_eq(typed_rows.length(), 1)
   let from_typed : Array[T] = typed_rows[0].get_name("value")
-  assert_eq(from_typed, value)
+  @debug.assert_eq(from_typed, value)
 }
 
 ///|
@@ -601,10 +601,13 @@ async test "integration exposes startup parameters" {
     )
     group.spawn_bg(() => connection.run())
 
-    assert_eq(client.parameter("client_encoding"), Some("UTF8"))
-    assert_eq(connection.parameter("client_encoding"), Some("UTF8"))
-    assert_eq(client.parameter("application_name"), Some("moonbit-postgres"))
-    assert_eq(
+    @debug.assert_eq(client.parameter("client_encoding"), Some("UTF8"))
+    @debug.assert_eq(connection.parameter("client_encoding"), Some("UTF8"))
+    @debug.assert_eq(
+      client.parameter("application_name"),
+      Some("moonbit-postgres"),
+    )
+    @debug.assert_eq(
       connection.parameter("application_name"),
       Some("moonbit-postgres"),
     )
@@ -757,11 +760,11 @@ async test "integration simple query supports multiple result sets" {
     }
     @debug.assert_eq(stream.next(), None)
     assert_eq(left_columns, ["side", "missing"])
-    assert_eq(try! left_row.get_name("side"), Some("left"))
-    assert_eq(try! left_row.get_name("missing"), None)
+    @debug.assert_eq(try! left_row.get_name("side"), Some("left"))
+    @debug.assert_eq(try! left_row.get_name("missing"), None)
     assert_eq(left_tag, "SELECT 1")
     assert_eq(right_columns, ["side"])
-    assert_eq(try! right_row.get_name("side"), Some("right"))
+    @debug.assert_eq(try! right_row.get_name("side"), Some("right"))
     assert_eq(right_tag, "SELECT 1")
 
     client.close()
@@ -790,7 +793,7 @@ async test "integration simple query supports pipelining" {
     guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
       fail("expected first row")
     }
-    assert_eq(try! row.get_name("value"), Some("1"))
+    @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     // If the simple-query stream held the connection until full completion, this concurrent query would stay blocked.
     let task = group.spawn(no_wait=true, () => {
@@ -834,7 +837,7 @@ async test "integration simple query detach unblocks later requests" {
     guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
       fail("expected first row")
     }
-    assert_eq(try! row.get_name("value"), Some("1"))
+    @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     let task = group.spawn(no_wait=true, () => {
       let value : Int = client
@@ -884,7 +887,7 @@ async test "integration simple query detach swallows trailing database error" {
     guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
       fail("expected first row")
     }
-    assert_eq(try! row.get_name("value"), Some("ok"))
+    @debug.assert_eq(try! row.get_name("value"), Some("ok"))
 
     stream.detach()
 
@@ -1231,7 +1234,7 @@ async test "integration cancel token cancels running query" {
     token.cancel()
 
     let err = expect_database_error(task.wait())
-    assert_eq(err.code, Some("57014"))
+    @debug.assert_eq(err.code, Some("57014"))
     let value : Int = client
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -1633,7 +1636,7 @@ async test "integration deferred constraint" {
       1,
     )
     let err = expect_database_error(try? tx.commit())
-    assert_eq(err.code, Some("23505"))
+    @debug.assert_eq(err.code, Some("23505"))
     let count : Int = client
       .query_one(
         "select count(*)::int4 as count from moon_driver_deferred_constraint",
@@ -1907,7 +1910,7 @@ async test "integration bytea and bpchar roundtrips" {
       let value : String? = row.get(0)
       value
     })
-    assert_eq(values, [Some("12345"), Some("123  "), None])
+    @debug.assert_eq(values, [Some("12345"), Some("123  "), None])
 
     assert_roundtrip(
       client,
@@ -2001,7 +2004,7 @@ async test "integration database errors surface" {
     group.spawn_bg(() => connection.run())
 
     let err = expect_database_error(try? client.query_one("select 1 / 0"))
-    assert_eq(err.code, Some("22012"))
+    @debug.assert_eq(err.code, Some("22012"))
 
     client.close()
   })

@@ -194,28 +194,28 @@ pub fn Message::parse(
       Message::CommandComplete({ tag: tag_bytes })
     }
     COPY_DATA_TAG => {
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::CopyData({ storage, })
     }
     DATA_ROW_TAG => {
       let len = reader.read_u16_be().to_int()
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::DataRow({ storage, len })
     }
     ERROR_RESPONSE_TAG => {
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::ErrorResponse({ storage, })
     }
     COPY_IN_RESPONSE_TAG => {
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::CopyInResponse({ format, len, storage })
     }
     COPY_OUT_RESPONSE_TAG => {
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::CopyOutResponse({ format, len, storage })
     }
     EMPTY_QUERY_RESPONSE_TAG => Message::EmptyQueryResponse
@@ -226,7 +226,7 @@ pub fn Message::parse(
     }
     NO_DATA_TAG => Message::NoData
     NOTICE_RESPONSE_TAG => {
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::NoticeResponse({ storage, })
     }
     AUTHENTICATION_TAG => {
@@ -238,26 +238,26 @@ pub fn Message::parse(
         2 => Message::AuthenticationKerberosV5
         3 => Message::AuthenticationCleartextPassword
         5 => {
-          let salt = reader.read_bytes(4).to_bytes()
+          let salt = reader.read_bytes(4).to_owned()
           Message::AuthenticationMd5Password({ salt, })
         }
         6 => Message::AuthenticationScmCredential
         7 => Message::AuthenticationGss
         8 => {
-          let data = reader.read_all().to_bytes()
+          let data = reader.read_all().to_owned()
           Message::AuthenticationGssContinue({ data, })
         }
         9 => Message::AuthenticationSspi
         10 => {
-          let data = reader.read_all().to_bytes()
+          let data = reader.read_all().to_owned()
           Message::AuthenticationSasl({ data, })
         }
         11 => {
-          let data = reader.read_all().to_bytes()
+          let data = reader.read_all().to_owned()
           Message::AuthenticationSaslContinue({ data, })
         }
         12 => {
-          let data = reader.read_all().to_bytes()
+          let data = reader.read_all().to_owned()
           Message::AuthenticationSaslFinal({ data, })
         }
         _ =>
@@ -272,12 +272,12 @@ pub fn Message::parse(
     }
     PARAMETER_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::ParameterDescription({ storage, len })
     }
     ROW_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
-      let storage = reader.read_all().to_bytes()
+      let storage = reader.read_all().to_owned()
       Message::RowDescription({ storage, len })
     }
     READY_FOR_QUERY_TAG => {
@@ -381,7 +381,7 @@ pub fn SaslMechanisms::next(
   } else {
     let value = self.buf[0:pos]
     self.buf = self.buf[pos + 1:]
-    Some(value.to_bytes())
+    Some(value.to_owned())
   }
 }
 
@@ -722,7 +722,7 @@ pub fn ErrorFields::next(
   let value_end = find_null(self.buf, 0)
   let value = self.buf[0:value_end]
   self.buf = self.buf[value_end + 1:]
-  Some({ type_, value: value.to_bytes() })
+  Some({ type_, value: value.to_owned() })
 }
 
 ///|
@@ -992,7 +992,7 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
   let format = r.read_i16_be()
   self.buf = self.buf[18:]
   Some({
-    name: name.to_bytes(),
+    name: name.to_owned(),
     table_oid,
     column_id,
     type_oid,

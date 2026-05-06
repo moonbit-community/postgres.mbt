@@ -68,7 +68,7 @@ pub fn text_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 /// Deserialize a TEXT/VARCHAR/CHAR/NAME/CITEXT value.
 pub fn text_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   @proto.validate_utf8(buf)
-  buf.to_bytes()
+  buf.to_owned()
 }
 
 ///|
@@ -304,14 +304,14 @@ pub fn HstoreEntries::next(
       raise @proto.ProtocolError::InvalidInput("invalid value length")
     }
     self.buf = self.buf[4:]
-    return Some((key.to_bytes(), None))
+    return Some((key.to_owned(), None))
   }
   if self.buf.length() < 4 + value_len {
     raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
   }
   let value = self.buf[4:4 + value_len]
   self.buf = self.buf[4 + value_len:]
-  Some((key.to_bytes(), Some(value.to_bytes())))
+  Some((key.to_owned(), Some(value.to_owned())))
 }
 
 ///|
@@ -440,7 +440,7 @@ pub fn macaddr_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
       "invalid message length: macaddr length mismatch",
     )
   }
-  buf.to_bytes()
+  buf.to_owned()
 }
 
 ///|
@@ -463,7 +463,7 @@ pub fn uuid_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
       "invalid message length: uuid size mismatch",
     )
   }
-  buf.to_bytes()
+  buf.to_owned()
 }
 
 ///|
@@ -552,7 +552,7 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
   if dimensions == 0 {
     elements = 0
   }
-  { dimensions, has_nulls, element_type, elements, buf: buf.to_bytes() }
+  { dimensions, has_nulls, element_type, elements, buf: buf.to_owned() }
 }
 
 ///|
@@ -649,7 +649,7 @@ pub fn ArrayValues::next(
   }
   let val = self.buf[4:4 + len]
   self.buf = self.buf[4 + len:]
-  Some(Some(val.to_bytes()))
+  Some(Some(val.to_owned()))
 }
 
 ///|
@@ -762,7 +762,7 @@ fn read_bound(
   if buf.length() < 4 + len {
     raise @proto.ProtocolError::InvalidInput("invalid message size")
   }
-  let value = buf[4:4 + len].to_bytes()
+  let value = buf[4:4 + len].to_owned()
   let rest = buf[4 + len:]
   if (tag & inclusive) != 0 {
     (RangeBound::Inclusive(Some(value)), rest)
@@ -940,7 +940,7 @@ pub fn Ipv4Addr::from_octets(
   if octets.length() != 4 {
     raise @proto.ProtocolError::InvalidInput("invalid IPv4 length")
   }
-  { octets: octets.to_bytes() }
+  { octets: octets.to_owned() }
 }
 
 ///|
@@ -951,7 +951,7 @@ pub fn Ipv6Addr::from_octets(
   if octets.length() != 16 {
     raise @proto.ProtocolError::InvalidInput("invalid IPv6 length")
   }
-  { octets: octets.to_bytes() }
+  { octets: octets.to_owned() }
 }
 
 ///|
@@ -1003,7 +1003,7 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
       if len != 4 {
         raise @proto.ProtocolError::InvalidInput("invalid IPv4 address length")
       }
-      let octets = r.read_bytes(4).to_bytes()
+      let octets = r.read_bytes(4).to_owned()
       IpAddr::V4({ octets, })
     }
     _ if family == pgsql_af_inet6 => {
@@ -1013,7 +1013,7 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
       if len != 16 {
         raise @proto.ProtocolError::InvalidInput("invalid IPv6 address length")
       }
-      let octets = r.read_bytes(16).to_bytes()
+      let octets = r.read_bytes(16).to_owned()
       IpAddr::V6({ octets, })
     }
     _ => raise @proto.ProtocolError::InvalidInput("invalid IP family")
@@ -1042,7 +1042,7 @@ pub fn ltree_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 /// Deserialize a Postgres ltree string.
 pub fn ltree_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
-    [b'\x01', .. rest] => rest.to_bytes()
+    [b'\x01', .. rest] => rest.to_owned()
     _ =>
       raise @proto.ProtocolError::InvalidInput("ltree version 1 only supported")
   }
@@ -1059,7 +1059,7 @@ pub fn lquery_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 /// Deserialize a Postgres lquery string.
 pub fn lquery_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
-    [b'\x01', .. rest] => rest.to_bytes()
+    [b'\x01', .. rest] => rest.to_owned()
     _ =>
       raise @proto.ProtocolError::InvalidInput(
         "lquery version 1 only supported",
@@ -1078,7 +1078,7 @@ pub fn ltxtquery_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 /// Deserialize a Postgres ltxtquery string.
 pub fn ltxtquery_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
-    [b'\x01', .. rest] => rest.to_bytes()
+    [b'\x01', .. rest] => rest.to_owned()
     _ =>
       raise @proto.ProtocolError::InvalidInput(
         "ltxtquery version 1 only supported",

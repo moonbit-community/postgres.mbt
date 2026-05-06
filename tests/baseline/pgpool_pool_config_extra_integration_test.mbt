@@ -32,7 +32,7 @@ test "integration pool config constructors and normalization" {
   guard @pgpool.RecyclingMethod::custom("reset all") is Custom(sql) else {
     fail("expected custom recycling")
   }
-  assert_eq(sql, "reset all")
+  @debug.assert_eq(sql, "reset all")
 
   let config = @pgpool.Config::new(
     "one.db",
@@ -47,15 +47,15 @@ test "integration pool config constructors and normalization" {
     pool=@pgpool.PoolConfig::new(2),
   )
   let targets = config.get_connection_targets()
-  assert_eq(targets.length(), 2)
-  assert_eq(targets[0].host, "one.db")
-  assert_eq(targets[1].host, "two.db")
-  assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
-  assert_eq(targets[1].hostaddr, Some("10.0.0.2"))
-  assert_eq(targets[0].port, 1111)
-  assert_eq(targets[1].port, 2222)
+  @debug.assert_eq(targets.length(), 2)
+  @debug.assert_eq(targets[0].host, "one.db")
+  @debug.assert_eq(targets[1].host, "two.db")
+  @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
+  @debug.assert_eq(targets[1].hostaddr, Some("10.0.0.2"))
+  @debug.assert_eq(targets[0].port, 1111)
+  @debug.assert_eq(targets[1].port, 2222)
   assert_true(targets[0].ssl_mode == @client.SslMode::VerifyCa)
-  assert_eq(targets[0].ssl_root_cert, Some("/tmp/root.crt"))
+  @debug.assert_eq(targets[0].ssl_root_cert, Some("/tmp/root.crt"))
   assert_true(
     config.get_manager_config().recycling_method ==
     @pgpool.RecyclingMethod::fast(),
@@ -72,7 +72,7 @@ test "integration pool config validation rejects invalid settings" {
     is Err(@pgpool.PoolError::InvalidConfig(max_size_message)) else {
     fail("expected invalid max size")
   }
-  assert_eq(max_size_message, "pool max_size must be at least 1")
+  @debug.assert_eq(max_size_message, "pool max_size must be at least 1")
 
   let invalid_timeout : Result[@pgpool.PoolConfig, Error] = try? @pgpool.PoolConfig::new(
     1,
@@ -82,7 +82,7 @@ test "integration pool config validation rejects invalid settings" {
     is Err(@pgpool.PoolError::InvalidConfig(timeout_message)) else {
     fail("expected invalid timeout")
   }
-  assert_eq(timeout_message, "pool wait_ms must be non-negative")
+  @debug.assert_eq(timeout_message, "pool wait_ms must be non-negative")
 
   let invalid_tls : Result[Array[@client.Config], Error] = try? @pgpool.Config::new(
     "db.example",
@@ -96,7 +96,9 @@ test "integration pool config validation rejects invalid settings" {
   guard invalid_tls is Err(@pgpool.ConfigError::InvalidConfig(tls_message)) else {
     fail("expected tls validation error")
   }
-  assert_eq(tls_message, "sslrootcert=system requires sslmode=verify-full")
+  @debug.assert_eq(
+    tls_message, "sslrootcert=system requires sslmode=verify-full",
+  )
 }
 
 ///|
@@ -153,10 +155,10 @@ async test "integration pool builder hooks resize and custom connector" {
       })
       .build()
 
-    assert_eq(pool.status().max_size, 2)
-    assert_eq(pool.timeouts().wait_ms, Some(11))
-    assert_eq(pool.timeouts().create_ms, Some(2_000))
-    assert_eq(pool.timeouts().recycle_ms, Some(2_000))
+    @debug.assert_eq(pool.status().max_size, 2)
+    @debug.assert_eq(pool.timeouts().wait_ms, Some(11))
+    @debug.assert_eq(pool.timeouts().create_ms, Some(2_000))
+    @debug.assert_eq(pool.timeouts().recycle_ms, Some(2_000))
     assert_true(
       pool.manager().config().recycling_method ==
       @pgpool.RecyclingMethod::verified(),
@@ -179,7 +181,7 @@ async test "integration pool builder hooks resize and custom connector" {
     let reused_pid : Int = reused
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
-    assert_eq(reused_pid, second_pid)
+    @debug.assert_eq(reused_pid, second_pid)
     reused.release()
 
     assert_true(connect_calls.length() >= 2)
@@ -188,17 +190,17 @@ async test "integration pool builder hooks resize and custom connector" {
     assert_true(post_recycle_calls.length() >= 1)
 
     pool.resize(1)
-    assert_eq(pool.status().max_size, 1)
-    assert_eq(pool.status().size, 1)
+    @debug.assert_eq(pool.status().max_size, 1)
+    @debug.assert_eq(pool.status().size, 1)
 
     pool.resize(3)
-    assert_eq(pool.status().max_size, 3)
+    @debug.assert_eq(pool.status().max_size, 3)
 
     guard (try? pool.resize(0))
       is Err(@pgpool.PoolError::InvalidConfig(message)) else {
       fail("expected invalid resize")
     }
-    assert_eq(message, "pool max_size must be at least 1")
+    @debug.assert_eq(message, "pool max_size must be at least 1")
 
     pool.close()
     pool.resize(2)
@@ -262,15 +264,15 @@ async test "integration pool declarative config fails over to later target" {
       ports=[config.port, config.port],
       pool=@pgpool.PoolConfig::new(1),
     ).get_connection_targets()
-    assert_eq(targets.length(), 2)
-    assert_eq(targets[0].port, config.port)
-    assert_eq(targets[1].port, config.port)
+    @debug.assert_eq(targets.length(), 2)
+    @debug.assert_eq(targets[0].port, config.port)
+    @debug.assert_eq(targets[1].port, config.port)
 
     let value : Int = pool.with_client(client => {
       client.query_one("select 29::int4 as value").get_name("value")
     })
-    assert_eq(value, 29)
-    assert_eq(attempts.length(), 1)
+    @debug.assert_eq(value, 29)
+    @debug.assert_eq(attempts.length(), 1)
 
     pool.close()
   })

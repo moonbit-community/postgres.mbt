@@ -557,7 +557,7 @@ async test "integration pool run_cancellable cancels running query" {
 
     expect_pool_wait_timeout(wait_timeout)
     let err = expect_database_error(task_result)
-    assert_eq(err.code, Some("57014"))
+    @debug.assert_eq(err.code, Some("57014"))
     let value : Int = pool.with_client(client => {
       client.query_one("select 11::int4 as value").get_name("value")
     })
@@ -617,7 +617,7 @@ async test "integration pool release waits for cancellable cleanup" {
 
     expect_pool_wait_timeout(wait_timeout)
     let err = expect_database_error(task_result)
-    assert_eq(err.code, Some("57014"))
+    @debug.assert_eq(err.code, Some("57014"))
     let value : Int = pool.with_client(client => {
       client.query_one("select 3::int4 as value").get_name("value")
     })
@@ -747,7 +747,7 @@ async test "integration pool close wakes blocked checkout while cancellable task
         task, "expected cancellable task to finish after pool close",
       ),
     )
-    assert_eq(err.code, Some("57014"))
+    @debug.assert_eq(err.code, Some("57014"))
     assert_eq(pool.status().closed, true)
     assert_eq(pool.status().size, 0)
 

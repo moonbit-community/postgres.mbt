@@ -48,7 +48,7 @@ fn parse_binary_values(
       Some(Some(range)) => {
         // Copy the slice so the returned row owns stable bytes independent of
         // the temporary backend message buffer.
-        values.push(Some(buffer[range.start:range.end].to_bytes()))
+        values.push(Some(buffer[range.start:range.end].to_owned()))
         continue ranges.next()
       }
     }
