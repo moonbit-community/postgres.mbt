@@ -135,7 +135,7 @@ fn make_pool(
     target_session_attrs: Some(@pgpool.TargetSessionAttrs::any()),
     load_balance_hosts: Some(@pgpool.LoadBalanceHosts::Disable),
     manager: Some(manager),
-    pool: Some(pool_config),
+    pool: pool_config,
   }
   config.create_pool(group)
 }

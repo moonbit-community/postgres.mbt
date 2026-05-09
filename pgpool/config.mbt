@@ -202,7 +202,6 @@ pub suberror ConfigError {
   UserMissing
   DbnameMissing
   DbnameEmpty
-  PoolConfigMissing
   HostPortArityMismatch
   InvalidConfig(String)
 } derive(Eq, Debug)
@@ -270,7 +269,7 @@ pub(all) struct Config {
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   manager : ManagerConfig?
-  pool : PoolConfig?
+  pool : PoolConfig
 } derive(Eq, Debug)
 
 ///|
@@ -301,7 +300,7 @@ pub fn Config::new(
   target_session_attrs? : TargetSessionAttrs = Any,
   load_balance_hosts? : LoadBalanceHosts = Disable,
   manager? : ManagerConfig,
-  pool? : PoolConfig,
+  pool~ : PoolConfig,
 ) -> Config {
   {
     user: Some(user),
@@ -414,18 +413,9 @@ pub fn Config::get_manager_config(self : Config) -> ManagerConfig {
 
 ///|
 /// Return the validated pool-capacity config for this declarative input.
-///
-/// The caller must have provided `self.pool`. The returned value is validated on
-/// every call, so negative timeouts or `max_size < 1` still fail here even if
-/// the `PoolConfig` record was assembled manually.
 pub fn Config::get_pool_config(self : Config) -> PoolConfig raise {
-  match self.pool {
-    Some(pool) => {
-      validate_pool_config(pool)
-      pool
-    }
-    None => raise ConfigError::PoolConfigMissing
-  }
+  validate_pool_config(self.pool)
+  self.pool
 }
 
 ///|
