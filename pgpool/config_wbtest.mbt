@@ -103,7 +103,7 @@ test "pool config manual record still reports missing user" {
     target_session_attrs: Some(TargetSessionAttrs::any()),
     load_balance_hosts: Some(LoadBalanceHosts::Disable),
     manager: None,
-    pool: Some(PoolConfig::new(1)),
+    pool: PoolConfig::new(1),
   }.get_connection_targets()
   guard result is Err(ConfigError::UserMissing) else {
     fail("expected missing user")
@@ -133,7 +133,7 @@ test "pool config manual record still reports missing dbname" {
     target_session_attrs: Some(TargetSessionAttrs::any()),
     load_balance_hosts: Some(LoadBalanceHosts::Disable),
     manager: None,
-    pool: Some(PoolConfig::new(1)),
+    pool: PoolConfig::new(1),
   }.get_connection_targets()
   guard result is Err(ConfigError::DbnameMissing) else {
     fail("expected missing dbname")
@@ -163,40 +163,10 @@ test "pool config manual record still reports empty dbname" {
     target_session_attrs: Some(TargetSessionAttrs::any()),
     load_balance_hosts: Some(LoadBalanceHosts::Disable),
     manager: None,
-    pool: Some(PoolConfig::new(1)),
+    pool: PoolConfig::new(1),
   }.get_connection_targets()
   guard result is Err(ConfigError::DbnameEmpty) else {
     fail("expected empty dbname")
-  }
-}
-
-///|
-test "pool config requires pool config before build" {
-  let result = try? {
-    user: Some("moon"),
-    password: None,
-    dbname: Some("moondb"),
-    options: None,
-    application_name: "pool-missing-pool",
-    ssl_mode: Some(@client.SslMode::VerifyFull),
-    ssl_root_cert: None,
-    channel_binding: Some(@client.ChannelBinding::Disable),
-    host: Some("db.example"),
-    hosts: None,
-    hostaddr: None,
-    hostaddrs: None,
-    port: Some(5432),
-    ports: None,
-    connect_timeout_ms: None,
-    keepalives: None,
-    keepalives_idle_s: None,
-    target_session_attrs: Some(TargetSessionAttrs::any()),
-    load_balance_hosts: Some(LoadBalanceHosts::Disable),
-    manager: None,
-    pool: None,
-  }.get_pool_config()
-  guard result is Err(ConfigError::PoolConfigMissing) else {
-    fail("expected missing pool config")
   }
 }
 
@@ -223,7 +193,7 @@ test "pool config requires explicit host for verify_full" {
     target_session_attrs: Some(TargetSessionAttrs::any()),
     load_balance_hosts: Some(LoadBalanceHosts::Disable),
     manager: None,
-    pool: Some(PoolConfig::new(1)),
+    pool: PoolConfig::new(1),
   }.get_connection_targets()
   guard result is Err(ConfigError::InvalidConfig(message)) else {
     fail("expected verify-full host validation error")

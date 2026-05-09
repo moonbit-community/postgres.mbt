@@ -14,7 +14,6 @@ pub suberror ConfigError {
   UserMissing
   DbnameMissing
   DbnameEmpty
-  PoolConfigMissing
   HostPortArityMismatch
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
@@ -76,14 +75,14 @@ pub(all) struct Config {
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   manager : ManagerConfig?
-  pool : PoolConfig?
+  pool : PoolConfig
 } derive(Eq, @debug.Debug)
 pub fn Config::builder(Self, @async.TaskGroup[Unit]) -> PoolBuilder raise
 pub fn Config::create_pool(Self, @async.TaskGroup[Unit]) -> Pool raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config] raise
 pub fn Config::get_manager_config(Self) -> ManagerConfig
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
-pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, manager? : ManagerConfig, pool? : PoolConfig) -> Self
+pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, manager? : ManagerConfig, pool~ : PoolConfig) -> Self
 
 type Connector
 pub fn Connector::new(async (@client.Config) -> (@client.Client, @client.Connection)) -> Self
