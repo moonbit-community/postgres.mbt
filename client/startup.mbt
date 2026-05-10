@@ -54,14 +54,6 @@ fn Config::tls_verify_host(self : Config) -> String? raise {
 }
 
 ///|
-fn Config::uses_system_trust_store(self : Config) -> Bool {
-  match self.ssl_root_cert {
-    Some(root_cert) => root_cert == "system"
-    None => true
-  }
-}
-
-///|
 fn Config::tls_root_cert_file(self : Config) -> String? {
   match self.ssl_root_cert {
     Some(root_cert) =>
@@ -71,22 +63,6 @@ fn Config::tls_root_cert_file(self : Config) -> String? {
         Some(root_cert)
       }
     None => None
-  }
-}
-
-///|
-#cfg(not(platform="windows"))
-fn Config::validate_platform_tls_config(self : Config) -> Unit {
-  ignore(self)
-}
-
-///|
-#cfg(platform="windows")
-fn Config::validate_platform_tls_config(self : Config) -> Unit raise {
-  if !self.uses_system_trust_store() {
-    raise ClientError::Ssl(
-      "custom trust-store selection is not supported on Windows",
-    )
   }
 }
 
@@ -104,35 +80,42 @@ fn Config::validate_tls_config(self : Config) -> Unit raise {
   if self.ssl_mode is VerifyFull {
     ignore(self.tls_verify_host())
   }
-  self.validate_platform_tls_config()
 }
 
 ///|
-fn Config::tls_client_options(self : Config) -> @local_tls.ClientOptions raise {
-  @local_tls.ClientOptions::new(
-    verify_peer=self.ssl_mode.requires_tls(),
-    verify_host=self.tls_verify_host(),
-    use_system_trust_store=self.uses_system_trust_store(),
-    root_cert_file=self.tls_root_cert_file(),
-  )
-}
-
-///|
-fn from_transport_channel_binding(
-  binding : @local_tls.ChannelBinding,
-) -> TlsChannelBinding {
-  match binding {
-    @local_tls.ChannelBinding::NoBinding => NoBinding
-    @local_tls.ChannelBinding::TlsServerEndPoint(digest) =>
-      TlsServerEndPoint(digest)
+fn Config::tls_trusted_root(self : Config) -> @tls.TrustedRoot {
+  if !self.ssl_mode.requires_tls() {
+    NoVerification
+  } else {
+    match self.tls_root_cert_file() {
+      Some(file) => CustomPemFile(file)
+      None => SystemRoot
+    }
   }
+}
+
+///|
+fn TlsChannelBinding::from_tls(tls : @tls.Tls) -> TlsChannelBinding raise {
+  let digest = tls.server_endpoint_channel_binding() catch {
+    err =>
+      match err {
+        @tls.TlsError::TlsError(message) =>
+          if message == "tls-server-endpoint channel binding unavailable" {
+            return NoBinding
+          } else {
+            raise err
+          }
+        _ => raise err
+      }
+  }
+  TlsServerEndPoint(digest)
 }
 
 ///|
 fn tls_error_message(err : Error) -> String {
   match err {
-    @local_tls.TlsError::TlsError(message) => message
-    @local_tls.ConnectionClosed => "TLS connection closed"
+    @tls.TlsError::TlsError(message) => message
+    @tls.ConnectionClosed => "TLS connection closed"
     _ => err.to_string()
   }
 }
@@ -163,23 +146,22 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
         b'S' => {
           // Upgrade the existing TCP connection in place so the subsequent
           // startup/authentication exchange stays on the same transport.
-          let tls = @local_tls.Tls::client_with_options(
+          let tls = @tls.Tls::client(
             conn,
-            config.tls_client_options(),
+            host?=config.tls_verify_host(),
+            trust=config.tls_trusted_root(),
           ) catch {
             err => {
               conn.close()
               raise ClientError::Ssl(tls_error_message(err))
             }
           }
-          let channel_binding = from_transport_channel_binding(
-            tls.channel_binding() catch {
-              err => {
-                tls.close()
-                raise ClientError::Ssl(tls_error_message(err))
-              }
-            },
-          )
+          let channel_binding = TlsChannelBinding::from_tls(tls) catch {
+            err => {
+              tls.close()
+              raise ClientError::Ssl(tls_error_message(err))
+            }
+          }
           { stream: Secure(tls), channel_binding }
         }
         b'N' => {

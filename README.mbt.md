@@ -32,8 +32,8 @@ Supported libpq-style TLS parameters:
 - `sslrootcert`
 
 `sslrootcert=system` uses the platform trust store and requires `verify-full`.
-On Windows, custom `sslrootcert` files are rejected explicitly instead of being
-ignored.
+Custom `sslrootcert` files are passed to `moonbitlang/async/tls` as PEM root
+certificates.
 
 Migration summary:
 
