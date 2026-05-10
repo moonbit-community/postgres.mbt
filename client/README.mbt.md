@@ -142,9 +142,7 @@ Default behavior:
 Windows notes:
 
 - `Disable`, `VerifyCa`, and `VerifyFull` still work.
-- `sslrootcert` with a custom file is rejected explicitly on the Schannel path.
-- The package reports these cases as unsupported instead of silently ignoring
-  them.
+- Custom `sslrootcert` files are handled by `moonbitlang/async/tls`.
 
 External references:
 

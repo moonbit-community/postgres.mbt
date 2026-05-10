@@ -13,7 +13,7 @@ import {
   "moonbitlang/async/aqueue" @aqueue,
   "moonbitlang/async/io",
   "moonbitlang/async/socket",
-  "moonbit-community/postgres/client/tls" @local_tls,
+  "moonbitlang/async/tls",
 }
 
 import {
