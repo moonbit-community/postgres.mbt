@@ -5,6 +5,9 @@ async fn assert_auth_ok(
   config : IntegrationConfig,
   user : String,
   password : String,
+  ssl_mode? : @client.SslMode = @client.SslMode::Disable,
+  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
+  application_name? : String = "moonbit-postgres",
 ) -> Unit {
   @async.with_task_group(group => {
     let (client, connection) = @client.connect(
@@ -12,7 +15,9 @@ async fn assert_auth_ok(
         config,
         user,
         password=Some(password),
-        application_name="moonbit-postgres",
+        ssl_mode~,
+        channel_binding~,
+        application_name~,
       ),
     )
     group.spawn_bg(() => connection.run())
@@ -567,6 +572,77 @@ async test "integration scram password wrong" {
 async test "integration scram password ok" {
   guard integration_config() is Some(config) else { return }
   assert_auth_ok(config, "moon_scram", "moonpass")
+}
+
+///|
+/// This verifies that preferred channel binding does not make plaintext SCRAM deployments fail.
+/// With TLS disabled, the client must fall back to plain `SCRAM-SHA-256`.
+async test "integration scram channel binding prefer falls back without tls" {
+  guard integration_config() is Some(config) else { return }
+  assert_auth_ok(
+    config,
+    "moon_scram",
+    "moonpass",
+    channel_binding=@client.ChannelBinding::Prefer,
+    application_name="moonbit-postgres-scram-channel-binding-prefer-plain",
+  )
+}
+
+///|
+/// This verifies that required channel binding rejects plaintext SCRAM instead of silently falling back.
+async test "integration scram channel binding require rejects plaintext" {
+  guard integration_config() is Some(config) else { return }
+  let message = expect_authentication_error(
+    try? @client.connect(
+      auth_client_config(
+        config,
+        "moon_scram",
+        password=Some(config.password),
+        channel_binding=@client.ChannelBinding::Require,
+        application_name="moonbit-postgres-scram-channel-binding-require-plain",
+      ),
+    ),
+  )
+  assert_eq(
+    message, "channel binding requires TLS with tls-server-end-point support",
+  )
+}
+
+///|
+/// This verifies the real PostgreSQL `SCRAM-SHA-256-PLUS` path over TLS.
+/// Requiring channel binding forces the client to use the server's advertised binding-capable mechanism.
+async test "integration scram channel binding require works over tls" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  assert_auth_ok(
+    config,
+    "moon_scram",
+    "moonpass",
+    ssl_mode=@client.SslMode::VerifyFull,
+    channel_binding=@client.ChannelBinding::Require,
+    application_name="moonbit-postgres-scram-channel-binding-require-tls",
+  )
+}
+
+///|
+/// This verifies that required channel binding rejects non-SCRAM authentication before sending a password.
+/// Plain password authentication cannot employ PostgreSQL channel binding.
+async test "integration channel binding require rejects plain password auth" {
+  guard integration_config() is Some(config) else { return }
+  let message = expect_authentication_error(
+    try? @client.connect(
+      auth_client_config(
+        config,
+        "moon_password",
+        password=Some(config.password),
+        channel_binding=@client.ChannelBinding::Require,
+        application_name="moonbit-postgres-channel-binding-require-password",
+      ),
+    ),
+  )
+  assert_eq(
+    message, "channel binding required but not supported by server's authentication request",
+  )
 }
 
 ///|
