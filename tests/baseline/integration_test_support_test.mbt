@@ -115,9 +115,9 @@ fn make_pool(
   manager? : @pgpool.ManagerConfig = @pgpool.ManagerConfig::new(),
 ) -> @pgpool.Pool raise {
   let config : @pgpool.Config = {
-    user: Some(config.user),
+    user: config.user,
     password: config.password,
-    dbname: Some(config.database),
+    dbname: config.database,
     options: config.options,
     application_name: config.application_name,
     ssl_mode: Some(config.ssl_mode),
