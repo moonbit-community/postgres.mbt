@@ -32,9 +32,8 @@ pub(all) enum SslMode {
 ///|
 /// Controls whether SCRAM channel binding is disabled, preferred, or required.
 ///
-/// This setting matters only when PostgreSQL authenticates with SCRAM. It does
-/// not enable TLS by itself and it does not affect non-SCRAM methods such as
-/// plain password authentication.
+/// This setting controls whether the connection must complete SCRAM channel
+/// binding. It does not enable TLS by itself.
 /// It is also unrelated to TLS `sslmode`: this package still does not support
 /// the removed libpq-style TLS aliases `sslmode=prefer` or `sslmode=require`.
 ///
@@ -43,7 +42,9 @@ pub(all) enum SslMode {
 /// supported binding and the server advertises it, otherwise it falls back to
 /// plain `SCRAM-SHA-256`.
 /// `Require` insists on `SCRAM-SHA-256-PLUS` and fails when TLS or server
-/// support is missing.
+/// support is missing. Because non-SCRAM authentication methods cannot employ
+/// PostgreSQL channel binding, `Require` rejects them before sending
+/// authentication credentials.
 pub(all) enum ChannelBinding {
   Disable
   Prefer

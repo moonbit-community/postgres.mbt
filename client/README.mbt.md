@@ -91,7 +91,8 @@ fn _config_example() -> @client.Config {
 - `password`: optional password
 - `ssl_mode`: `SslMode::Disable`, `SslMode::VerifyCa`, or `SslMode::VerifyFull`
 - `ssl_root_cert`: custom CA file, or `"system"` for the platform trust store
-- `channel_binding`: SCRAM channel-binding policy for SCRAM authentication
+- `channel_binding`: SCRAM channel-binding policy; `Require` rejects
+  non-SCRAM authentication
 - `application_name`: value visible in PostgreSQL session metadata
 - `options`: optional PostgreSQL startup `options` string
 - `connect_timeout_ms`: optional end-to-end connect timeout
@@ -225,8 +226,8 @@ fn _tls_examples() -> (@client.Config, @client.Config) {
 
 ## SCRAM Channel Binding
 
-`channel_binding` controls SCRAM behavior only. It does not enable TLS on its
-own, and it does not change non-SCRAM authentication methods.
+`channel_binding` controls whether SCRAM channel binding is disabled,
+preferred, or required. It does not enable TLS on its own.
 
 MD5 password authentication is deprecated by PostgreSQL and is not supported by
 this client. If the server requests `AuthenticationMD5Password`, `connect`
@@ -234,18 +235,20 @@ fails during startup with `ClientError::Authentication`.
 
 This is not the same setting as TLS `sslmode`. The repository still does not
 support the removed libpq-style TLS aliases `sslmode=prefer` and
-`sslmode=require`. The `Prefer` and `Require` here belong only to SCRAM channel
-binding.
+`sslmode=require`. The `Prefer` and `Require` names here refer to SCRAM
+channel-binding policy, not TLS negotiation.
 
 - `ChannelBinding::Disable`: always use plain `SCRAM-SHA-256`
 - `ChannelBinding::Prefer`: use `SCRAM-SHA-256-PLUS` when TLS exposes a binding
   PostgreSQL can use, otherwise fall back to plain `SCRAM-SHA-256`
-- `ChannelBinding::Require`: fail unless `SCRAM-SHA-256-PLUS` is available
+- `ChannelBinding::Require`: fail unless `SCRAM-SHA-256-PLUS` is available;
+  non-SCRAM authentication methods are rejected because they cannot employ
+  PostgreSQL channel binding
 
 Use `Prefer` when you want stronger SCRAM when the deployment supports it but
-do not want to reject older servers yet. Use `Require` when the deployment is
-already standardized on TLS plus SCRAM channel binding and a silent fallback
-would be the wrong outcome.
+do not want to reject older servers yet. Use `Require` when every accepted
+connection must prove channel binding happened, and a silent fallback or a
+non-SCRAM password exchange would be the wrong outcome.
 
 ```mbt check
 ///|
