@@ -18,6 +18,12 @@ priv struct ConnectionSetup {
 let deprecated_md5_authentication_message = "server requested deprecated md5 authentication; use scram-sha-256 or password"
 
 ///|
+let channel_binding_required_unsupported_message = "channel binding required but not supported by server's authentication request"
+
+///|
+let channel_binding_required_not_used_message = "channel binding required, but server authenticated client without channel binding"
+
+///|
 /// Resolve the socket host for the current connection target.
 fn Config::connect_host(self : Config) -> String {
   match self.hostaddr {
@@ -215,27 +221,35 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let mut secret_key = 0
   let mut transaction_status = b'I'
   let mut scram : @auth.ScramSha256? = None
+  let mut scram_channel_bound = false
+  let mut channel_binding_used = false
   // SCRAM authentication spans multiple round trips, so its local state has to
   // survive across several backend auth messages.
   for msg = read_message(stream) {
     match msg {
-      @backend.Message::AuthenticationOk => continue read_message(stream)
+      @backend.Message::AuthenticationOk => {
+        verify_required_channel_binding(config, channel_binding_used)
+        continue read_message(stream)
+      }
       @backend.Message::AuthenticationCleartextPassword => {
+        reject_unsupported_channel_binding(config)
         send_password_message(stream, config.password)
         continue read_message(stream)
       }
-      @backend.Message::AuthenticationMd5Password(_) =>
+      @backend.Message::AuthenticationMd5Password(_) => {
+        reject_unsupported_channel_binding(config)
         raise ClientError::Authentication(deprecated_md5_authentication_message)
+      }
       @backend.Message::AuthenticationSasl(body) => {
-        scram = Some(
-          begin_scram(
-            stream,
-            body,
-            config.password,
-            config.channel_binding,
-            setup.channel_binding,
-          ),
+        let (next_scram, channel_bound) = begin_scram(
+          stream,
+          body,
+          config.password,
+          config.channel_binding,
+          setup.channel_binding,
         )
+        scram = Some(next_scram)
+        scram_channel_bound = channel_bound
         continue read_message(stream)
       }
       @backend.Message::AuthenticationSaslContinue(body) => {
@@ -244,6 +258,9 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
       }
       @backend.Message::AuthenticationSaslFinal(body) => {
         finish_scram(scram, body.data())
+        if scram_channel_bound {
+          channel_binding_used = true
+        }
         continue read_message(stream)
       }
       @backend.Message::ParameterStatus(body) => {
@@ -261,6 +278,7 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
       }
       @backend.Message::NoticeResponse(_) => continue read_message(stream)
       @backend.Message::ReadyForQuery(body) => {
+        verify_required_channel_binding(config, channel_binding_used)
         // `ReadyForQuery` is the handoff point from startup/authentication into
         // the ordinary request scheduling loop.
         transaction_status = body.status
@@ -277,12 +295,33 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
       | @backend.Message::AuthenticationScmCredential
       | @backend.Message::AuthenticationGss
       | @backend.Message::AuthenticationGssContinue(_)
-      | @backend.Message::AuthenticationSspi =>
+      | @backend.Message::AuthenticationSspi => {
+        reject_unsupported_channel_binding(config)
         raise ClientError::Authentication(
           "server requested an unsupported authentication method",
         )
+      }
       _ => raise ClientError::UnexpectedMessage("unexpected startup message")
     }
+  }
+}
+
+///|
+fn reject_unsupported_channel_binding(config : Config) -> Unit raise {
+  if config.channel_binding is Require {
+    raise ClientError::Authentication(
+      channel_binding_required_unsupported_message,
+    )
+  }
+}
+
+///|
+fn verify_required_channel_binding(
+  config : Config,
+  channel_binding_used : Bool,
+) -> Unit raise {
+  if config.channel_binding is Require && !channel_binding_used {
+    raise ClientError::Authentication(channel_binding_required_not_used_message)
   }
 }
 
@@ -321,12 +360,14 @@ async fn begin_scram(
   password : String?,
   channel_binding : ChannelBinding,
   transport_binding : TlsChannelBinding,
-) -> @auth.ScramSha256 {
+) -> (@auth.ScramSha256, Bool) {
   let password = require_password(password)
   let nonce = secure_random_bytes(18)
   let (mechanism, scram_binding) = choose_scram_binding(
     body, channel_binding, transport_binding,
   )
+  let channel_bound = scram_binding
+    is @auth.ChannelBinding::TlsServerEndPoint(_)
   let scram = @auth.ScramSha256::new(
     @proto.utf8_encode(password)[:],
     scram_binding,
@@ -335,7 +376,7 @@ async fn begin_scram(
   let buf = @buffer.new()
   @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
   stream.write(buf.to_bytes())
-  scram
+  (scram, channel_bound)
 }
 
 ///|
