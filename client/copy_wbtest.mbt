@@ -160,8 +160,8 @@ fn copy_test_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-copy-wbtest",
     ),
-    requests: @async.Queue::new(kind=Unbounded),
-    async_messages: @async.Queue::new(kind=Unbounded),
+    requests: @async.Queue(kind=Unbounded),
+    async_messages: @async.Queue(kind=Unbounded),
     background_group,
     parameters: {},
     types,
@@ -384,7 +384,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
     assert_eq(message, "unexpected copy-in response")
   })
 
-  let finish_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let finish_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   finish_responses.put(copy_test_copy_done_message())
@@ -407,7 +407,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
 async test "client copy out drain_discard covers finished error and unexpected paths" {
   let completed_stream : CopyOutStream = {
     background_group: @ref.new(None),
-    responses: @async.Queue::new(kind=Unbounded),
+    responses: @async.Queue(kind=Unbounded),
     formats: [],
     database_error: None,
     detached: false,
@@ -417,7 +417,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
 
   let finished_error_stream : CopyOutStream = {
     background_group: @ref.new(None),
-    responses: @async.Queue::new(kind=Unbounded),
+    responses: @async.Queue(kind=Unbounded),
     formats: [],
     database_error: Some(copy_test_database_error("copy already failed")),
     detached: false,
@@ -429,7 +429,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   }
   assert_eq(err.message, "copy already failed")
 
-  let draining_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let draining_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   draining_responses.put(copy_test_error_response_message("copy drain failed"))
@@ -449,7 +449,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   assert_eq(err.message, "copy drain failed")
   assert_true(draining_stream.finished)
 
-  let next_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let next_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   next_responses.put(copy_test_row_description_message())
@@ -467,7 +467,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   }
   assert_eq(message, "unexpected copy out response")
 
-  let discard_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let discard_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   discard_responses.put(copy_test_row_description_message())
@@ -488,7 +488,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
 
 ///|
 async test "response helpers drain simple query and close sequences" {
-  let simple_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let simple_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   simple_responses.put(copy_test_row_description_message())
@@ -497,7 +497,7 @@ async test "response helpers drain simple query and close sequences" {
   simple_responses.put(copy_test_ready_for_query_message())
   drain_simple_query(simple_responses)
 
-  let close_responses : @async.Queue[@backend.Message] = @async.Queue::new(
+  let close_responses : @async.Queue[@backend.Message] = @async.Queue(
     kind=Unbounded,
   )
   close_responses.put(copy_test_close_complete_message())

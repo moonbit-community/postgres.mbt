@@ -161,7 +161,7 @@ async test "integration pool transaction portals support pagination and cleanup"
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_portals : @async.Queue[@pgpool.Portal] = @async.Queue::new(
+    let stale_portals : @async.Queue[@pgpool.Portal] = @async.Queue(
       kind=Unbounded,
     )
 
@@ -299,8 +299,8 @@ async test "integration pool release waits for active stream cleanup and rejects
       make_pool_config(1),
     )
     let lease = pool.get()
-    let entered : @async.Queue[Unit] = @async.Queue::new(kind=Unbounded)
-    let finish_stream : @async.Queue[Unit] = @async.Queue::new(kind=Unbounded)
+    let entered : @async.Queue[Unit] = @async.Queue(kind=Unbounded)
+    let finish_stream : @async.Queue[Unit] = @async.Queue(kind=Unbounded)
 
     let task = group.spawn(no_wait=true, () => {
       lease.with_stream(
@@ -351,10 +351,10 @@ async test "integration pool stale cancellable handles reject new work" {
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_operations : @async.Queue[@pgpool.Operation] = @async.Queue::new(
+    let stale_operations : @async.Queue[@pgpool.Operation] = @async.Queue(
       kind=Unbounded,
     )
-    let stale_tokens : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue::new(
+    let stale_tokens : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
       kind=Unbounded,
     )
 
@@ -395,7 +395,7 @@ async test "integration pool transaction wrappers cover row counts and cache gua
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_caches : @async.Queue[@pgpool.StatementCache] = @async.Queue::new(
+    let stale_caches : @async.Queue[@pgpool.StatementCache] = @async.Queue(
       kind=Unbounded,
     )
 

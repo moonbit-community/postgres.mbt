@@ -26,7 +26,7 @@ pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
 /// loop relays backend progress and completion messages.
 pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
   ensure_open(self.shared)
-  let input = @async.Queue::new(kind=Unbounded)
+  let input = @async.Queue(kind=Unbounded)
   let responses = self.send_request_with_copy(simple_query_bytes(sql), input)
   let mut database_error : DatabaseError? = None
   for res = responses.get() {

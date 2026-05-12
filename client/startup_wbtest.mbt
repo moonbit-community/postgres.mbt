@@ -53,7 +53,7 @@ fn startup_auth_ok_packet() -> Bytes raise @proto.ProtocolError {
 ///|
 async test "connect rejects deprecated md5 authentication" {
   @async.with_task_group(group => {
-    let server = @socket.TcpServer::new(@socket.Addr::parse("127.0.0.1:0"))
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
     group.spawn_bg(() => {
@@ -84,7 +84,7 @@ async test "connect rejects deprecated md5 authentication" {
 ///|
 async test "connect rejects cleartext password when channel binding is required" {
   @async.with_task_group(group => {
-    let server = @socket.TcpServer::new(@socket.Addr::parse("127.0.0.1:0"))
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
     group.spawn_bg(() => {
@@ -116,7 +116,7 @@ async test "connect rejects cleartext password when channel binding is required"
 ///|
 async test "connect rejects authentication ok when channel binding is required" {
   @async.with_task_group(group => {
-    let server = @socket.TcpServer::new(@socket.Addr::parse("127.0.0.1:0"))
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
     group.spawn_bg(() => {

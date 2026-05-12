@@ -66,8 +66,8 @@ fn make_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-connect-wbtest",
     ),
-    requests: @async.Queue::new(kind=Unbounded),
-    async_messages: @async.Queue::new(kind=Unbounded),
+    requests: @async.Queue(kind=Unbounded),
+    async_messages: @async.Queue(kind=Unbounded),
     background_group: @ref.new(None),
     parameters,
     types,
@@ -83,7 +83,7 @@ fn make_shared(
 ///|
 async test "connect captures startup state and close enqueues terminate request" {
   @async.with_task_group(group => {
-    let server = @socket.TcpServer::new(@socket.Addr::parse("127.0.0.1:0"))
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
     group.spawn_bg(() => {
@@ -147,7 +147,7 @@ async test "connect captures startup state and close enqueues terminate request"
 ///|
 async test "connect timeout surfaces protocol timeout" {
   @async.with_task_group(group => {
-    let server = @socket.TcpServer::new(@socket.Addr::parse("127.0.0.1:0"))
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
     group.spawn_bg(() => {
