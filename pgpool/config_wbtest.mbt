@@ -81,11 +81,11 @@ test "pool config broadcasts hostaddr to every host" {
 }
 
 ///|
-test "pool config manual record still reports missing user" {
+test "pool config manual record still reports empty user name" {
   let result = try? {
-    user: None,
+    user: "",
     password: None,
-    dbname: Some("moondb"),
+    dbname: "moondb",
     options: None,
     application_name: "pool-missing-user",
     ssl_mode: Some(@client.SslMode::VerifyFull),
@@ -105,47 +105,17 @@ test "pool config manual record still reports missing user" {
     manager: None,
     pool: PoolConfig::new(1),
   }.get_connection_targets()
-  guard result is Err(ConfigError::UserMissing) else {
-    fail("expected missing user")
-  }
-}
-
-///|
-test "pool config manual record still reports missing dbname" {
-  let result = try? {
-    user: Some("moon"),
-    password: None,
-    dbname: None,
-    options: None,
-    application_name: "pool-missing-dbname",
-    ssl_mode: Some(@client.SslMode::VerifyFull),
-    ssl_root_cert: None,
-    channel_binding: Some(@client.ChannelBinding::Disable),
-    host: Some("db.example"),
-    hosts: None,
-    hostaddr: None,
-    hostaddrs: None,
-    port: Some(5432),
-    ports: None,
-    connect_timeout_ms: None,
-    keepalives: None,
-    keepalives_idle_s: None,
-    target_session_attrs: Some(TargetSessionAttrs::any()),
-    load_balance_hosts: Some(LoadBalanceHosts::Disable),
-    manager: None,
-    pool: PoolConfig::new(1),
-  }.get_connection_targets()
-  guard result is Err(ConfigError::DbnameMissing) else {
-    fail("expected missing dbname")
+  guard result is Err(ConfigError::UsernameEmpty) else {
+    fail("expected username empty")
   }
 }
 
 ///|
 test "pool config manual record still reports empty dbname" {
   let result = try? {
-    user: Some("moon"),
+    user: "moon",
     password: None,
-    dbname: Some(""),
+    dbname: "",
     options: None,
     application_name: "pool-empty-dbname",
     ssl_mode: Some(@client.SslMode::VerifyFull),
@@ -173,9 +143,9 @@ test "pool config manual record still reports empty dbname" {
 ///|
 test "pool config requires explicit host for verify_full" {
   let result = try? {
-    user: Some("moon"),
+    user: "moon",
     password: None,
-    dbname: Some("moondb"),
+    dbname: "moondb",
     options: None,
     application_name: "pool-verify-full-host",
     ssl_mode: Some(@client.SslMode::VerifyFull),

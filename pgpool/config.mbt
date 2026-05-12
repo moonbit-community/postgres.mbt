@@ -199,8 +199,7 @@ pub fn PoolConfig::new(
 ///
 /// These errors are reported before the pool opens any physical connection.
 pub suberror ConfigError {
-  UserMissing
-  DbnameMissing
+  UsernameEmpty
   DbnameEmpty
   HostPortArityMismatch
   InvalidConfig(String)
@@ -249,9 +248,9 @@ pub(all) enum LoadBalanceHosts {
 /// normalized output via `builder`, `create_pool`, `get_pool_config`, or
 /// `get_connection_targets`.
 pub(all) struct Config {
-  user : String?
+  user : String
   password : String?
-  dbname : String?
+  dbname : String
   options : String?
   application_name : String
   ssl_mode : @client.SslMode?
@@ -303,9 +302,9 @@ pub fn Config::new(
   pool~ : PoolConfig,
 ) -> Config {
   {
-    user: Some(user),
+    user,
     password,
-    dbname: Some(dbname),
+    dbname,
     options,
     application_name,
     ssl_mode: Some(ssl_mode),
@@ -467,18 +466,15 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
       }
     }
   }
-  let user = match config.user {
-    Some(user) => user
-    None => raise ConfigError::UserMissing
+  let user = if config.user == "" {
+    raise ConfigError::UsernameEmpty
+  } else {
+    config.user
   }
-  let dbname = match config.dbname {
-    Some(dbname) =>
-      if dbname == "" {
-        raise ConfigError::DbnameEmpty
-      } else {
-        dbname
-      }
-    None => raise ConfigError::DbnameMissing
+  let dbname = if config.dbname == "" {
+    raise ConfigError::DbnameEmpty
+  } else {
+    config.dbname
   }
   let ssl_mode = choose_ssl_mode(config.ssl_mode)
   let ssl_root_cert = config.ssl_root_cert

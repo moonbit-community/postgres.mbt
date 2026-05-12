@@ -11,8 +11,7 @@ import {
 
 // Errors
 pub suberror ConfigError {
-  UserMissing
-  DbnameMissing
+  UsernameEmpty
   DbnameEmpty
   HostPortArityMismatch
   InvalidConfig(String)
@@ -55,9 +54,9 @@ pub async fn[T] Client::with_typed_stream(Self, String, Array[@client.Type], par
 pub impl GenericClient for Client
 
 pub(all) struct Config {
-  user : String?
+  user : String
   password : String?
-  dbname : String?
+  dbname : String
   options : String?
   application_name : String
   ssl_mode : @client.SslMode?
