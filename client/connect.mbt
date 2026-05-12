@@ -28,8 +28,8 @@ async fn connect_inner(config : Config) -> (Client, Connection) {
   seed_builtin_types(types)
   let shared = {
     config,
-    requests: @async.Queue::new(kind=Unbounded),
-    async_messages: @async.Queue::new(kind=Unbounded),
+    requests: @async.Queue(kind=Unbounded),
+    async_messages: @async.Queue(kind=Unbounded),
     background_group,
     parameters: startup.parameters,
     types,
@@ -63,7 +63,7 @@ pub fn Client::close(self : Client) -> Unit {
     return
   }
   self.shared.closing.val = true
-  let responses = @async.Queue::new(kind=Unbounded)
+  let responses = @async.Queue(kind=Unbounded)
   try
     self.shared.requests.try_put({
       kind: RequestKind::Terminate,

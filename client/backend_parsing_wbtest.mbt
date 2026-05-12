@@ -279,7 +279,7 @@ test "backend parsing merges stream columns and reports mismatches" {
 
 ///|
 async test "backend parsing fail_response_stream closes queue with error" {
-  let responses : @async.Queue[Int] = @async.Queue::new(kind=Unbounded)
+  let responses : @async.Queue[Int] = @async.Queue(kind=Unbounded)
   let result : Result[Unit, Error] = try? fail_response_stream(
     responses,
     ClientError::UnexpectedMessage("boom"),

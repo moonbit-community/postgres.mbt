@@ -11,7 +11,7 @@ fn Client::send_request(
   bytes : Bytes,
   response_kind? : @aqueue.Kind = request_response_queue_kind,
 ) -> @async.Queue[@backend.Message] raise {
-  let responses = @async.Queue::new(kind=response_kind)
+  let responses = @async.Queue(kind=response_kind)
   // `shared.requests` is created as `Unbounded`, so `try_put` cannot return
   // `false` for "queue full". The only failure mode here is a closed queue,
   // which still raises and propagates out of this helper.
@@ -28,7 +28,7 @@ fn Client::send_request_with_copy(
   bytes : Bytes,
   input : @async.Queue[CopyInAction],
 ) -> @async.Queue[@backend.Message] raise {
-  let responses = @async.Queue::new(kind=request_response_queue_kind)
+  let responses = @async.Queue(kind=request_response_queue_kind)
   // Same reasoning as `send_request`: the shared request queue is unbounded,
   // so ignoring the `Bool` only discards an impossible "queue full" result.
   ignore(
