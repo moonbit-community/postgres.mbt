@@ -52,6 +52,7 @@ fn as_client_config(
   hostaddr? : String,
   ssl_mode? : @client.SslMode = @client.SslMode::Disable,
   ssl_root_cert? : String,
+  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
   application_name~ : String,
 ) -> @client.Config {
   @client.Config::new(
@@ -63,6 +64,7 @@ fn as_client_config(
     port=config.port,
     ssl_mode~,
     ssl_root_cert?,
+    channel_binding~,
     application_name~,
   )
 }
@@ -75,6 +77,7 @@ fn auth_client_config(
   user : String,
   password? : String? = Some(config.password),
   ssl_mode? : @client.SslMode = @client.SslMode::Disable,
+  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
   application_name~ : String,
 ) -> @client.Config {
   match password {
@@ -86,6 +89,7 @@ fn auth_client_config(
         password~,
         port=config.port,
         ssl_mode~,
+        channel_binding~,
         application_name~,
       )
     None =>
@@ -95,6 +99,7 @@ fn auth_client_config(
         database=config.database,
         port=config.port,
         ssl_mode~,
+        channel_binding~,
         application_name~,
       )
   }
