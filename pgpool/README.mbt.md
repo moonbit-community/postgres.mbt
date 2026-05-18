@@ -127,7 +127,7 @@ fn _multi_target_config() -> Config raise {
     hosts=["replica.db"],
     ports=[5432, 5432],
     target_session_attrs=TargetSessionAttrs::read_write(),
-    load_balance_hosts=LoadBalanceHosts::Random,
+    load_balance_hosts=Random,
     pool=PoolConfig::new(
       4,
       timeouts=Timeouts::new(

@@ -66,8 +66,8 @@ fn make_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-connect-wbtest",
     ),
-    requests: @async.Queue(kind=Unbounded),
-    async_messages: @async.Queue(kind=Unbounded),
+    requests: Queue(kind=Unbounded),
+    async_messages: Queue(kind=Unbounded),
     background_group: @ref.new(None),
     parameters,
     types,
@@ -135,7 +135,7 @@ async test "connect captures startup state and close enqueues terminate request"
     client.close()
     let request = client.shared.requests.try_get() catch { _ => None }
     guard request is Some(request) else { fail("expected terminate request") }
-    assert_true(request.kind is RequestKind::Terminate)
+    assert_true(request.kind is Terminate)
     @debug.assert_eq(request.bytes, terminate_bytes())
 
     client.close()

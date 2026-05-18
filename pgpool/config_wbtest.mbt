@@ -7,7 +7,7 @@ test "pool config new builds defaults and appended hosts" {
     application_name="pool-config-test",
     hosts=["replica.db"],
     target_session_attrs=TargetSessionAttrs::read_write(),
-    load_balance_hosts=LoadBalanceHosts::Random,
+    load_balance_hosts=Random,
     pool=PoolConfig::new(2),
   )
   let targets = config.get_connection_targets()
@@ -16,12 +16,12 @@ test "pool config new builds defaults and appended hosts" {
   @debug.assert_eq(targets[1].host, "replica.db")
   @debug.assert_eq(targets[0].port, 5432)
   @debug.assert_eq(targets[1].port, 5432)
-  assert_true(targets[0].ssl_mode == @client.SslMode::VerifyFull)
-  assert_true(targets[0].channel_binding == @client.ChannelBinding::Disable)
+  assert_true(targets[0].ssl_mode == VerifyFull)
+  assert_true(targets[0].channel_binding == Disable)
   assert_true(
     config.target_session_attrs == Some(TargetSessionAttrs::read_write()),
   )
-  assert_true(config.load_balance_hosts == Some(LoadBalanceHosts::Random))
+  assert_true(config.load_balance_hosts == Some(Random))
   @debug.assert_eq(targets[0].application_name, "pool-config-test")
   @debug.assert_eq(targets[1].application_name, "pool-config-test")
 }
@@ -45,7 +45,7 @@ test "pool config broadcasts explicit ports" {
   @debug.assert_eq(targets[0].port, 7000)
   @debug.assert_eq(targets[1].port, 7000)
   @debug.assert_eq(targets[0].password, Some("secret"))
-  assert_true(targets[0].ssl_mode == @client.SslMode::VerifyFull)
+  assert_true(targets[0].ssl_mode == VerifyFull)
 }
 
 ///|
@@ -54,13 +54,13 @@ test "pool config keeps explicit tls settings" {
     "db.example",
     user="moon",
     dbname="moondb",
-    ssl_mode=@client.SslMode::VerifyCa,
+    ssl_mode=VerifyCa,
     ssl_root_cert="/tmp/root.crt",
     application_name="pool-tls",
     pool=PoolConfig::new(1),
   )
   let target = config.get_connection_targets()[0]
-  assert_true(target.ssl_mode == @client.SslMode::VerifyCa)
+  assert_true(target.ssl_mode == VerifyCa)
   @debug.assert_eq(target.ssl_root_cert, Some("/tmp/root.crt"))
 }
 
@@ -145,7 +145,7 @@ test "pool config rejects sslrootcert system without verify_full" {
     "db.example",
     user="moon",
     dbname="moondb",
-    ssl_mode=@client.SslMode::VerifyCa,
+    ssl_mode=VerifyCa,
     ssl_root_cert="system",
     application_name="pool-system-root",
     pool=PoolConfig::new(1),

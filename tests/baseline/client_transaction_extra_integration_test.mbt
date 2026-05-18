@@ -39,7 +39,7 @@ async test "integration transaction builder savepoints and raw statement helpers
       "select value from moon_client_tx_extra order by value",
     )
 
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         tx
         .query_statement(typed_statement, params=[7 as &@client.ToSql])
@@ -54,7 +54,7 @@ async test "integration transaction builder savepoints and raw statement helpers
       named.execute_raw(insert_statement, params=[2 as &@client.ToSql]),
       1,
     )
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         named
         .query("select value from moon_client_tx_extra order by value")
@@ -73,11 +73,11 @@ async test "integration transaction builder savepoints and raw statement helpers
       1,
     )
     let portal = nested.bind(select_statement)
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(nested.query_portal(portal, 1).collect()),
       [1],
     )
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(nested.query_portal(portal, 8).collect()),
       [3],
     )
@@ -96,7 +96,7 @@ async test "integration transaction builder savepoints and raw statement helpers
     assert_eq(isolation, "serializable")
     assert_eq(read_only, "off")
     assert_eq(deferrable, "off")
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         tx
         .query("select value from moon_client_tx_extra order by value")
@@ -117,7 +117,7 @@ async test "integration transaction builder savepoints and raw statement helpers
     assert_eq(total, 4)
 
     let follow_up = client.transaction()
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         follow_up.query("select 9::int4 as value").collect(),
       ),
@@ -173,7 +173,7 @@ async test "integration transaction default builder and named savepoint commit" 
     )
     nested.rollback()
 
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         tx
         .query("select value from moon_client_tx_default order by value")
@@ -184,7 +184,7 @@ async test "integration transaction default builder and named savepoint commit" 
     tx.commit()
 
     client.check_connection()
-    assert_eq(
+    @debug.assert_eq(
       transaction_row_values(
         client
         .query("select value from moon_client_tx_default order by value")

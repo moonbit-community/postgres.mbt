@@ -15,10 +15,7 @@ pub fn Client::simple_query(
   sql : String,
 ) -> SimpleQueryStream raise {
   ensure_open(self.shared)
-  let responses = self.send_request(
-    RequestKind::Messages,
-    simple_query_bytes(sql),
-  )
+  let responses = self.send_request(Messages, simple_query_bytes(sql))
   new_simple_query_stream(self.shared.background_group, responses)
 }
 
@@ -29,10 +26,7 @@ pub fn Client::simple_query(
 /// configuration where only protocol completion matters.
 pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
   ensure_open(self.shared)
-  let responses = self.send_request(
-    RequestKind::Messages,
-    simple_query_bytes(sql),
-  )
+  let responses = self.send_request(Messages, simple_query_bytes(sql))
   drain_simple_query(responses)
 }
 
@@ -55,7 +49,7 @@ pub async fn Client::prepare_typed(
   ensure_open(self.shared)
   let name = next_name(self.shared, "s")
   let bytes = prepare_bytes(name[:], sql, types)
-  let responses = self.send_request(RequestKind::Messages, bytes)
+  let responses = self.send_request(Messages, bytes)
   let (params, columns) = read_prepare_response(self.shared, responses)
   { client: self, name, params, columns, closed: @ref.new(false) }
 }
@@ -70,7 +64,7 @@ pub async fn Statement::close(self : Statement) -> Unit {
     return
   }
   let responses = self.client.send_request(
-    RequestKind::Messages,
+    Messages,
     close_bytes(b'S', self.name[:]),
   )
   drain_close_response(responses)
@@ -99,7 +93,7 @@ pub async fn Client::query(
   // Use a temporary named statement so the driver can learn PostgreSQL's
   // resolved parameter and result metadata before execution starts.
   let prepare_responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     prepare_bytes(name[:], sql, []),
   )
   let (param_types, columns) = read_prepare_response(
@@ -115,7 +109,7 @@ pub async fn Client::query(
     )
   }
   let responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
   // Cleanup is deferred onto the returned stream because closing the temporary
@@ -198,12 +192,12 @@ pub async fn Client::query_typed(
   }
   let name = next_name(self.shared, "q")
   let prepare_responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     prepare_bytes(name[:], sql, param_types),
   )
   let (_, columns) = read_prepare_response(self.shared, prepare_responses)
   let responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
   new_row_stream(
@@ -245,7 +239,7 @@ pub fn Client::query_statement(
     )
   }
   let responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     execute_statement_bytes(statement.name[:], statement.params, params),
   )
   new_row_stream(
@@ -314,7 +308,7 @@ pub async fn Client::bind(
   }
   let name = next_name(self.shared, "p")
   let responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     bind_portal_bytes(name[:], statement.name[:], statement.params, params),
   )
   let mut columns = statement.columns
@@ -323,17 +317,17 @@ pub async fn Client::bind(
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::BindComplete => continue responses.get()
-      @backend.Message::RowDescription(body) => {
+      BindComplete => continue responses.get()
+      RowDescription(body) => {
         columns = parse_columns(body)
         continue responses.get()
       }
-      @backend.Message::NoData => continue responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      NoData => continue responses.get()
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => {
@@ -360,7 +354,7 @@ pub async fn Portal::close(self : Portal) -> Unit {
     return
   }
   let responses = self.client.send_request(
-    RequestKind::Messages,
+    Messages,
     close_bytes(b'P', self.name[:]),
   )
   drain_close_response(responses)
@@ -382,7 +376,7 @@ pub fn Client::query_portal(
     raise ClientError::Closed("portal already closed")
   }
   let responses = self.send_request(
-    RequestKind::Messages,
+    Messages,
     execute_portal_bytes(portal.name[:], max_rows),
   )
   new_row_stream(

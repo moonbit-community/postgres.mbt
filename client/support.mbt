@@ -33,7 +33,7 @@ fn Client::send_request_with_copy(
   // so ignoring the `Bool` only discards an impossible "queue full" result.
   ignore(
     self.shared.requests.try_put({
-      kind: RequestKind::CopyIn,
+      kind: CopyIn,
       bytes,
       responses,
       copy_input: Some(input),

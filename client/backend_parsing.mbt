@@ -158,7 +158,7 @@ fn parse_database_error(
 /// Decode protocol UTF-8 and normalize decoder failures to `ProtocolError`.
 fn decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
+    _ => raise InvalidInput("invalid UTF-8")
   }
 }
 

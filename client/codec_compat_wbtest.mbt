@@ -1,9 +1,5 @@
 ///|
-fn make_row(
-  type_ : Type,
-  raw : Bytes,
-  format? : WireFormat = WireFormat::Text,
-) -> Row {
+fn make_row(type_ : Type, raw : Bytes, format? : WireFormat = Text) -> Row {
   let columns : Array[Column] = [
     {
       name: "value",
@@ -71,11 +67,11 @@ test "built-in ToSql compatibility remains stable" {
 
 ///|
 test "built-in wire formats remain stable" {
-  assert_encode_format(true, Type::bool(), WireFormat::Binary)
-  assert_encode_format("moonbit", Type::text(), WireFormat::Text)
-  assert_encode_format(Json::null(), Type::json(), WireFormat::Text)
-  assert_encode_format(Json::null(), Type::jsonb(), WireFormat::Text)
-  assert_encode_format((None : String?), Type::text(), WireFormat::Binary)
+  assert_encode_format(true, Type::bool(), Binary)
+  assert_encode_format("moonbit", Type::text(), Text)
+  assert_encode_format(Json::null(), Type::json(), Text)
+  assert_encode_format(Json::null(), Type::jsonb(), Text)
+  assert_encode_format((None : String?), Type::text(), Binary)
 }
 
 ///|
@@ -107,17 +103,15 @@ test "built-in FromSql compatibility remains stable" {
   let varchar_value : String = make_row(Type::varchar(), b"world").get(0)
   @debug.assert_eq(varchar_value, "world")
 
-  let bytea_value : Bytes = make_row(
-    Type::bytea(),
-    b"abc",
-    format=WireFormat::Binary,
-  ).get(0)
+  let bytea_value : Bytes = make_row(Type::bytea(), b"abc", format=Binary).get(
+    0,
+  )
   @debug.assert_eq(bytea_value, b"abc")
 
   let uuid_value : Bytes = make_row(
     Type::uuid(),
     b"1234567890abcdef",
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(uuid_value, b"1234567890abcdef")
 
@@ -136,7 +130,7 @@ test "built-in FromSql compatibility remains stable" {
   let jsonb_value : Json = make_row(
     Type::jsonb(),
     jsonb_payload.to_bytes(),
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(
     jsonb_value,
@@ -147,7 +141,7 @@ test "built-in FromSql compatibility remains stable" {
 ///|
 test "built-in Array codecs support binary arrays" {
   let ints = [1, 2, 3]
-  assert_encode_format(ints, Type::int4_array(), WireFormat::Binary)
+  assert_encode_format(ints, Type::int4_array(), Binary)
   let encoded_ints = encode_param(ints, Type::int4_array())
   guard encoded_ints.value is Some(int_bytes) else {
     fail("expected encoded int array bytes")
@@ -155,7 +149,7 @@ test "built-in Array codecs support binary arrays" {
   let decoded_ints : Array[Int] = make_row(
     Type::int4_array(),
     int_bytes,
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(decoded_ints, ints)
 
@@ -167,7 +161,7 @@ test "built-in Array codecs support binary arrays" {
   let decoded_texts : Array[String] = make_row(
     Type::text_array(),
     text_bytes,
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(decoded_texts, texts)
 
@@ -179,7 +173,7 @@ test "built-in Array codecs support binary arrays" {
   let decoded_nullable : Array[String?] = make_row(
     Type::text_array(),
     nullable_bytes,
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(decoded_nullable, nullable)
 
@@ -194,7 +188,7 @@ test "built-in Array codecs support binary arrays" {
   let decoded_json : Array[Json] = make_row(
     Type::json_array(),
     json_bytes,
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(decoded_json, json_values)
 
@@ -205,7 +199,7 @@ test "built-in Array codecs support binary arrays" {
   let decoded_jsonb : Array[Json] = make_row(
     Type::jsonb_array(),
     jsonb_bytes,
-    format=WireFormat::Binary,
+    format=Binary,
   ).get(0)
   @debug.assert_eq(decoded_jsonb, json_values)
 }

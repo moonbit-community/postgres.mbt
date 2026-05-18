@@ -14,7 +14,7 @@ pub impl ToSql for Bool with moonbit_type_name(_) {
 ///|
 pub impl ToSql for Bool with to_sql(self, _, buf) {
   @types.bool_to_sql(self, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -30,8 +30,8 @@ pub impl FromSql for Bool with moonbit_type_name() {
 ///|
 pub impl FromSql for Bool with from_sql(_, format, raw) {
   match format {
-    WireFormat::Text => decode_utf8(raw) == "t" || decode_utf8(raw) == "true"
-    WireFormat::Binary => @types.bool_from_sql(raw)
+    Text => decode_utf8(raw) == "t" || decode_utf8(raw) == "true"
+    Binary => @types.bool_from_sql(raw)
   }
 }
 
@@ -43,7 +43,7 @@ pub impl ToSql for Int with to_sql(self, type_, buf) {
     INT4_OID => @types.int4_to_sql(self, buf)
     _ => raise ClientError::Encode("cannot encode Int for type \{type_.name}")
   }
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -62,8 +62,8 @@ pub impl ToSql for Int with moonbit_type_name(_) {
 ///|
 pub impl FromSql for Int with from_sql(type_, format, raw) {
   match format {
-    WireFormat::Text => @string.parse_int(decode_utf8(raw))
-    WireFormat::Binary =>
+    Text => @string.parse_int(decode_utf8(raw))
+    Binary =>
       match type_.oid {
         INT2_OID => @types.int2_from_sql(raw)
         INT4_OID => @types.int4_from_sql(raw)
@@ -99,7 +99,7 @@ pub impl ToSql for Int64 with moonbit_type_name(_) {
 ///|
 pub impl ToSql for Int64 with to_sql(self, _, buf) {
   @types.int8_to_sql(self, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -115,8 +115,8 @@ pub impl FromSql for Int64 with moonbit_type_name() {
 ///|
 pub impl FromSql for Int64 with from_sql(_, format, raw) {
   match format {
-    WireFormat::Text => @string.parse_int64(decode_utf8(raw))
-    WireFormat::Binary => @types.int8_from_sql(raw)
+    Text => @string.parse_int64(decode_utf8(raw))
+    Binary => @types.int8_from_sql(raw)
   }
 }
 
@@ -134,7 +134,7 @@ pub impl ToSql for Float with moonbit_type_name(_) {
 ///|
 pub impl ToSql for Float with to_sql(self, _, buf) {
   @types.float4_to_sql(self, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -150,9 +150,8 @@ pub impl FromSql for Float with moonbit_type_name() {
 ///|
 pub impl FromSql for Float with from_sql(_, format, raw) {
   match format {
-    WireFormat::Text =>
-      Float::from_double(@string.parse_double(decode_utf8(raw)))
-    WireFormat::Binary => @types.float4_from_sql(raw)
+    Text => Float::from_double(@string.parse_double(decode_utf8(raw)))
+    Binary => @types.float4_from_sql(raw)
   }
 }
 
@@ -170,7 +169,7 @@ pub impl ToSql for Double with moonbit_type_name(_) {
 ///|
 pub impl ToSql for Double with to_sql(self, _, buf) {
   @types.float8_to_sql(self, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -186,8 +185,8 @@ pub impl FromSql for Double with moonbit_type_name() {
 ///|
 pub impl FromSql for Double with from_sql(_, format, raw) {
   match format {
-    WireFormat::Text => @string.parse_double(decode_utf8(raw))
-    WireFormat::Binary => @types.float8_from_sql(raw)
+    Text => @string.parse_double(decode_utf8(raw))
+    Binary => @types.float8_from_sql(raw)
   }
 }
 
@@ -205,7 +204,7 @@ pub impl ToSql for UInt with moonbit_type_name(_) {
 ///|
 pub impl ToSql for UInt with to_sql(self, _, buf) {
   @types.oid_to_sql(self, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -221,8 +220,8 @@ pub impl FromSql for UInt with moonbit_type_name() {
 ///|
 pub impl FromSql for UInt with from_sql(_, format, raw) {
   match format {
-    WireFormat::Text => @string.parse_uint(decode_utf8(raw))
-    WireFormat::Binary => @types.oid_from_sql(raw)
+    Text => @string.parse_uint(decode_utf8(raw))
+    Binary => @types.oid_from_sql(raw)
   }
 }
 
@@ -239,13 +238,13 @@ pub impl ToSql for String with moonbit_type_name(_) {
 
 ///|
 pub impl ToSql for String with format(_, _) {
-  WireFormat::Text
+  Text
 }
 
 ///|
 pub impl ToSql for String with to_sql(self, _, buf) {
   buf.write_bytes(@proto.utf8_encode(self))
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -281,7 +280,7 @@ pub impl ToSql for Bytes with to_sql(self, type_, buf) {
     UUID_OID => @types.uuid_to_sql(self[:], buf)
     _ => raise ClientError::Encode("cannot encode bytes for type \{type_.name}")
   }
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -297,13 +296,13 @@ pub impl FromSql for Bytes with moonbit_type_name() {
 ///|
 pub impl FromSql for Bytes with from_sql(type_, format, raw) {
   match format {
-    WireFormat::Text =>
+    Text =>
       if type_.oid == BYTEA_OID {
         raw.to_owned()
       } else {
         @proto.utf8_encode(decode_utf8(raw))
       }
-    WireFormat::Binary =>
+    Binary =>
       match type_.oid {
         BYTEA_OID => @types.bytea_from_sql(raw).to_owned()
         UUID_OID => @types.uuid_from_sql(raw)
@@ -325,13 +324,13 @@ pub impl ToSql for Json with moonbit_type_name(_) {
 
 ///|
 pub impl ToSql for Json with format(_, _) {
-  WireFormat::Text
+  Text
 }
 
 ///|
 pub impl ToSql for Json with to_sql(self, _, buf) {
   buf.write_bytes(@proto.utf8_encode(self.stringify()))
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -347,8 +346,8 @@ pub impl FromSql for Json with moonbit_type_name() {
 ///|
 pub impl FromSql for Json with from_sql(type_, format, raw) {
   match format {
-    WireFormat::Text => @json.parse(decode_utf8(raw)[:])
-    WireFormat::Binary =>
+    Text => @json.parse(decode_utf8(raw)[:])
+    Binary =>
       match type_.oid {
         JSONB_OID => decode_jsonb_binary(raw)
         _ => @json.parse(decode_utf8(raw)[:])

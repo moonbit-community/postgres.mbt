@@ -41,7 +41,7 @@ pub fn bool_to_sql(v : Bool, buf : @buffer.Buffer) -> Unit {
 /// Deserialize a BOOL value.
 pub fn bool_from_sql(buf : BytesView) -> Bool raise @proto.ProtocolError {
   if buf.length() != 1 {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   buf[0] != 0
 }
@@ -78,7 +78,7 @@ pub fn char_to_sql(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   if v < -128 || v > 127 {
-    raise @proto.ProtocolError::Overflow("value out of range for i8")
+    raise Overflow("value out of range for i8")
   }
   let u = if v < 0 { v + 256 } else { v }
   buf.write_byte(u.to_byte())
@@ -88,7 +88,7 @@ pub fn char_to_sql(
 /// Deserialize a "char" value.
 pub fn char_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   if buf.length() != 1 {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   let b = buf[0].to_int()
   if b >= 128 {
@@ -113,7 +113,7 @@ pub fn int2_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i16_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -133,7 +133,7 @@ pub fn int4_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -150,7 +150,7 @@ pub fn oid_from_sql(buf : BytesView) -> @proto.Oid raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_u32_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -167,7 +167,7 @@ pub fn int8_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -184,7 +184,7 @@ pub fn lsn_from_sql(buf : BytesView) -> @proto.Lsn raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_u64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -201,7 +201,7 @@ pub fn float4_from_sql(buf : BytesView) -> Float raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_f32_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -218,7 +218,7 @@ pub fn float8_from_sql(buf : BytesView) -> Double raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_f64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   v
 }
@@ -263,7 +263,7 @@ pub fn hstore_from_sql(
   let r = @proto.ByteReader::new(buf)
   let count = r.read_i32_be()
   if count < 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid entry count")
+    raise InvalidInput("invalid entry count")
   }
   { remaining: count, buf: buf[4:] }
 }
@@ -282,7 +282,7 @@ pub fn HstoreEntries::next(
 ) -> (Bytes, Bytes?)? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() != 0 {
-      raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+      raise InvalidInput("invalid buffer size")
     }
     return None
   }
@@ -290,10 +290,10 @@ pub fn HstoreEntries::next(
   let r = @proto.ByteReader::new(self.buf)
   let key_len = r.read_i32_be()
   if key_len < 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid key length")
+    raise InvalidInput("invalid key length")
   }
   if self.buf.length() < 4 + key_len {
-    raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+    raise UnexpectedEof("unexpected EOF")
   }
   let key = self.buf[4:4 + key_len]
   self.buf = self.buf[4 + key_len:]
@@ -301,13 +301,13 @@ pub fn HstoreEntries::next(
   let value_len = r2.read_i32_be()
   if value_len < 0 {
     if value_len != -1 {
-      raise @proto.ProtocolError::InvalidInput("invalid value length")
+      raise InvalidInput("invalid value length")
     }
     self.buf = self.buf[4:]
     return Some((key.to_owned(), None))
   }
   if self.buf.length() < 4 + value_len {
-    raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+    raise UnexpectedEof("unexpected EOF")
   }
   let value = self.buf[4:4 + value_len]
   self.buf = self.buf[4 + value_len:]
@@ -334,15 +334,11 @@ pub fn varbit_from_sql(buf : BytesView) -> Varbit raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let len = r.read_i32_be()
   if len < 0 {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid varbit length: varbit < 0",
-    )
+    raise InvalidInput("invalid varbit length: varbit < 0")
   }
   let bytes_len = (len + 7) / 8
   if buf.length() != 4 + bytes_len {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: varbit mismatch",
-    )
+    raise InvalidInput("invalid message length: varbit mismatch")
   }
   { len, bytes: buf[4:] }
 }
@@ -372,9 +368,7 @@ pub fn timestamp_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: timestamp not drained",
-    )
+    raise InvalidInput("invalid message length: timestamp not drained")
   }
   v
 }
@@ -394,9 +388,7 @@ pub fn date_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: date not drained",
-    )
+    raise InvalidInput("invalid message length: date not drained")
   }
   v
 }
@@ -413,9 +405,7 @@ pub fn time_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: time not drained",
-    )
+    raise InvalidInput("invalid message length: time not drained")
   }
   v
 }
@@ -427,7 +417,7 @@ pub fn macaddr_to_sql(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   if v.length() != 6 {
-    raise @proto.ProtocolError::InvalidInput("invalid MAC address length")
+    raise InvalidInput("invalid MAC address length")
   }
   buf.write_bytesview(v)
 }
@@ -436,9 +426,7 @@ pub fn macaddr_to_sql(
 /// Deserialize a MACADDR value.
 pub fn macaddr_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   if buf.length() != 6 {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: macaddr length mismatch",
-    )
+    raise InvalidInput("invalid message length: macaddr length mismatch")
   }
   buf.to_owned()
 }
@@ -450,7 +438,7 @@ pub fn uuid_to_sql(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   if v.length() != 16 {
-    raise @proto.ProtocolError::InvalidInput("invalid UUID length")
+    raise InvalidInput("invalid UUID length")
   }
   buf.write_bytesview(v)
 }
@@ -459,9 +447,7 @@ pub fn uuid_to_sql(
 /// Deserialize a UUID value.
 pub fn uuid_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   if buf.length() != 16 {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: uuid size mismatch",
-    )
+    raise InvalidInput("invalid message length: uuid size mismatch")
   }
   buf.to_owned()
 }
@@ -480,13 +466,13 @@ pub fn[T] array_to_sql(
   let mut expected_elements = 1
   for dimension in dimensions {
     if dimension.len < 0 {
-      raise @proto.ProtocolError::InvalidInput("invalid dimension size")
+      raise InvalidInput("invalid dimension size")
     }
     num_dimensions = num_dimensions + 1
     if dimension.len != 0 {
       let max = 0x7fff_ffff / dimension.len
       if expected_elements > max {
-        raise @proto.ProtocolError::InvalidInput("too many array elements")
+        raise InvalidInput("too many array elements")
       }
     }
     expected_elements = expected_elements * dimension.len
@@ -504,8 +490,8 @@ pub fn[T] array_to_sql(
       b => {
         let r = serializer(element, b)
         match r {
-          @proto.IsNull::Yes => has_nulls = true
-          @proto.IsNull::No => ()
+          Yes => has_nulls = true
+          No => ()
         }
         r
       },
@@ -513,9 +499,7 @@ pub fn[T] array_to_sql(
     )
   }
   if actual_elements != expected_elements {
-    raise @proto.ProtocolError::InvalidInput(
-      "array element count does not match dimensions",
-    )
+    raise InvalidInput("array element count does not match dimensions")
   }
   let num_dimensions_i32 = @proto.i32_from_usize(num_dimensions)
   buf.write_int_be(num_dimensions_i32)
@@ -530,7 +514,7 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let dimensions = r.read_i32_be()
   if dimensions < 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid dimension count")
+    raise InvalidInput("invalid dimension count")
   }
   let has_nulls = r.read_i32_be() != 0
   let element_type = r.read_u32_be()
@@ -539,12 +523,12 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
     let len = r.read_i32_be()
     let _lower = r.read_i32_be()
     if len < 0 {
-      raise @proto.ProtocolError::InvalidInput("invalid dimension size")
+      raise InvalidInput("invalid dimension size")
     }
     if len != 0 {
       let max = 0x7fff_ffff / len
       if elements > max {
-        raise @proto.ProtocolError::InvalidInput("too many array elements")
+        raise InvalidInput("too many array elements")
       }
     }
     elements = elements * len
@@ -628,9 +612,7 @@ pub fn ArrayValues::next(
 ) -> Bytes?? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() != 0 {
-      raise @proto.ProtocolError::InvalidInput(
-        "invalid message length: arrayvalue not drained",
-      )
+      raise InvalidInput("invalid message length: arrayvalue not drained")
     }
     return None
   }
@@ -639,13 +621,13 @@ pub fn ArrayValues::next(
   let len = r.read_i32_be()
   if len < 0 {
     if len != -1 {
-      raise @proto.ProtocolError::InvalidInput("invalid value length")
+      raise InvalidInput("invalid value length")
     }
     self.buf = self.buf[4:]
     return Some(None)
   }
   if self.buf.length() < 4 + len {
-    raise @proto.ProtocolError::InvalidInput("invalid value length")
+    raise InvalidInput("invalid value length")
   }
   let val = self.buf[4:4 + len]
   self.buf = self.buf[4 + len:]
@@ -676,14 +658,14 @@ pub fn range_to_sql(
   let payload = @buffer.new()
   let mut tag : Byte = 0
   match write_bound(lower, payload) {
-    RangeBound::Inclusive(_) => tag = tag | range_lower_inclusive
-    RangeBound::Exclusive(_) => ()
-    RangeBound::Unbounded => tag = tag | range_lower_unbounded
+    Inclusive(_) => tag = tag | range_lower_inclusive
+    Exclusive(_) => ()
+    Unbounded => tag = tag | range_lower_unbounded
   }
   match write_bound(upper, payload) {
-    RangeBound::Inclusive(_) => tag = tag | range_upper_inclusive
-    RangeBound::Exclusive(_) => ()
-    RangeBound::Unbounded => tag = tag | range_upper_unbounded
+    Inclusive(_) => tag = tag | range_upper_inclusive
+    Exclusive(_) => ()
+    Unbounded => tag = tag | range_upper_unbounded
   }
   buf.write_byte(tag)
   buf.write_bytes(payload.to_bytes())
@@ -696,18 +678,18 @@ fn write_bound(
 ) -> RangeBound[Unit] raise @proto.ProtocolError {
   let payload = @buffer.new()
   let (null, ret) = match bound(payload) {
-    RangeBound::Inclusive(null) => (Some(null), RangeBound::Inclusive(()))
-    RangeBound::Exclusive(null) => (Some(null), RangeBound::Exclusive(()))
-    RangeBound::Unbounded => (None, RangeBound::Unbounded)
+    Inclusive(null) => (Some(null), RangeBound::Inclusive(()))
+    Exclusive(null) => (Some(null), Exclusive(()))
+    Unbounded => (None, Unbounded)
   }
   match null {
     Some(n) => {
       let len = match n {
-        @proto.IsNull::No => @proto.i32_from_usize(payload.length())
-        @proto.IsNull::Yes => -1
+        No => @proto.i32_from_usize(payload.length())
+        Yes => -1
       }
       buf.write_int_be(len)
-      if n is @proto.IsNull::No {
+      if n is No {
         buf.write_bytes(payload.to_bytes())
       }
     }
@@ -723,9 +705,9 @@ pub fn range_from_sql(buf : BytesView) -> Range raise @proto.ProtocolError {
   let tag = r.read_u8()
   if tag == range_empty {
     if !r.is_empty() {
-      raise @proto.ProtocolError::InvalidInput("invalid message size")
+      raise InvalidInput("invalid message size")
     }
-    return Range::Empty
+    return Empty
   }
   let rest0 = buf[1:]
   let (lower, rest1) = read_bound(
@@ -735,9 +717,9 @@ pub fn range_from_sql(buf : BytesView) -> Range raise @proto.ProtocolError {
     rest1, tag, range_upper_unbounded, range_upper_inclusive,
   )
   if rest2.length() != 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid message size")
+    raise InvalidInput("invalid message size")
   }
-  Range::Nonempty(lower, upper)
+  Nonempty(lower, upper)
 }
 
 ///|
@@ -748,26 +730,26 @@ fn read_bound(
   inclusive : Byte,
 ) -> (RangeBound[Bytes?], BytesView) raise @proto.ProtocolError {
   if (tag & unbounded) != 0 {
-    return (RangeBound::Unbounded, buf)
+    return (Unbounded, buf)
   }
   let r = @proto.ByteReader::new(buf)
   let len = r.read_i32_be()
   if len < 0 {
     let rest = buf[4:]
     if (tag & inclusive) != 0 {
-      return (RangeBound::Inclusive(None), rest)
+      return (Inclusive(None), rest)
     }
-    return (RangeBound::Exclusive(None), rest)
+    return (Exclusive(None), rest)
   }
   if buf.length() < 4 + len {
-    raise @proto.ProtocolError::InvalidInput("invalid message size")
+    raise InvalidInput("invalid message size")
   }
   let value = buf[4:4 + len].to_owned()
   let rest = buf[4 + len:]
   if (tag & inclusive) != 0 {
-    (RangeBound::Inclusive(Some(value)), rest)
+    (Inclusive(Some(value)), rest)
   } else {
-    (RangeBound::Exclusive(Some(value)), rest)
+    (Exclusive(Some(value)), rest)
   }
 }
 
@@ -792,7 +774,7 @@ pub fn point_from_sql(buf : BytesView) -> Point raise @proto.ProtocolError {
   let x = r.read_f64_be()
   let y = r.read_f64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   { x, y }
 }
@@ -827,7 +809,7 @@ pub fn box_from_sql(buf : BytesView) -> Box raise @proto.ProtocolError {
   let x2 = r.read_f64_be()
   let y2 = r.read_f64_be()
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   { upper_right: { x: x1, y: y1 }, lower_left: { x: x2, y: y2 } }
 }
@@ -866,11 +848,11 @@ pub fn path_from_sql(buf : BytesView) -> Path raise @proto.ProtocolError {
   let closed = r.read_u8() != 0
   let points = r.read_i32_be()
   if points < 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid point count")
+    raise InvalidInput("invalid point count")
   }
   let payload_len = buf.length() - 5
   if payload_len < 0 || payload_len % 16 != 0 || payload_len / 16 != points {
-    raise @proto.ProtocolError::InvalidInput("invalid message length")
+    raise InvalidInput("invalid message length")
   }
   { closed, points, buf: buf[5:] }
 }
@@ -901,9 +883,7 @@ pub struct PathPoints {
 pub fn PathPoints::next(self : PathPoints) -> Point? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() != 0 {
-      raise @proto.ProtocolError::InvalidInput(
-        "invalid message length: path points not drained",
-      )
+      raise InvalidInput("invalid message length: path points not drained")
     }
     return None
   }
@@ -938,7 +918,7 @@ pub fn Ipv4Addr::from_octets(
   octets : BytesView,
 ) -> Ipv4Addr raise @proto.ProtocolError {
   if octets.length() != 4 {
-    raise @proto.ProtocolError::InvalidInput("invalid IPv4 length")
+    raise InvalidInput("invalid IPv4 length")
   }
   { octets: octets.to_owned() }
 }
@@ -949,7 +929,7 @@ pub fn Ipv6Addr::from_octets(
   octets : BytesView,
 ) -> Ipv6Addr raise @proto.ProtocolError {
   if octets.length() != 16 {
-    raise @proto.ProtocolError::InvalidInput("invalid IPv6 length")
+    raise InvalidInput("invalid IPv6 length")
   }
   { octets: octets.to_owned() }
 }
@@ -998,28 +978,28 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
   let addr = match family {
     _ if family == pgsql_af_inet => {
       if netmask > 32 {
-        raise @proto.ProtocolError::InvalidInput("invalid IPv4 netmask")
+        raise InvalidInput("invalid IPv4 netmask")
       }
       if len != 4 {
-        raise @proto.ProtocolError::InvalidInput("invalid IPv4 address length")
+        raise InvalidInput("invalid IPv4 address length")
       }
       let octets = r.read_bytes(4).to_owned()
       IpAddr::V4({ octets, })
     }
     _ if family == pgsql_af_inet6 => {
       if netmask > 128 {
-        raise @proto.ProtocolError::InvalidInput("invalid IPv6 netmask")
+        raise InvalidInput("invalid IPv6 netmask")
       }
       if len != 16 {
-        raise @proto.ProtocolError::InvalidInput("invalid IPv6 address length")
+        raise InvalidInput("invalid IPv6 address length")
       }
       let octets = r.read_bytes(16).to_owned()
-      IpAddr::V6({ octets, })
+      V6({ octets, })
     }
-    _ => raise @proto.ProtocolError::InvalidInput("invalid IP family")
+    _ => raise InvalidInput("invalid IP family")
   }
   if !r.is_empty() {
-    raise @proto.ProtocolError::InvalidInput("invalid buffer size")
+    raise InvalidInput("invalid buffer size")
   }
   { addr, netmask }
 }
@@ -1043,8 +1023,7 @@ pub fn ltree_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 pub fn ltree_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
     [b'\x01', .. rest] => rest.to_owned()
-    _ =>
-      raise @proto.ProtocolError::InvalidInput("ltree version 1 only supported")
+    _ => raise InvalidInput("ltree version 1 only supported")
   }
 }
 
@@ -1060,10 +1039,7 @@ pub fn lquery_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 pub fn lquery_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
     [b'\x01', .. rest] => rest.to_owned()
-    _ =>
-      raise @proto.ProtocolError::InvalidInput(
-        "lquery version 1 only supported",
-      )
+    _ => raise InvalidInput("lquery version 1 only supported")
   }
 }
 
@@ -1079,9 +1055,6 @@ pub fn ltxtquery_to_sql(v : BytesView, buf : @buffer.Buffer) -> Unit {
 pub fn ltxtquery_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
   match buf {
     [b'\x01', .. rest] => rest.to_owned()
-    _ =>
-      raise @proto.ProtocolError::InvalidInput(
-        "ltxtquery version 1 only supported",
-      )
+    _ => raise InvalidInput("ltxtquery version 1 only supported")
   }
 }

@@ -188,7 +188,7 @@ pub fn PoolBuilder::post_recycle(
 /// during checkout.
 pub fn PoolBuilder::build(self : PoolBuilder) -> Pool raise {
   validate_pool_config(self.pool_config)
-  let slots : @async.Queue[Unit] = @async.Queue(kind=Unbounded)
+  let slots : @async.Queue[Unit] = Queue(kind=Unbounded)
   for _ in 0..<self.pool_config.max_size {
     ignore(slots.try_put(()))
   }

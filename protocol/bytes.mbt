@@ -8,7 +8,7 @@
 /// fields, such as parameter counts and format-code counts.
 pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
   if len < 0 || len > 0x7fff {
-    raise ProtocolError::Overflow("value too large to transmit")
+    raise Overflow("value too large to transmit")
   }
   Int16::from_int(len)
 }
@@ -21,7 +21,7 @@ pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
 /// surrounding message format.
 pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
   if len < 0 || len > 0x7fff_ffff {
-    raise ProtocolError::Overflow("value too large to transmit")
+    raise Overflow("value too large to transmit")
   }
   len
 }
@@ -31,7 +31,7 @@ pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
 /// fields.
 pub fn checked_i32(value : Int) -> Int raise ProtocolError {
   if value < -0x8000_0000 || value > 0x7fff_ffff {
-    raise ProtocolError::Overflow("value out of range for i32")
+    raise Overflow("value out of range for i32")
   }
   value
 }
@@ -41,7 +41,7 @@ pub fn checked_i32(value : Int) -> Int raise ProtocolError {
 /// fields.
 pub fn checked_i16(value : Int) -> Int16 raise ProtocolError {
   if value < -0x8000 || value > 0x7fff {
-    raise ProtocolError::Overflow("value out of range for i16")
+    raise Overflow("value out of range for i16")
   }
   Int16::from_int(value)
 }
@@ -92,7 +92,7 @@ pub fn ByteReader::is_empty(self : ByteReader) -> Bool {
 /// field.
 fn ByteReader::ensure(self : ByteReader, n : Int) -> Unit raise ProtocolError {
   if self.remaining() < n {
-    raise ProtocolError::UnexpectedEof("unexpected EOF")
+    raise UnexpectedEof("unexpected EOF")
   }
 }
 
@@ -194,7 +194,7 @@ pub fn ByteReader::read_bytes(
   len : Int,
 ) -> BytesView raise ProtocolError {
   if len < 0 {
-    raise ProtocolError::InvalidInput("invalid length")
+    raise InvalidInput("invalid length")
   }
   self.ensure(len)
   let start = self.idx
@@ -224,7 +224,7 @@ fn find_null(buf : BytesView, start : Int) -> Int raise ProtocolError {
     }
     i = i + 1
   }
-  raise ProtocolError::UnexpectedEof("unexpected EOF")
+  raise UnexpectedEof("unexpected EOF")
 }
 
 ///|

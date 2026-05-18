@@ -28,7 +28,7 @@ fn make_text_row(type_ : Type, value : String) -> Row {
       type_,
       type_size: -1,
       type_modifier: -1,
-      format: WireFormat::Text,
+      format: Text,
     },
   ]
   let values : Array[Bytes?] = [Some(@proto.utf8_encode(value))]

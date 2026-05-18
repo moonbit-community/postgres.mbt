@@ -7,7 +7,7 @@ struct TextOnlyParam {
 
 ///|
 impl @client.ToSql for TextOnlyParam with format(_, _) {
-  @client.WireFormat::Text
+  Text
 }
 
 ///|

@@ -104,8 +104,8 @@ fn encode_param(param : &ToSql, type_ : Type) -> EncodedParam raise {
   }
   let payload = @buffer.new()
   let value = match param.to_sql(type_, payload) {
-    @proto.IsNull::Yes => None
-    @proto.IsNull::No => Some(payload.to_bytes())
+    Yes => None
+    No => Some(payload.to_bytes())
   }
   { format: param.format(type_), value }
 }
@@ -117,10 +117,10 @@ fn write_encoded_param(
   payload : @buffer.Buffer,
 ) -> @proto.IsNull {
   match param.value {
-    None => @proto.IsNull::Yes
+    None => Yes
     Some(bytes) => {
       payload.write_bytes(bytes)
-      @proto.IsNull::No
+      No
     }
   }
 }

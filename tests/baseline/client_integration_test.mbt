@@ -5,8 +5,8 @@ async fn assert_auth_ok(
   config : IntegrationConfig,
   user : String,
   password : String,
-  ssl_mode? : @client.SslMode = @client.SslMode::Disable,
-  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
+  ssl_mode? : @client.SslMode = Disable,
+  channel_binding? : @client.ChannelBinding = Disable,
   application_name? : String = "moonbit-postgres",
 ) -> Unit {
   @async.with_task_group(group => {
@@ -81,7 +81,7 @@ async fn collect_driver_async_messages(
     guard connection.next_message() is Some(message) else {
       fail("expected async message")
     }
-    if message is @client.AsyncMessage::ParameterStatus(_, _) {
+    if message is ParameterStatus(_, _) {
       continue
     }
     messages.push(message)
@@ -254,20 +254,20 @@ async fn assert_json_roundtrip(
   let from_literal : Json = client
     .query_one("select \{literal}::\{sql_type} as value")
     .get_name("value")
-  assert_eq(from_literal, expected)
+  @debug.assert_eq(from_literal, expected)
 
   let params : Array[&@client.ToSql] = [expected as &@client.ToSql]
   let from_param : Json = client
     .query_one("select $1::\{sql_type} as value", params~)
     .get_name("value")
-  assert_eq(from_param, expected)
+  @debug.assert_eq(from_param, expected)
 
   let typed_rows = client
     .query_typed("select $1::\{sql_type} as value", [param_type], params~)
     .collect()
   assert_eq(typed_rows.length(), 1)
   let from_typed : Json = typed_rows[0].get_name("value")
-  assert_eq(from_typed, expected)
+  @debug.assert_eq(from_typed, expected)
 }
 
 ///|
@@ -376,7 +376,7 @@ async test "integration tls verify_ca connects and queries" {
   assert_tls_query_ok(
     as_client_config(
       config,
-      ssl_mode=@client.SslMode::VerifyCa,
+      ssl_mode=VerifyCa,
       application_name="moonbit-postgres-tls-verify-ca",
     ),
   )
@@ -390,7 +390,7 @@ async test "integration tls verify_full connects and queries" {
   assert_tls_query_ok(
     as_client_config(
       config,
-      ssl_mode=@client.SslMode::VerifyFull,
+      ssl_mode=VerifyFull,
       application_name="moonbit-postgres-tls-verify-full",
     ),
   )
@@ -407,7 +407,7 @@ async test "integration tls rejects untrusted server certificate" {
     try? @client.connect(
       as_client_config(
         config,
-        ssl_mode=@client.SslMode::VerifyFull,
+        ssl_mode=VerifyFull,
         application_name="moonbit-postgres-tls-untrusted",
       ),
     ),
@@ -431,7 +431,7 @@ async test "integration tls verify_ca ignores hostname mismatch" {
       config,
       host="db.invalid",
       hostaddr=config.host,
-      ssl_mode=@client.SslMode::VerifyCa,
+      ssl_mode=VerifyCa,
       application_name="moonbit-postgres-tls-verify-ca-host-mismatch",
     ),
   )
@@ -449,7 +449,7 @@ async test "integration tls verify_full rejects hostname mismatch" {
         config,
         host="db.invalid",
         hostaddr=config.host,
-        ssl_mode=@client.SslMode::VerifyFull,
+        ssl_mode=VerifyFull,
         application_name="moonbit-postgres-tls-verify-full-host-mismatch",
       ),
     ),
@@ -472,7 +472,7 @@ async test "integration tls verify_full accepts explicit hostaddr identity" {
       config,
       host="",
       hostaddr=config.host,
-      ssl_mode=@client.SslMode::VerifyFull,
+      ssl_mode=VerifyFull,
       application_name="moonbit-postgres-tls-verify-full-hostaddr",
     ),
   )
@@ -491,7 +491,7 @@ async test "integration tls verify_full requires explicit host or hostaddr" {
         database=config.database,
         password=config.password,
         port=config.port,
-        ssl_mode=@client.SslMode::VerifyFull,
+        ssl_mode=VerifyFull,
         application_name="moonbit-postgres-tls-verify-full-missing-host",
       ),
     ),
@@ -507,7 +507,7 @@ async test "integration tls sslrootcert system requires verify_full" {
     try? @client.connect(
       as_client_config(
         config,
-        ssl_mode=@client.SslMode::VerifyCa,
+        ssl_mode=VerifyCa,
         ssl_root_cert="system",
         application_name="moonbit-postgres-tls-system-root-invalid",
       ),
@@ -524,7 +524,7 @@ async test "integration tls sslrootcert system works with verify_full" {
   assert_tls_query_ok(
     as_client_config(
       config,
-      ssl_mode=@client.SslMode::VerifyFull,
+      ssl_mode=VerifyFull,
       ssl_root_cert="system",
       application_name="moonbit-postgres-tls-system-root",
     ),
@@ -583,7 +583,7 @@ async test "integration scram channel binding prefer falls back without tls" {
     config,
     "moon_scram",
     "moonpass",
-    channel_binding=@client.ChannelBinding::Prefer,
+    channel_binding=Prefer,
     application_name="moonbit-postgres-scram-channel-binding-prefer-plain",
   )
 }
@@ -598,7 +598,7 @@ async test "integration scram channel binding require rejects plaintext" {
         config,
         "moon_scram",
         password=Some(config.password),
-        channel_binding=@client.ChannelBinding::Require,
+        channel_binding=Require,
         application_name="moonbit-postgres-scram-channel-binding-require-plain",
       ),
     ),
@@ -618,8 +618,8 @@ async test "integration scram channel binding require works over tls" {
     config,
     "moon_scram",
     "moonpass",
-    ssl_mode=@client.SslMode::VerifyFull,
-    channel_binding=@client.ChannelBinding::Require,
+    ssl_mode=VerifyFull,
+    channel_binding=Require,
     application_name="moonbit-postgres-scram-channel-binding-require-tls",
   )
 }
@@ -635,7 +635,7 @@ async test "integration channel binding require rejects plain password auth" {
         config,
         "moon_password",
         password=Some(config.password),
-        channel_binding=@client.ChannelBinding::Require,
+        channel_binding=Require,
         application_name="moonbit-postgres-channel-binding-require-password",
       ),
     ),
@@ -812,34 +812,30 @@ async test "integration simple query supports multiple result sets" {
     let stream = client.simple_query(
       "select 'left'::text as side, null::text as missing; select 'right'::text as side",
     )
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::RowDescription(left_columns)) else {
+    guard stream.next() is Some(RowDescription(left_columns)) else {
       fail("expected first row description")
     }
-    guard stream.next() is Some(@client.SimpleQueryMessage::Row(left_row)) else {
+    guard stream.next() is Some(Row(left_row)) else {
       fail("expected first row")
     }
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::CommandComplete(left_tag)) else {
+    guard stream.next() is Some(CommandComplete(left_tag)) else {
       fail("expected first command tag")
     }
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::RowDescription(right_columns)) else {
+    guard stream.next() is Some(RowDescription(right_columns)) else {
       fail("expected second row description")
     }
-    guard stream.next() is Some(@client.SimpleQueryMessage::Row(right_row)) else {
+    guard stream.next() is Some(Row(right_row)) else {
       fail("expected second row")
     }
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::CommandComplete(right_tag)) else {
+    guard stream.next() is Some(CommandComplete(right_tag)) else {
       fail("expected second command tag")
     }
     @debug.assert_eq(stream.next(), None)
-    assert_eq(left_columns, ["side", "missing"])
+    @debug.assert_eq(left_columns, ["side", "missing"])
     @debug.assert_eq(try! left_row.get_name("side"), Some("left"))
     @debug.assert_eq(try! left_row.get_name("missing"), None)
     assert_eq(left_tag, "SELECT 1")
-    assert_eq(right_columns, ["side"])
+    @debug.assert_eq(right_columns, ["side"])
     @debug.assert_eq(try! right_row.get_name("side"), Some("right"))
     assert_eq(right_tag, "SELECT 1")
 
@@ -861,14 +857,11 @@ async test "integration simple query supports pipelining" {
     let stream = client.simple_query(
       "select generate_series(1, 3)::int4 as value; select 'done'::text as marker",
     )
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+    guard stream.next() is Some(RowDescription(columns)) else {
       fail("expected row description")
     }
-    assert_eq(columns, ["value"])
-    guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
-      fail("expected first row")
-    }
+    @debug.assert_eq(columns, ["value"])
+    guard stream.next() is Some(Row(row)) else { fail("expected first row") }
     @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     // If the simple-query stream held the connection until full completion, this concurrent query would stay blocked.
@@ -905,14 +898,11 @@ async test "integration simple query detach unblocks later requests" {
     let stream = client.simple_query(
       "select generate_series(1, 16)::int4 as value order by value",
     )
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+    guard stream.next() is Some(RowDescription(columns)) else {
       fail("expected row description")
     }
-    assert_eq(columns, ["value"])
-    guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
-      fail("expected first row")
-    }
+    @debug.assert_eq(columns, ["value"])
+    guard stream.next() is Some(Row(row)) else { fail("expected first row") }
     @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     let task = group.spawn(no_wait=true, () => {
@@ -955,14 +945,11 @@ async test "integration simple query detach swallows trailing database error" {
     group.spawn_bg(() => connection.run())
 
     let stream = client.simple_query("select 'ok'::text as value; select 1 / 0")
-    guard stream.next()
-      is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+    guard stream.next() is Some(RowDescription(columns)) else {
       fail("expected row description")
     }
-    assert_eq(columns, ["value"])
-    guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
-      fail("expected first row")
-    }
+    @debug.assert_eq(columns, ["value"])
+    guard stream.next() is Some(Row(row)) else { fail("expected first row") }
     @debug.assert_eq(try! row.get_name("value"), Some("ok"))
 
     stream.detach()
@@ -1346,16 +1333,16 @@ async test "integration notice and notification surface as async messages" {
 
     // Filter out parameter-status messages first so the test can focus only on notice and notification payloads.
     let messages = collect_driver_async_messages(connection, 4)
-    guard messages[0] is @client.AsyncMessage::Notice(first_notice) else {
+    guard messages[0] is Notice(first_notice) else {
       fail("expected first notice")
     }
-    guard messages[1] is @client.AsyncMessage::Notice(second_notice) else {
+    guard messages[1] is Notice(second_notice) else {
       fail("expected second notice")
     }
-    guard messages[2] is @client.AsyncMessage::Notification(first_notification) else {
+    guard messages[2] is Notification(first_notification) else {
       fail("expected first notification")
     }
-    guard messages[3] is @client.AsyncMessage::Notification(second_notification) else {
+    guard messages[3] is Notification(second_notification) else {
       fail("expected second notification")
     }
     assert_eq(first_notice.message, "integration notice 1")
@@ -1401,9 +1388,7 @@ async test "integration copy out" {
         }
       }
     }
-    assert_true(
-      stream.formats == [@client.WireFormat::Text, @client.WireFormat::Text],
-    )
+    assert_true(stream.formats == [Text, Text])
     assert_true(chunks.length() >= 1)
     assert_eq(payload.contents(), b"1\tjim\n2\tjoe\n")
 
@@ -1431,9 +1416,7 @@ async test "integration copy out supports pipelining" {
     let stream = client.copy_out(
       "copy moon_driver_copy_out_finish (id, name) to stdout",
     )
-    assert_true(
-      stream.formats == [@client.WireFormat::Text, @client.WireFormat::Text],
-    )
+    assert_true(stream.formats == [Text, Text])
     guard stream.next() is Some(chunk) else { fail("expected copy chunk") }
     assert_true(chunk.length() > 0)
 
@@ -2029,10 +2012,10 @@ async test "integration resolves custom type metadata" {
     let mood_type = mood_stream.columns[0].type_
     ignore(mood_stream.finish())
     assert_eq(mood_type.name, "moon_driver_mood")
-    guard mood_type.kind is @client.Kind::Enum(labels) else {
+    guard mood_type.kind is Enum(labels) else {
       fail("expected enum type metadata")
     }
-    assert_eq(labels, ["sad", "happy"])
+    @debug.assert_eq(labels, ["sad", "happy"])
 
     let pair_stream = client.query(
       "select row(1, 'hi')::pg_temp.moon_driver_pair as pair",
@@ -2040,17 +2023,19 @@ async test "integration resolves custom type metadata" {
     let pair_type = pair_stream.columns[0].type_
     ignore(pair_stream.finish())
     assert_eq(pair_type.name, "moon_driver_pair")
-    guard pair_type.kind is @client.Kind::Composite(fields) else {
+    guard pair_type.kind is Composite(fields) else {
       fail("expected composite type metadata")
     }
-    assert_eq(fields.map(field => field.name), ["left_value", "right_value"])
-    assert_eq(fields.map(field => field.type_oid), [23U, 25U])
+    @debug.assert_eq(fields.map(field => field.name), [
+      "left_value", "right_value",
+    ])
+    @debug.assert_eq(fields.map(field => field.type_oid), [23U, 25U])
 
     let domain_type = client.prepare(
         "select $1::pg_temp.moon_driver_name as name",
       ).params[0]
     assert_eq(domain_type.name, "moon_driver_name")
-    guard domain_type.kind is @client.Kind::Domain(base_oid) else {
+    guard domain_type.kind is Domain(base_oid) else {
       fail("expected domain type metadata")
     }
     assert_eq(base_oid, 25U)
@@ -2059,7 +2044,7 @@ async test "integration resolves custom type metadata" {
     let range_type = range_stream.columns[0].type_
     ignore(range_stream.finish())
     assert_eq(range_type.name, "int4range")
-    guard range_type.kind is @client.Kind::Range(subtype_oid) else {
+    guard range_type.kind is Range(subtype_oid) else {
       fail("expected range type metadata")
     }
     assert_eq(subtype_oid, 23U)

@@ -68,18 +68,17 @@ async fn WireConnection::collect_until_ready(
   let messages : Array[@backend.Message] = []
   for message = self.read_message() {
     match message {
-      @backend.Message::ReadyForQuery(body) =>
-        self.transaction_status = body.status
-      @backend.Message::ParameterStatus(body) =>
+      ReadyForQuery(body) => self.transaction_status = body.status
+      ParameterStatus(body) =>
         self.parameters[body.name_str()] = body.value_str()
-      @backend.Message::BackendKeyData(body) => {
+      BackendKeyData(body) => {
         self.process_id = body.process_id
         self.secret_key = body.secret_key
       }
       _ => ()
     }
     messages.push(message)
-    if message is @backend.Message::ReadyForQuery(_) {
+    if message is ReadyForQuery(_) {
       break messages
     } else {
       continue self.read_message()
@@ -146,44 +145,44 @@ async fn wire_connect(
   let mut scram : @auth.ScramSha256? = None
   for message = connection.read_message() {
     match message {
-      @backend.Message::AuthenticationOk => continue connection.read_message()
-      @backend.Message::AuthenticationCleartextPassword => {
+      AuthenticationOk => continue connection.read_message()
+      AuthenticationCleartextPassword => {
         wire_send_password(connection, config.password)
         continue connection.read_message()
       }
-      @backend.Message::AuthenticationMd5Password(_) =>
+      AuthenticationMd5Password(_) =>
         fail(
           "protocol integration tests do not support deprecated md5 authentication",
         )
-      @backend.Message::AuthenticationSasl(body) => {
+      AuthenticationSasl(body) => {
         scram = Some(wire_begin_scram(connection, body, config.password))
         continue connection.read_message()
       }
-      @backend.Message::AuthenticationSaslContinue(body) => {
+      AuthenticationSaslContinue(body) => {
         wire_continue_scram(connection, scram, body.data())
         continue connection.read_message()
       }
-      @backend.Message::AuthenticationSaslFinal(body) => {
+      AuthenticationSaslFinal(body) => {
         wire_finish_scram(scram, body.data())
         continue connection.read_message()
       }
-      @backend.Message::ParameterStatus(body) => {
+      ParameterStatus(body) => {
         ignore(body.name_bytes())
         ignore(body.value_bytes())
         connection.parameters[body.name_str()] = body.value_str()
         continue connection.read_message()
       }
-      @backend.Message::BackendKeyData(body) => {
+      BackendKeyData(body) => {
         connection.process_id = body.process_id
         connection.secret_key = body.secret_key
         continue connection.read_message()
       }
-      @backend.Message::NoticeResponse(_) => continue connection.read_message()
-      @backend.Message::ReadyForQuery(body) => {
+      NoticeResponse(_) => continue connection.read_message()
+      ReadyForQuery(body) => {
         connection.transaction_status = body.status
         break connection
       }
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         let err = parse_wire_database_error(body.fields())
         fail("startup failed: \{err.message}")
       }
@@ -282,10 +281,10 @@ fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 /// `None` becomes SQL `NULL`, encoded as length `-1`.
 fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull {
   match param {
-    None => @proto.IsNull::Yes
+    None => Yes
     Some(value) => {
       buf.write_bytes(@proto.utf8_encode(value))
-      @proto.IsNull::No
+      No
     }
   }
 }
@@ -294,7 +293,7 @@ fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull 
 /// Centralize UTF-8 decoding for protocol tests so each test does not repeat the same error handling.
 fn wire_decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
+    _ => raise InvalidInput("invalid UTF-8")
   }
 }
 
@@ -364,7 +363,7 @@ fn find_notification_response(
   messages : Array[@backend.Message],
 ) -> @backend.NotificationResponseBody raise {
   for message in messages {
-    if message is @backend.Message::NotificationResponse(body) {
+    if message is NotificationResponse(body) {
       return body
     }
   }
@@ -377,7 +376,7 @@ fn find_notice_response(
   messages : Array[@backend.Message],
 ) -> @backend.NoticeResponseBody raise {
   for message in messages {
-    if message is @backend.Message::NoticeResponse(body) {
+    if message is NoticeResponse(body) {
       return body
     }
   }
@@ -478,7 +477,7 @@ async test "integration protocol startup packet header parsing" {
   }
   assert_eq(parsed.consumed, packet.length())
   match parsed.message {
-    @backend.Message::AuthenticationSasl(body) => {
+    AuthenticationSasl(body) => {
       let mechanisms = body.mechanisms()
       @debug.assert_eq(try! mechanisms.next_str(), Some("SCRAM-SHA-256"))
       @debug.assert_eq(try! mechanisms.next(), None)
@@ -546,14 +545,14 @@ async test "integration protocol empty query and no data" {
   defer wire.close()
 
   let empty = wire.simple_query("")
-  assert_true(empty[0] is @backend.Message::EmptyQueryResponse)
-  assert_true(empty[1] is @backend.Message::ReadyForQuery(_))
+  assert_true(empty[0] is EmptyQueryResponse)
+  assert_true(empty[1] is ReadyForQuery(_))
 
   let create = wire.simple_query(
     "create temp table wire_no_data (value int4 not null)",
   )
   match create[0] {
-    @backend.Message::CommandComplete(body) =>
+    CommandComplete(body) =>
       assert_eq(body.tag_bytes().to_owned(), b"CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
@@ -568,9 +567,9 @@ async test "integration protocol empty query and no data" {
   @frontend.sync(buf)
 
   let messages = wire.send_and_collect(buf)
-  assert_true(messages[0] is @backend.Message::ParseComplete)
+  assert_true(messages[0] is ParseComplete)
   match messages[1] {
-    @backend.Message::ParameterDescription(body) => {
+    ParameterDescription(body) => {
       let parameters = body.parameters()
       @debug.assert_eq(try! parameters.next(), Some(23U))
       @debug.assert_eq(try! parameters.next(), None)
@@ -578,8 +577,8 @@ async test "integration protocol empty query and no data" {
     }
     _ => fail("expected ParameterDescription")
   }
-  assert_true(messages[2] is @backend.Message::NoData)
-  assert_true(messages[3] is @backend.Message::ReadyForQuery(_))
+  assert_true(messages[2] is NoData)
+  assert_true(messages[3] is ReadyForQuery(_))
 }
 
 ///|
@@ -597,7 +596,7 @@ async test "integration protocol copy out flush and terminate" {
   assert_true(wire.secret_key != 0)
   assert_eq(wire.transaction_status, b'I')
   match messages[0] {
-    @backend.Message::CopyOutResponse(body) => {
+    CopyOutResponse(body) => {
       assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
       @debug.assert_eq(try! formats.next(), Some(0))
@@ -614,19 +613,19 @@ async test "integration protocol copy out flush and terminate" {
   let mut saw_ready = false
   for message in messages {
     match message {
-      @backend.Message::CopyData(body) => {
+      CopyData(body) => {
         saw_copy_data = true
         let data_len = body.data().length()
         let bytes = body.storage
         assert_eq(bytes.length(), data_len)
         payload.write_bytes(bytes)
       }
-      @backend.Message::CopyDone => saw_copy_done = true
-      @backend.Message::CommandComplete(body) => {
+      CopyDone => saw_copy_done = true
+      CommandComplete(body) => {
         saw_command_complete = true
         assert_eq(try! body.tag_str(), "COPY 1")
       }
-      @backend.Message::ReadyForQuery(_) => saw_ready = true
+      ReadyForQuery(_) => saw_ready = true
       _ => ()
     }
   }
@@ -655,8 +654,7 @@ async test "integration protocol copy in success" {
     "create temp table wire_copy_in (value text not null)",
   )
   match create[0] {
-    @backend.Message::CommandComplete(body) =>
-      assert_eq(try! body.tag_str(), "CREATE TABLE")
+    CommandComplete(body) => assert_eq(try! body.tag_str(), "CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
 
@@ -664,7 +662,7 @@ async test "integration protocol copy in success" {
   @frontend.query(b"copy wire_copy_in from stdin"[:], start)
   wire.write_buffer(start)
   match wire.read_message() {
-    @backend.Message::CopyInResponse(body) => {
+    CopyInResponse(body) => {
       assert_eq(body.format.to_int(), 0)
       let formats = body.column_formats()
       @debug.assert_eq(try! formats.next(), Some(0))
@@ -682,8 +680,7 @@ async test "integration protocol copy in success" {
   @frontend.copy_done(copy_payload)
   let copy_messages = wire.send_and_collect(copy_payload)
   match copy_messages[0] {
-    @backend.Message::CommandComplete(body) =>
-      assert_eq(try! body.tag_str(), "COPY 2")
+    CommandComplete(body) => assert_eq(try! body.tag_str(), "COPY 2")
     _ => fail("expected COPY command complete")
   }
 
@@ -691,7 +688,7 @@ async test "integration protocol copy in success" {
     "select string_agg(value, ',' order by value) as values from wire_copy_in",
   )
   match verify[1] {
-    @backend.Message::DataRow(body) =>
+    DataRow(body) =>
       @debug.assert_eq(data_row_texts(body), [Some("alpha,beta")])
     _ => fail("expected DataRow")
   }
@@ -708,21 +705,20 @@ async test "integration protocol copy fail surfaces backend error" {
     "create temp table wire_copy_fail (value text not null)",
   )
   match create[0] {
-    @backend.Message::CommandComplete(body) =>
-      assert_eq(try! body.tag_str(), "CREATE TABLE")
+    CommandComplete(body) => assert_eq(try! body.tag_str(), "CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
 
   let start = @buffer.new()
   @frontend.query(b"copy wire_copy_fail from stdin"[:], start)
   wire.write_buffer(start)
-  assert_true(wire.read_message() is @backend.Message::CopyInResponse(_))
+  assert_true(wire.read_message() is CopyInResponse(_))
 
   let fail_buf = @buffer.new()
   @frontend.copy_fail(b"integration copy failure"[:], fail_buf)
   let fail_messages = wire.send_and_collect(fail_buf)
   match fail_messages[0] {
-    @backend.Message::ErrorResponse(body) => {
+    ErrorResponse(body) => {
       let err = parse_wire_database_error(body.fields())
       @debug.assert_eq(err.severity, Some("ERROR"))
       assert_true(err.code is Some(_))
@@ -732,7 +728,7 @@ async test "integration protocol copy fail surfaces backend error" {
     }
     _ => fail("expected ErrorResponse")
   }
-  assert_true(fail_messages[1] is @backend.Message::ReadyForQuery(_))
+  assert_true(fail_messages[1] is ReadyForQuery(_))
 }
 
 ///|
@@ -751,9 +747,9 @@ async test "integration protocol describe close and parameter description" {
   @frontend.sync(buf)
 
   let messages = wire.send_and_collect(buf)
-  assert_true(messages[0] is @backend.Message::ParseComplete)
+  assert_true(messages[0] is ParseComplete)
   match messages[1] {
-    @backend.Message::ParameterDescription(body) => {
+    ParameterDescription(body) => {
       let parameters = body.parameters()
       @debug.assert_eq(try! parameters.next(), Some(23U))
       @debug.assert_eq(try! parameters.next(), None)
@@ -761,7 +757,7 @@ async test "integration protocol describe close and parameter description" {
     _ => fail("expected ParameterDescription")
   }
   match messages[2] {
-    @backend.Message::RowDescription(body) => {
+    RowDescription(body) => {
       let fields = body.fields()
       let first_field = try! fields.next()
       match first_field {
@@ -777,8 +773,8 @@ async test "integration protocol describe close and parameter description" {
     }
     _ => fail("expected RowDescription")
   }
-  assert_true(messages[3] is @backend.Message::CloseComplete)
-  assert_true(messages[4] is @backend.Message::ReadyForQuery(_))
+  assert_true(messages[3] is CloseComplete)
+  assert_true(messages[4] is ReadyForQuery(_))
 }
 
 ///|
@@ -796,7 +792,7 @@ async test "integration protocol bind text formats and null row ranges" {
     "create temp table wire_bind_formats (id int4 primary key, note text)",
   )
   match create[0] {
-    @backend.Message::CommandComplete(body) =>
+    CommandComplete(body) =>
       assert_eq(body.tag_bytes().to_owned(), b"CREATE TABLE")
     _ => fail("expected CREATE TABLE")
   }
@@ -805,7 +801,7 @@ async test "integration protocol bind text formats and null row ranges" {
     "insert into wire_bind_formats values (7, null)",
   )
   match insert[0] {
-    @backend.Message::CommandComplete(body) =>
+    CommandComplete(body) =>
       assert_eq(body.tag_bytes().to_owned(), b"INSERT 0 1")
     _ => fail("expected INSERT command complete")
   }
@@ -832,10 +828,10 @@ async test "integration protocol bind text formats and null row ranges" {
   @frontend.sync(buf)
 
   let messages = wire.send_and_collect(buf)
-  assert_true(messages[0] is @backend.Message::ParseComplete)
-  assert_true(messages[1] is @backend.Message::BindComplete)
+  assert_true(messages[0] is ParseComplete)
+  assert_true(messages[1] is BindComplete)
   match messages[2] {
-    @backend.Message::RowDescription(body) => {
+    RowDescription(body) => {
       let fields = body.fields()
       let first = try! fields.next()
       let second = try! fields.next()
@@ -869,7 +865,7 @@ async test "integration protocol bind text formats and null row ranges" {
     _ => fail("expected RowDescription")
   }
   match messages[3] {
-    @backend.Message::DataRow(body) => {
+    DataRow(body) => {
       let ranges = body.ranges()
       let buffer = body.buffer()
       let first_range = try! ranges.next()
@@ -885,11 +881,10 @@ async test "integration protocol bind text formats and null row ranges" {
     _ => fail("expected DataRow")
   }
   match messages[4] {
-    @backend.Message::CommandComplete(body) =>
-      assert_eq(body.tag_bytes().to_owned(), b"SELECT 1")
+    CommandComplete(body) => assert_eq(body.tag_bytes().to_owned(), b"SELECT 1")
     _ => fail("expected SELECT command complete")
   }
-  assert_true(messages[5] is @backend.Message::ReadyForQuery(_))
+  assert_true(messages[5] is ReadyForQuery(_))
 }
 
 ///|
@@ -922,18 +917,18 @@ async test "integration protocol portal suspended" {
   @frontend.sync(buf)
 
   let messages = wire.send_and_collect(buf)
-  assert_true(messages[0] is @backend.Message::ParseComplete)
-  assert_true(messages[1] is @backend.Message::BindComplete)
-  assert_true(messages[2] is @backend.Message::RowDescription(_))
+  assert_true(messages[0] is ParseComplete)
+  assert_true(messages[1] is BindComplete)
+  assert_true(messages[2] is RowDescription(_))
   match messages[3] {
-    @backend.Message::DataRow(body) => {
+    DataRow(body) => {
       assert_true(body.storage.length() > 0)
       @debug.assert_eq(data_row_texts(body), [Some("1")])
     }
     _ => fail("expected DataRow")
   }
-  assert_true(messages[4] is @backend.Message::PortalSuspended)
-  assert_true(messages[5] is @backend.Message::ReadyForQuery(_))
+  assert_true(messages[4] is PortalSuspended)
+  assert_true(messages[5] is ReadyForQuery(_))
 }
 
 ///|
@@ -967,8 +962,7 @@ async test "integration protocol notice and notification getters" {
 
   let listen_messages = wire.simple_query("listen wire_channel")
   match listen_messages[0] {
-    @backend.Message::CommandComplete(body) =>
-      assert_eq(try! body.tag_str(), "LISTEN")
+    CommandComplete(body) => assert_eq(try! body.tag_str(), "LISTEN")
     _ => fail("expected LISTEN command complete")
   }
 

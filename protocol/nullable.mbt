@@ -16,11 +16,11 @@ pub fn write_nullable(
   let payload = @buffer.new()
   let is_null = serializer(payload)
   let size = match is_null {
-    IsNull::No => i32_from_usize(payload.length())
-    IsNull::Yes => -1
+    No => i32_from_usize(payload.length())
+    Yes => -1
   }
   buf.write_int_be(size)
-  if is_null is IsNull::No {
+  if is_null is No {
     buf.write_bytes(payload.to_bytes())
   }
 }

@@ -50,9 +50,9 @@ fn as_client_config(
   config : IntegrationConfig,
   host? : String = config.host,
   hostaddr? : String,
-  ssl_mode? : @client.SslMode = @client.SslMode::Disable,
+  ssl_mode? : @client.SslMode = Disable,
   ssl_root_cert? : String,
-  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
+  channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
   @client.Config::new(
@@ -76,8 +76,8 @@ fn auth_client_config(
   config : IntegrationConfig,
   user : String,
   password? : String? = Some(config.password),
-  ssl_mode? : @client.SslMode = @client.SslMode::Disable,
-  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
+  ssl_mode? : @client.SslMode = Disable,
+  channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
   match password {
@@ -130,7 +130,7 @@ fn make_pool(
     keepalives?=config.keepalives,
     keepalives_idle_s?=config.keepalives_idle_s,
     target_session_attrs=@pgpool.TargetSessionAttrs::any(),
-    load_balance_hosts=@pgpool.LoadBalanceHosts::Disable,
+    load_balance_hosts=Disable,
     manager~,
     pool=pool_config,
   ).create_pool(group)

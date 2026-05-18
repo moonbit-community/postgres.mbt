@@ -12,10 +12,7 @@
 /// drained.
 pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   ensure_open(self.shared)
-  let responses = self.send_request(
-    RequestKind::Messages,
-    simple_query_bytes(sql),
-  )
+  let responses = self.send_request(Messages, simple_query_bytes(sql))
   start_copy_out(self.shared.background_group, responses)
 }
 
@@ -31,17 +28,17 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::CopyInResponse(_) =>
+      CopyInResponse(_) =>
         // The producer side queue is usable only after PostgreSQL explicitly
         // switches this request into COPY FROM STDIN mode.
         return { input, responses, finished: @ref.new(false) }
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         // COPY startup failures still drain until `ReadyForQuery`, mirroring
         // the delayed-error behavior of the other streaming helpers.
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None =>
@@ -58,7 +55,7 @@ pub async fn CopyInSink::send(self : CopyInSink, data : BytesView) -> Unit {
   guard !self.finished.val else {
     raise ClientError::Closed("copy sink already finished")
   }
-  self.input.put(CopyInAction::Data(data.to_owned()))
+  self.input.put(Data(data.to_owned()))
 }
 
 ///|
@@ -72,7 +69,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
     raise ClientError::Closed("copy sink already finished")
   }
   self.finished.val = true
-  self.input.put(CopyInAction::Finish)
+  self.input.put(Finish)
   collect_copy_in_completion(self.responses)
 }
 
@@ -88,7 +85,7 @@ pub async fn CopyInSink::abort(
 ) -> Unit {
   guard !self.finished.val else { return }
   self.finished.val = true
-  self.input.put(CopyInAction::Fail(message))
+  self.input.put(Fail(message))
   // Abort is best-effort from the caller's perspective: once `CopyFail` is
   // queued, only protocol cleanup remains and its row count is irrelevant.
   let _ = collect_copy_in_completion(self.responses) catch { _ => 0 }
@@ -147,16 +144,16 @@ pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
   }
   for response = self.responses.get() {
     match response {
-      @backend.Message::CopyData(body) => return Some(body.storage)
-      @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
+      CopyData(body) => return Some(body.storage)
+      CopyDone | CommandComplete(_) =>
         // Completion frames are internal to COPY bookkeeping; the public API
         // only exposes raw data chunks and the final success/error outcome.
         continue self.responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()
       }
-      @backend.Message::ReadyForQuery(_) => {
+      ReadyForQuery(_) => {
         // `ReadyForQuery` is the point where COPY mode has fully unwound and
         // the connection can safely accept ordinary requests again.
         self.finished = true
@@ -222,17 +219,16 @@ async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
   }
   for response = self.responses.get() {
     match response {
-      @backend.Message::CopyDone | @backend.Message::CommandComplete(_) =>
-        continue self.responses.get()
-      @backend.Message::CopyData(_) =>
+      CopyDone | CommandComplete(_) => continue self.responses.get()
+      CopyData(_) =>
         // Detached drains intentionally throw away raw COPY payloads while
         // keeping the request moving toward its terminal ready state.
         continue self.responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()
       }
-      @backend.Message::ReadyForQuery(_) => {
+      ReadyForQuery(_) => {
         self.finished = true
         match self.database_error {
           Some(err) => raise ClientError::Database(err)
