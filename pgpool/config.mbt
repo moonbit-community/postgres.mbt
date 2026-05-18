@@ -247,8 +247,10 @@ pub(all) enum LoadBalanceHosts {
 /// All fields are explicit. Validation is deferred until callers ask for
 /// normalized output via `builder`, `create_pool`, `get_pool_config`, or
 /// `get_connection_targets`.
-pub(all) struct Config {
+pub struct Config {
   user : String
+  /// Optional in the declarative config, but required at connection startup
+  /// when PostgreSQL selects password or SCRAM authentication.
   password : String?
   dbname : String
   options : String?
@@ -456,7 +458,8 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
   )
   let ports = choose_int_array(config.port, config.ports)
   let target_count = infer_target_count(hosts, hostaddrs, ports)
-  let has_explicit_host = hosts.length() > 0 || hostaddrs.length() > 0
+  let has_tls_identity_target = has_non_empty_host(hosts) ||
+    hostaddrs.length() > 0
   if hosts.length() == 0 {
     if target_count == 1 && hostaddrs.length() == 0 {
       hosts.push(Some("127.0.0.1"))
@@ -478,7 +481,7 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
   }
   let ssl_mode = choose_ssl_mode(config.ssl_mode)
   let ssl_root_cert = config.ssl_root_cert
-  validate_tls_config(ssl_mode, ssl_root_cert, has_explicit_host)
+  validate_tls_config(ssl_mode, ssl_root_cert, has_tls_identity_target)
   {
     hosts,
     hostaddrs: broadcast_optional_strings(hostaddrs, target_count),
@@ -499,6 +502,17 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
     ),
     load_balance_hosts: choose_load_balance_hosts(config.load_balance_hosts),
   }
+}
+
+///|
+fn has_non_empty_host(hosts : Array[String?]) -> Bool {
+  for host in hosts {
+    match host {
+      Some(host) => if host != "" { return true }
+      None => ()
+    }
+  }
+  false
 }
 
 ///|

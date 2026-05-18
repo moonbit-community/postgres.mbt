@@ -53,7 +53,7 @@ pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T) -> T
 pub async fn[T] Client::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
 pub impl GenericClient for Client
 
-pub(all) struct Config {
+pub struct Config {
   user : String
   password : String?
   dbname : String

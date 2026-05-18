@@ -69,6 +69,8 @@ pub struct Config {
   /// Database selected in the startup packet.
   database : String
   /// Optional password consumed by password-based authentication methods.
+  /// PostgreSQL chooses the authentication method at startup; cleartext
+  /// password and SCRAM authentication require this field to be present.
   password : String?
   /// TLS negotiation policy.
   ssl_mode : SslMode
