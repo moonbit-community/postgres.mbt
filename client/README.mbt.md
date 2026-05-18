@@ -88,7 +88,8 @@ fn _config_example() -> @client.Config {
 - `port`: PostgreSQL port, default `5432`
 - `user`: login role
 - `database`: database name, default is the same as `user`
-- `password`: optional password
+- `password`: optional in the config, but required if the server selects
+  cleartext password or SCRAM authentication
 - `ssl_mode`: `SslMode::Disable`, `SslMode::VerifyCa`, or `SslMode::VerifyFull`
 - `ssl_root_cert`: custom CA file, or `"system"` for the platform trust store
 - `channel_binding`: SCRAM channel-binding policy; `Require` rejects

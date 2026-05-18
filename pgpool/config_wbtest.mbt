@@ -81,60 +81,28 @@ test "pool config broadcasts hostaddr to every host" {
 }
 
 ///|
-test "pool config manual record still reports empty user name" {
-  let result = try? {
-    user: "",
-    password: None,
-    dbname: "moondb",
-    options: None,
-    application_name: "pool-missing-user",
-    ssl_mode: Some(@client.SslMode::VerifyFull),
-    ssl_root_cert: None,
-    channel_binding: Some(@client.ChannelBinding::Disable),
-    host: Some("db.example"),
-    hosts: None,
-    hostaddr: None,
-    hostaddrs: None,
-    port: Some(5432),
-    ports: None,
-    connect_timeout_ms: None,
-    keepalives: None,
-    keepalives_idle_s: None,
-    target_session_attrs: Some(TargetSessionAttrs::any()),
-    load_balance_hosts: Some(LoadBalanceHosts::Disable),
-    manager: None,
-    pool: PoolConfig::new(1),
-  }.get_connection_targets()
+test "pool config constructor still reports empty user name" {
+  let result = try? Config::new(
+    "db.example",
+    user="",
+    dbname="moondb",
+    application_name="pool-missing-user",
+    pool=PoolConfig::new(1),
+  ).get_connection_targets()
   guard result is Err(ConfigError::UsernameEmpty) else {
     fail("expected username empty")
   }
 }
 
 ///|
-test "pool config manual record still reports empty dbname" {
-  let result = try? {
-    user: "moon",
-    password: None,
-    dbname: "",
-    options: None,
-    application_name: "pool-empty-dbname",
-    ssl_mode: Some(@client.SslMode::VerifyFull),
-    ssl_root_cert: None,
-    channel_binding: Some(@client.ChannelBinding::Disable),
-    host: Some("db.example"),
-    hosts: None,
-    hostaddr: None,
-    hostaddrs: None,
-    port: Some(5432),
-    ports: None,
-    connect_timeout_ms: None,
-    keepalives: None,
-    keepalives_idle_s: None,
-    target_session_attrs: Some(TargetSessionAttrs::any()),
-    load_balance_hosts: Some(LoadBalanceHosts::Disable),
-    manager: None,
-    pool: PoolConfig::new(1),
-  }.get_connection_targets()
+test "pool config constructor still reports empty dbname" {
+  let result = try? Config::new(
+    "db.example",
+    user="moon",
+    dbname="",
+    application_name="pool-empty-dbname",
+    pool=PoolConfig::new(1),
+  ).get_connection_targets()
   guard result is Err(ConfigError::DbnameEmpty) else {
     fail("expected empty dbname")
   }
@@ -142,35 +110,33 @@ test "pool config manual record still reports empty dbname" {
 
 ///|
 test "pool config requires explicit host for verify_full" {
-  let result = try? {
-    user: "moon",
-    password: None,
-    dbname: "moondb",
-    options: None,
-    application_name: "pool-verify-full-host",
-    ssl_mode: Some(@client.SslMode::VerifyFull),
-    ssl_root_cert: None,
-    channel_binding: Some(@client.ChannelBinding::Disable),
-    host: None,
-    hosts: None,
-    hostaddr: None,
-    hostaddrs: None,
-    port: Some(5432),
-    ports: None,
-    connect_timeout_ms: None,
-    keepalives: None,
-    keepalives_idle_s: None,
-    target_session_attrs: Some(TargetSessionAttrs::any()),
-    load_balance_hosts: Some(LoadBalanceHosts::Disable),
-    manager: None,
-    pool: PoolConfig::new(1),
-  }.get_connection_targets()
+  let result = try? Config::new(
+    "",
+    user="moon",
+    dbname="moondb",
+    application_name="pool-verify-full-host",
+    pool=PoolConfig::new(1),
+  ).get_connection_targets()
   guard result is Err(ConfigError::InvalidConfig(message)) else {
     fail("expected verify-full host validation error")
   }
   @debug.assert_eq(
     message, "sslmode=verify-full requires explicit host or hostaddr",
   )
+}
+
+///|
+test "pool config accepts hostaddr identity when host is empty" {
+  let targets = Config::new(
+    "",
+    hostaddr="10.0.0.1",
+    user="moon",
+    dbname="moondb",
+    application_name="pool-verify-full-hostaddr",
+    pool=PoolConfig::new(1),
+  ).get_connection_targets()
+  @debug.assert_eq(targets[0].host, "")
+  @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
 }
 
 ///|

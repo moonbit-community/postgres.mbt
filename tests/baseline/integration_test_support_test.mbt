@@ -114,30 +114,26 @@ fn make_pool(
   pool_config : @pgpool.PoolConfig,
   manager? : @pgpool.ManagerConfig = @pgpool.ManagerConfig::new(),
 ) -> @pgpool.Pool raise {
-  let config : @pgpool.Config = {
-    user: config.user,
-    password: config.password,
-    dbname: config.database,
-    options: config.options,
-    application_name: config.application_name,
-    ssl_mode: Some(config.ssl_mode),
-    ssl_root_cert: config.ssl_root_cert,
-    channel_binding: Some(config.channel_binding),
-    host: Some(config.host),
-    hosts: None,
-    hostaddr: config.hostaddr,
-    hostaddrs: None,
-    port: Some(config.port),
-    ports: None,
-    connect_timeout_ms: config.connect_timeout_ms,
-    keepalives: config.keepalives,
-    keepalives_idle_s: config.keepalives_idle_s,
-    target_session_attrs: Some(@pgpool.TargetSessionAttrs::any()),
-    load_balance_hosts: Some(@pgpool.LoadBalanceHosts::Disable),
-    manager: Some(manager),
-    pool: pool_config,
-  }
-  config.create_pool(group)
+  @pgpool.Config::new(
+    config.host,
+    hostaddr?=config.hostaddr,
+    user=config.user,
+    dbname=config.database,
+    password?=config.password,
+    port=config.port,
+    ssl_mode=config.ssl_mode,
+    ssl_root_cert?=config.ssl_root_cert,
+    channel_binding=config.channel_binding,
+    application_name=config.application_name,
+    options?=config.options,
+    connect_timeout_ms?=config.connect_timeout_ms,
+    keepalives?=config.keepalives,
+    keepalives_idle_s?=config.keepalives_idle_s,
+    target_session_attrs=@pgpool.TargetSessionAttrs::any(),
+    load_balance_hosts=@pgpool.LoadBalanceHosts::Disable,
+    manager~,
+    pool=pool_config,
+  ).create_pool(group)
 }
 
 ///|

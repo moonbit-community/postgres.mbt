@@ -108,6 +108,8 @@ The practical rules are:
 - `host` and `hosts` are appended together in order
 - `port` is broadcast to every target when `ports` is absent
 - `hostaddr` and `hostaddrs` let TCP routing differ from certificate identity
+- `password` is optional in the config, but each connection needs it when the
+  server selects cleartext password or SCRAM authentication
 - `application_name` is required by `Config::new` and is copied to every target
 - `target_session_attrs=ReadWrite` rejects a target that reports
   `transaction_read_only = on`
