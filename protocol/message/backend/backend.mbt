@@ -96,9 +96,7 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf[1:5])
   let len = r.read_i32_be()
   if len < 4 {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: header length < 4",
-    )
+    raise InvalidInput("invalid message length: header length < 4")
   }
   Some({ tag, len })
 }
@@ -168,9 +166,7 @@ pub fn Message::parse(
   let len_reader = @proto.ByteReader::new(buf[1:5])
   let len = len_reader.read_i32_be()
   if len < 4 {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: header length < 4",
-    )
+    raise InvalidInput("invalid message length: header length < 4")
   }
   let total_len = len + 1
   if buf.length() < total_len {
@@ -180,116 +176,113 @@ pub fn Message::parse(
   let reader = @proto.ByteReader::new(body)
   let message = match tag {
     PARSE_COMPLETE_TAG => Message::ParseComplete
-    BIND_COMPLETE_TAG => Message::BindComplete
-    CLOSE_COMPLETE_TAG => Message::CloseComplete
+    BIND_COMPLETE_TAG => BindComplete
+    CLOSE_COMPLETE_TAG => CloseComplete
     NOTIFICATION_RESPONSE_TAG => {
       let process_id = reader.read_i32_be()
       let channel = reader.read_cstr()
       let msg = reader.read_cstr()
-      Message::NotificationResponse({ process_id, channel, message: msg })
+      NotificationResponse({ process_id, channel, message: msg })
     }
-    COPY_DONE_TAG => Message::CopyDone
+    COPY_DONE_TAG => CopyDone
     COMMAND_COMPLETE_TAG => {
       let tag_bytes = reader.read_cstr()
-      Message::CommandComplete({ tag: tag_bytes })
+      CommandComplete({ tag: tag_bytes })
     }
     COPY_DATA_TAG => {
       let storage = reader.read_all().to_owned()
-      Message::CopyData({ storage, })
+      CopyData({ storage, })
     }
     DATA_ROW_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      Message::DataRow({ storage, len })
+      DataRow({ storage, len })
     }
     ERROR_RESPONSE_TAG => {
       let storage = reader.read_all().to_owned()
-      Message::ErrorResponse({ storage, })
+      ErrorResponse({ storage, })
     }
     COPY_IN_RESPONSE_TAG => {
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      Message::CopyInResponse({ format, len, storage })
+      CopyInResponse({ format, len, storage })
     }
     COPY_OUT_RESPONSE_TAG => {
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      Message::CopyOutResponse({ format, len, storage })
+      CopyOutResponse({ format, len, storage })
     }
-    EMPTY_QUERY_RESPONSE_TAG => Message::EmptyQueryResponse
+    EMPTY_QUERY_RESPONSE_TAG => EmptyQueryResponse
     BACKEND_KEY_DATA_TAG => {
       let process_id = reader.read_i32_be()
       let secret_key = reader.read_i32_be()
-      Message::BackendKeyData({ process_id, secret_key })
+      BackendKeyData({ process_id, secret_key })
     }
-    NO_DATA_TAG => Message::NoData
+    NO_DATA_TAG => NoData
     NOTICE_RESPONSE_TAG => {
       let storage = reader.read_all().to_owned()
-      Message::NoticeResponse({ storage, })
+      NoticeResponse({ storage, })
     }
     AUTHENTICATION_TAG => {
       // `AuthenticationRequest` reuses tag `R`; a 32-bit subtype selects the
       // concrete authentication method or challenge frame.
       let auth_tag = reader.read_i32_be()
       match auth_tag {
-        0 => Message::AuthenticationOk
-        2 => Message::AuthenticationKerberosV5
-        3 => Message::AuthenticationCleartextPassword
+        0 => AuthenticationOk
+        2 => AuthenticationKerberosV5
+        3 => AuthenticationCleartextPassword
         5 => {
           let salt = reader.read_bytes(4).to_owned()
-          Message::AuthenticationMd5Password({ salt, })
+          AuthenticationMd5Password({ salt, })
         }
-        6 => Message::AuthenticationScmCredential
-        7 => Message::AuthenticationGss
+        6 => AuthenticationScmCredential
+        7 => AuthenticationGss
         8 => {
           let data = reader.read_all().to_owned()
-          Message::AuthenticationGssContinue({ data, })
+          AuthenticationGssContinue({ data, })
         }
-        9 => Message::AuthenticationSspi
+        9 => AuthenticationSspi
         10 => {
           let data = reader.read_all().to_owned()
-          Message::AuthenticationSasl({ data, })
+          AuthenticationSasl({ data, })
         }
         11 => {
           let data = reader.read_all().to_owned()
-          Message::AuthenticationSaslContinue({ data, })
+          AuthenticationSaslContinue({ data, })
         }
         12 => {
           let data = reader.read_all().to_owned()
-          Message::AuthenticationSaslFinal({ data, })
+          AuthenticationSaslFinal({ data, })
         }
-        _ =>
-          raise @proto.ProtocolError::InvalidInput("unknown authentication tag")
+        _ => raise InvalidInput("unknown authentication tag")
       }
     }
-    PORTAL_SUSPENDED_TAG => Message::PortalSuspended
+    PORTAL_SUSPENDED_TAG => PortalSuspended
     PARAMETER_STATUS_TAG => {
       let name = reader.read_cstr()
       let value = reader.read_cstr()
-      Message::ParameterStatus({ name, value })
+      ParameterStatus({ name, value })
     }
     PARAMETER_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      Message::ParameterDescription({ storage, len })
+      ParameterDescription({ storage, len })
     }
     ROW_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      Message::RowDescription({ storage, len })
+      RowDescription({ storage, len })
     }
     READY_FOR_QUERY_TAG => {
       let status = reader.read_u8()
-      Message::ReadyForQuery({ status, })
+      ReadyForQuery({ status, })
     }
-    _ => raise @proto.ProtocolError::InvalidInput("unknown message tag")
+    _ => raise InvalidInput("unknown message tag")
   }
   if !reader.is_empty() {
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: expected buffer to be empty",
-    )
+    raise InvalidInput("invalid message length: expected buffer to be empty")
   }
   Some({ message, consumed: total_len })
 }
@@ -372,7 +365,7 @@ pub fn SaslMechanisms::next(
   let pos = find_null(self.buf, 0)
   if pos == 0 {
     if self.buf.length() != 1 {
-      raise @proto.ProtocolError::InvalidInput(
+      raise InvalidInput(
         "invalid message length: expected to be at end of iterator for sasl",
       )
     }
@@ -545,9 +538,7 @@ pub fn ColumnFormats::next(
     if self.buf.length() == 0 {
       return None
     }
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: wrong column formats",
-    )
+    raise InvalidInput("invalid message length: wrong column formats")
   }
   self.remaining = self.remaining - 1
   let r = @proto.ByteReader::new(self.buf)
@@ -643,23 +634,21 @@ pub fn DataRowRanges::next(
     if self.buf.length() == 0 {
       return None
     }
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: datarowrange is not empty",
-    )
+    raise InvalidInput("invalid message length: datarowrange is not empty")
   }
   self.remaining = self.remaining - 1
   let r = @proto.ByteReader::new(self.buf)
   let len = r.read_i32_be()
   if len < 0 {
     if len != -1 {
-      raise @proto.ProtocolError::InvalidInput("invalid value length")
+      raise InvalidInput("invalid value length")
     }
     self.buf = self.buf[4:]
     return Some(None)
   }
   let len = len
   if self.buf.length() < 4 + len {
-    raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+    raise UnexpectedEof("unexpected EOF")
   }
   let base = self.len - self.buf.length()
   let start = base + 4
@@ -715,9 +704,7 @@ pub fn ErrorFields::next(
     if self.buf.length() == 0 {
       return None
     }
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: error fields is not drained",
-    )
+    raise InvalidInput("invalid message length: error fields is not drained")
   }
   let value_end = find_null(self.buf, 0)
   let value = self.buf[0:value_end]
@@ -849,9 +836,7 @@ pub fn Parameters::next(
     if self.buf.length() == 0 {
       return None
     }
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: parameters is not drained",
-    )
+    raise InvalidInput("invalid message length: parameters is not drained")
   }
   self.remaining = self.remaining - 1
   let r = @proto.ByteReader::new(self.buf)
@@ -975,9 +960,7 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
     if self.buf.length() == 0 {
       return None
     }
-    raise @proto.ProtocolError::InvalidInput(
-      "invalid message length: field is not drained",
-    )
+    raise InvalidInput("invalid message length: field is not drained")
   }
   self.remaining = self.remaining - 1
   let name_end = find_null(self.buf, 0)
@@ -1043,7 +1026,7 @@ fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
     }
     i = i + 1
   }
-  raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+  raise UnexpectedEof("unexpected EOF")
 }
 
 ///|
@@ -1053,6 +1036,6 @@ fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
 /// fields handled by this package are expected to decode successfully.
 fn decode_utf8(bytes : BytesView) -> String raise @proto.ProtocolError {
   @utf8.decode(bytes) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
+    _ => raise InvalidInput("invalid UTF-8")
   }
 }

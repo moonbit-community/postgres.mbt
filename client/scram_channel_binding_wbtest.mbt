@@ -31,7 +31,7 @@ test "choose_scram_binding uses SCRAM-SHA-256-PLUS with tls-server-end-point" {
     TlsServerEndPoint(b"binding"),
   )
   @debug.assert_eq(mechanism, @auth.SCRAM_SHA_256_PLUS)
-  guard binding is @auth.ChannelBinding::TlsServerEndPoint(signature) else {
+  guard binding is TlsServerEndPoint(signature) else {
     fail("expected tls-server-end-point channel binding")
   }
   @debug.assert_eq(signature, b"binding")

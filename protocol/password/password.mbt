@@ -35,7 +35,7 @@ pub fn scram_sha_256_salt(
   salt : BytesView,
 ) -> Bytes raise @proto.ProtocolError {
   if salt.length() != scram_default_salt_len {
-    raise @proto.ProtocolError::InvalidInput("invalid SCRAM salt length")
+    raise InvalidInput("invalid SCRAM salt length")
   }
   let prepared = @auth.normalize(password)
   let salted_password = @auth.hi(prepared[:], salt, scram_default_iterations)

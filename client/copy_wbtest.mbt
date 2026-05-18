@@ -104,8 +104,7 @@ fn copy_test_error_response_message(message : String) -> @backend.Message raise 
 
 ///|
 fn copy_test_database_error(message : String) -> DatabaseError raise {
-  guard copy_test_error_response_message(message)
-    is @backend.Message::ErrorResponse(body) else {
+  guard copy_test_error_response_message(message) is ErrorResponse(body) else {
     fail("expected backend error response")
   }
   parse_database_error(body.fields())
@@ -160,8 +159,8 @@ fn copy_test_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-copy-wbtest",
     ),
-    requests: @async.Queue(kind=Unbounded),
-    async_messages: @async.Queue(kind=Unbounded),
+    requests: Queue(kind=Unbounded),
+    async_messages: Queue(kind=Unbounded),
     background_group,
     parameters: {},
     types,
@@ -182,20 +181,18 @@ async test "client copy in streams input and returns affected rows" {
 
     group.spawn_bg(() => {
       let request = shared.requests.get()
-      guard request.kind is RequestKind::CopyIn else {
-        fail("expected COPY IN request")
-      }
+      guard request.kind is CopyIn else { fail("expected COPY IN request") }
       guard request.copy_input is Some(input) else {
         fail("expected copy input queue")
       }
       request.responses.put(copy_test_copy_in_response_message([0, 1]))
 
       match input.get() {
-        CopyInAction::Data(data) => assert_eq(data, b"alpha")
+        Data(data) => assert_eq(data, b"alpha")
         _ => fail("expected copy data")
       }
       match input.get() {
-        CopyInAction::Finish => ()
+        Finish => ()
         _ => fail("expected copy finish")
       }
 
@@ -270,7 +267,7 @@ async test "copy in abort is best effort and idempotent" {
       request.responses.put(copy_test_copy_in_response_message([]))
 
       match input.get() {
-        CopyInAction::Fail(message) => assert_eq(message, "stop now")
+        Fail(message) => assert_eq(message, "stop now")
         _ => fail("expected copy fail")
       }
 
@@ -298,9 +295,7 @@ async test "client copy out collects chunks and remembers wire formats" {
 
     group.spawn_bg(() => {
       let request = shared.requests.get()
-      guard request.kind is RequestKind::Messages else {
-        fail("expected messages request")
-      }
+      guard request.kind is Messages else { fail("expected messages request") }
       request.responses.put(copy_test_copy_out_response_message([0, 1]))
       request.responses.put(copy_test_copy_data_message(b"row1\n"))
       request.responses.put(copy_test_copy_data_message(b"row2\n"))
@@ -369,9 +364,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
 
     group.spawn_bg(() => {
       let request = shared.requests.get()
-      guard request.kind is RequestKind::CopyIn else {
-        fail("expected COPY IN request")
-      }
+      guard request.kind is CopyIn else { fail("expected COPY IN request") }
       request.responses.put(copy_test_row_description_message())
     })
 
@@ -384,9 +377,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
     assert_eq(message, "unexpected copy-in response")
   })
 
-  let finish_responses : @async.Queue[@backend.Message] = @async.Queue(
-    kind=Unbounded,
-  )
+  let finish_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   finish_responses.put(copy_test_copy_done_message())
   finish_responses.put(copy_test_command_complete_message("COPY 0"))
   finish_responses.put(copy_test_ready_for_query_message())
@@ -407,7 +398,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
 async test "client copy out drain_discard covers finished error and unexpected paths" {
   let completed_stream : CopyOutStream = {
     background_group: @ref.new(None),
-    responses: @async.Queue(kind=Unbounded),
+    responses: Queue(kind=Unbounded),
     formats: [],
     database_error: None,
     detached: false,
@@ -417,7 +408,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
 
   let finished_error_stream : CopyOutStream = {
     background_group: @ref.new(None),
-    responses: @async.Queue(kind=Unbounded),
+    responses: Queue(kind=Unbounded),
     formats: [],
     database_error: Some(copy_test_database_error("copy already failed")),
     detached: false,
@@ -429,7 +420,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   }
   assert_eq(err.message, "copy already failed")
 
-  let draining_responses : @async.Queue[@backend.Message] = @async.Queue(
+  let draining_responses : @async.Queue[@backend.Message] = Queue(
     kind=Unbounded,
   )
   draining_responses.put(copy_test_error_response_message("copy drain failed"))
@@ -449,9 +440,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   assert_eq(err.message, "copy drain failed")
   assert_true(draining_stream.finished)
 
-  let next_responses : @async.Queue[@backend.Message] = @async.Queue(
-    kind=Unbounded,
-  )
+  let next_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   next_responses.put(copy_test_row_description_message())
   let next_stream : CopyOutStream = {
     background_group: @ref.new(None),
@@ -467,9 +456,7 @@ async test "client copy out drain_discard covers finished error and unexpected p
   }
   assert_eq(message, "unexpected copy out response")
 
-  let discard_responses : @async.Queue[@backend.Message] = @async.Queue(
-    kind=Unbounded,
-  )
+  let discard_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   discard_responses.put(copy_test_row_description_message())
   let discard_stream : CopyOutStream = {
     background_group: @ref.new(None),
@@ -488,18 +475,14 @@ async test "client copy out drain_discard covers finished error and unexpected p
 
 ///|
 async test "response helpers drain simple query and close sequences" {
-  let simple_responses : @async.Queue[@backend.Message] = @async.Queue(
-    kind=Unbounded,
-  )
+  let simple_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   simple_responses.put(copy_test_row_description_message())
   simple_responses.put(copy_test_data_row_message(Some(b"ok")))
   simple_responses.put(copy_test_command_complete_message("SELECT 1"))
   simple_responses.put(copy_test_ready_for_query_message())
   drain_simple_query(simple_responses)
 
-  let close_responses : @async.Queue[@backend.Message] = @async.Queue(
-    kind=Unbounded,
-  )
+  let close_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   close_responses.put(copy_test_close_complete_message())
   close_responses.put(copy_test_ready_for_query_message())
   drain_close_response(close_responses)

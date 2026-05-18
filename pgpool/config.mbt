@@ -287,9 +287,9 @@ pub fn Config::new(
   user~ : String,
   dbname? : String = user,
   password? : String,
-  ssl_mode? : @client.SslMode = @client.SslMode::VerifyFull,
+  ssl_mode? : @client.SslMode = VerifyFull,
   ssl_root_cert? : String,
-  channel_binding? : @client.ChannelBinding = @client.ChannelBinding::Disable,
+  channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
   connect_timeout_ms? : Int,
@@ -629,7 +629,7 @@ fn choose_int_array(scalar : Int?, array : Array[Int]?) -> Array[Int] {
 ///|
 /// Choose one SSL mode override.
 fn choose_ssl_mode(selected : @client.SslMode?) -> @client.SslMode {
-  selected.unwrap_or(@client.SslMode::VerifyFull)
+  selected.unwrap_or(VerifyFull)
 }
 
 ///|
@@ -640,14 +640,14 @@ fn validate_tls_config(
 ) -> Unit raise {
   match ssl_root_cert {
     Some(root_cert) =>
-      if root_cert == "system" && ssl_mode != @client.SslMode::VerifyFull {
+      if root_cert == "system" && ssl_mode != VerifyFull {
         raise ConfigError::InvalidConfig(
           "sslrootcert=system requires sslmode=verify-full",
         )
       }
     None => ()
   }
-  if ssl_mode == @client.SslMode::VerifyFull && !has_explicit_host {
+  if ssl_mode == VerifyFull && !has_explicit_host {
     raise ConfigError::InvalidConfig(
       "sslmode=verify-full requires explicit host or hostaddr",
     )
@@ -659,7 +659,7 @@ fn validate_tls_config(
 fn choose_channel_binding(
   selected : @client.ChannelBinding?,
 ) -> @client.ChannelBinding {
-  selected.unwrap_or(@client.ChannelBinding::Disable)
+  selected.unwrap_or(Disable)
 }
 
 ///|

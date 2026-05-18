@@ -19,7 +19,7 @@ fn make_pool_config(
 /// These assertion helpers give the pool error branches a fixed shape.
 /// The tests can focus on concurrency timing and state transitions instead of unpacking error enums over and over.
 fn[T] expect_pool_wait_timeout(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(@pgpool.PoolError::Timeout(@pgpool.TimeoutKind::Wait)) else {
+  guard result is Err(@pgpool.PoolError::Timeout(Wait)) else {
     fail("expected pool wait timeout")
   }
 }
@@ -515,8 +515,8 @@ async test "integration pool run_cancellable cancels running query" {
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let pid_queue : @async.Queue[Int] = @async.Queue(kind=Unbounded)
-    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
+    let pid_queue : @async.Queue[Int] = Queue(kind=Unbounded)
+    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = Queue(
       kind=Unbounded,
     )
     let (observer, observer_connection) = @client.connect(
@@ -583,7 +583,7 @@ async test "integration pool release waits for cancellable cleanup" {
     let backend_pid : Int = lease
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
-    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
+    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = Queue(
       kind=Unbounded,
     )
     let (observer, observer_connection) = @client.connect(
@@ -639,10 +639,10 @@ async test "integration pool stale cancel token cannot cancel reused connection"
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_token_queue : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
+    let stale_token_queue : @async.Queue[@pgpool.OperationCancelToken] = Queue(
       kind=Unbounded,
     )
-    let pid_queue : @async.Queue[Int] = @async.Queue(kind=Unbounded)
+    let pid_queue : @async.Queue[Int] = Queue(kind=Unbounded)
     let (observer, observer_connection) = @client.connect(
       as_client_config(
         config,
@@ -700,8 +700,8 @@ async test "integration pool close wakes blocked checkout while cancellable task
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let pid_queue : @async.Queue[Int] = @async.Queue(kind=Unbounded)
-    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
+    let pid_queue : @async.Queue[Int] = Queue(kind=Unbounded)
+    let token_queue : @async.Queue[@pgpool.OperationCancelToken] = Queue(
       kind=Unbounded,
     )
     let (observer, observer_connection) = @client.connect(
@@ -975,9 +975,7 @@ async test "integration pool prepared statement expires after callback scope" {
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let queue : @async.Queue[@pgpool.PreparedStatement] = @async.Queue(
-      kind=Unbounded,
-    )
+    let queue : @async.Queue[@pgpool.PreparedStatement] = Queue(kind=Unbounded)
 
     let value : Int = pool.with_client(client => {
       client.with_prepared("select 13::int4 as value", prepared => {

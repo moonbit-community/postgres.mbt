@@ -40,7 +40,7 @@ test "integration pool config constructors and normalization" {
     ports=[1111, 2222],
     user="moon",
     dbname="moondb",
-    ssl_mode=@client.SslMode::VerifyCa,
+    ssl_mode=VerifyCa,
     ssl_root_cert="/tmp/root.crt",
     application_name="pool-config-extra",
     hosts=["two.db"],
@@ -54,7 +54,7 @@ test "integration pool config constructors and normalization" {
   @debug.assert_eq(targets[1].hostaddr, Some("10.0.0.2"))
   @debug.assert_eq(targets[0].port, 1111)
   @debug.assert_eq(targets[1].port, 2222)
-  assert_true(targets[0].ssl_mode == @client.SslMode::VerifyCa)
+  assert_true(targets[0].ssl_mode == VerifyCa)
   @debug.assert_eq(targets[0].ssl_root_cert, Some("/tmp/root.crt"))
   assert_true(
     config.get_manager_config().recycling_method ==
@@ -88,7 +88,7 @@ test "integration pool config validation rejects invalid settings" {
     "db.example",
     user="moon",
     dbname="moondb",
-    ssl_mode=@client.SslMode::VerifyCa,
+    ssl_mode=VerifyCa,
     ssl_root_cert="system",
     application_name="pool-system-root-extra",
     pool=@pgpool.PoolConfig::new(1),
@@ -126,7 +126,7 @@ async test "integration pool builder hooks resize and custom connector" {
         hosts=[config.host],
         ports=[config.port, config.port],
         target_session_attrs=@pgpool.TargetSessionAttrs::read_write(),
-        load_balance_hosts=@pgpool.LoadBalanceHosts::Random,
+        load_balance_hosts=Random,
         pool=@pgpool.PoolConfig::new(1),
       )
       .builder(group)

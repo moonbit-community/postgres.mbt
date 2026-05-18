@@ -31,9 +31,7 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 /// See:
 /// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
 pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
-  let s = @utf8.decode(pass) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid UTF-8")
-  }
+  let s = @utf8.decode(pass) catch { _ => raise InvalidInput("invalid UTF-8") }
   let mapped = map_saslprep_input(s)
   let normalized = @unicode_normalization.nfkc(mapped)
   validate_saslprep_output(normalized)
@@ -56,9 +54,7 @@ fn map_saslprep_input(s : String) -> String {
 fn validate_saslprep_output(s : String) -> Unit raise @proto.ProtocolError {
   for ch in s {
     if is_prohibited_output(ch) {
-      raise @proto.ProtocolError::InvalidInput(
-        "SCRAM password contains prohibited characters",
-      )
+      raise InvalidInput("SCRAM password contains prohibited characters")
     }
   }
 }
@@ -149,7 +145,7 @@ pub fn hi(
   iterations : Int,
 ) -> Bytes raise @proto.ProtocolError {
   if iterations <= 0 {
-    raise @proto.ProtocolError::InvalidInput("iteration count must be positive")
+    raise InvalidInput("iteration count must be positive")
   }
   let buf = @buffer.new(size_hint=salt.length() + 4)
   buf.write_bytesview(salt)
@@ -276,7 +272,7 @@ pub fn ScramSha256::new(
   nonce_bytes : BytesView,
 ) -> ScramSha256 raise @proto.ProtocolError {
   if nonce_bytes.length() == 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
+    raise InvalidInput("invalid SCRAM nonce")
   }
   let nonce = @proto.utf8_encode(@base64.encode(nonce_bytes))
   ScramSha256::new_inner(password, channel_binding, nonce)
@@ -316,11 +312,11 @@ pub fn ScramSha256::new_inner(
 /// Validate the SCRAM nonce grammar expected by PostgreSQL.
 fn validate_nonce(nonce : BytesView) -> Unit raise @proto.ProtocolError {
   if nonce.length() == 0 {
-    raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
+    raise InvalidInput("invalid SCRAM nonce")
   }
   for byte in nonce {
     if byte == b',' || byte < 0x21 || byte > 0x7e {
-      raise @proto.ProtocolError::InvalidInput("invalid SCRAM nonce")
+      raise InvalidInput("invalid SCRAM nonce")
     }
   }
 }
@@ -339,7 +335,7 @@ pub fn ScramSha256::message(
   self : ScramSha256,
 ) -> BytesView raise @proto.ProtocolError {
   match self.state {
-    Done => raise @proto.ProtocolError::InvalidInput("invalid SCRAM state")
+    Done => raise InvalidInput("invalid SCRAM state")
     _ => self.message[:]
   }
 }
@@ -369,17 +365,17 @@ pub fn ScramSha256::update(
   let (client_nonce, password, channel_binding) = match self.state {
     Update(nonce~, password~, channel_binding~) =>
       (nonce, password, channel_binding)
-    _ => raise @proto.ProtocolError::InvalidInput("invalid SCRAM state")
+    _ => raise InvalidInput("invalid SCRAM state")
   }
   let parsed = Parser::new(message).server_first_message()
   if !starts_with(parsed.nonce[:], client_nonce[:]) {
-    raise @proto.ProtocolError::InvalidInput("invalid nonce")
+    raise InvalidInput("invalid nonce")
   }
   let salt_str = @utf8.decode(parsed.salt) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 salt")
+    _ => raise InvalidInput("invalid base64 salt")
   }
   let salt = @base64.decode(salt_str) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 salt")
+    _ => raise InvalidInput("invalid base64 salt")
   }
   let salted_password = hi(password[:], salt[:], parsed.iteration_count)
   let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
@@ -450,26 +446,26 @@ pub fn ScramSha256::finish(
 ) -> Unit raise @proto.ProtocolError {
   let (salted_password, auth_message) = match self.state {
     Finish(salted_password~, auth_message~) => (salted_password, auth_message)
-    _ => raise @proto.ProtocolError::InvalidInput("invalid SCRAM state")
+    _ => raise InvalidInput("invalid SCRAM state")
   }
   let parsed = Parser::new(message).server_final_message()
   let verifier_b64 = match parsed {
-    ServerFinalMessage::Error(err) => {
+    Error(err) => {
       let msg = @utf8.decode(err[:]) catch { _ => "<invalid utf-8>" }
-      raise @proto.ProtocolError::InvalidInput("SCRAM error: \{msg}")
+      raise InvalidInput("SCRAM error: \{msg}")
     }
-    ServerFinalMessage::Verifier(v) => v
+    Verifier(v) => v
   }
   let verifier_str = @utf8.decode(verifier_b64) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 verifier")
+    _ => raise InvalidInput("invalid base64 verifier")
   }
   let verifier = @base64.decode(verifier_str) catch {
-    _ => raise @proto.ProtocolError::InvalidInput("invalid base64 verifier")
+    _ => raise InvalidInput("invalid base64 verifier")
   }
   let server_key = @crypto.hmac_sha256(salted_password[:], b"Server Key"[:])
   let server_signature = @crypto.hmac_sha256(server_key[:], auth_message[:])
   if !bytes_equal(server_signature[:], verifier[:]) {
-    raise @proto.ProtocolError::InvalidInput("SCRAM verification error")
+    raise InvalidInput("SCRAM verification error")
   }
   self.state = Done
 }
@@ -531,10 +527,10 @@ fn Parser::eat(self : Parser, target : Byte) -> Unit raise @proto.ProtocolError 
   match self.peek() {
     Some(c) if c == target => self.idx = self.idx + 1
     Some(c) =>
-      raise @proto.ProtocolError::InvalidInput(
+      raise InvalidInput(
         "unexpected character: expected \{target.to_char()} got \{c.to_char()}",
       )
-    None => raise @proto.ProtocolError::UnexpectedEof("unexpected EOF")
+    None => raise UnexpectedEof("unexpected EOF")
   }
 }
 
@@ -582,7 +578,7 @@ fn Parser::salt(self : Parser) -> BytesView raise @proto.ProtocolError {
 fn Parser::posit_number(self : Parser) -> Int raise @proto.ProtocolError {
   let digits = self.take_while(fn(b) { b >= b'0' && b <= b'9' })
   if digits.length() == 0 {
-    raise @proto.ProtocolError::InvalidInput("expected number")
+    raise InvalidInput("expected number")
   }
   let mut n = 0
   for b in digits {
@@ -601,7 +597,7 @@ fn Parser::iteration_count(self : Parser) -> Int raise @proto.ProtocolError {
 ///|
 fn Parser::eof(self : Parser) -> Unit raise @proto.ProtocolError {
   if self.idx < self.buf.length() {
-    raise @proto.ProtocolError::InvalidInput("unexpected trailing data")
+    raise InvalidInput("unexpected trailing data")
   }
 }
 
@@ -629,14 +625,14 @@ fn Parser::server_final_message(
       let err = self.buf[self.idx:]
       self.idx = self.buf.length()
       self.eof()
-      ServerFinalMessage::Error(err.to_owned())
+      Error(err.to_owned())
     }
     _ => {
       self.eat(b'v')
       self.eat(b'=')
       let v = self.base64()
       self.eof()
-      ServerFinalMessage::Verifier(v.to_owned())
+      Verifier(v.to_owned())
     }
   }
 }

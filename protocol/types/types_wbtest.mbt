@@ -93,10 +93,10 @@ fn encode_array(
     values.iter(),
     (value, payload) => {
       match value {
-        None => @proto.IsNull::Yes
+        None => Yes
         Some(value) => {
           payload.write_bytes(value)
-          @proto.IsNull::No
+          No
         }
       }
     },
@@ -116,14 +116,14 @@ fn encode_range(
       match lower {
         Inclusive(Some(value)) => {
           lower_buf.write_bytes(value)
-          Inclusive(@proto.IsNull::No)
+          Inclusive(No)
         }
-        Inclusive(None) => Inclusive(@proto.IsNull::Yes)
+        Inclusive(None) => Inclusive(Yes)
         Exclusive(Some(value)) => {
           lower_buf.write_bytes(value)
-          Exclusive(@proto.IsNull::No)
+          Exclusive(No)
         }
-        Exclusive(None) => Exclusive(@proto.IsNull::Yes)
+        Exclusive(None) => Exclusive(Yes)
         Unbounded => Unbounded
       }
     },
@@ -131,14 +131,14 @@ fn encode_range(
       match upper {
         Inclusive(Some(value)) => {
           upper_buf.write_bytes(value)
-          Inclusive(@proto.IsNull::No)
+          Inclusive(No)
         }
-        Inclusive(None) => Inclusive(@proto.IsNull::Yes)
+        Inclusive(None) => Inclusive(Yes)
         Exclusive(Some(value)) => {
           upper_buf.write_bytes(value)
-          Exclusive(@proto.IsNull::No)
+          Exclusive(No)
         }
-        Exclusive(None) => Exclusive(@proto.IsNull::Yes)
+        Exclusive(None) => Exclusive(Yes)
         Unbounded => Unbounded
       }
     },

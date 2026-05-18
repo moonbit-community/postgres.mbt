@@ -6,7 +6,7 @@ fn bytes_of(bytes : ArrayView[Byte]) -> Bytes {
 ///|
 fn expect_invalid_utf8(bytes : Bytes) -> Unit raise {
   let result = try? @protocol.validate_utf8(bytes[:])
-  guard result is Err(@protocol.ProtocolError::InvalidInput(message)) else {
+  guard result is Err(InvalidInput(message)) else {
     fail("expected invalid UTF-8 error")
   }
   assert_eq(message, "invalid UTF-8")

@@ -76,7 +76,7 @@ async test "integration pool client wrappers cover prepared statements and porta
         ),
         3,
       )
-      assert_eq(
+      @debug.assert_eq(
         row_values(
           client.query_all(
             "select value from moon_pool_client_api order by value",
@@ -90,7 +90,7 @@ async test "integration pool client wrappers cover prepared statements and porta
         is None else {
         fail("expected no pooled client row")
       }
-      assert_eq(
+      @debug.assert_eq(
         row_values(
           client.query_typed_all(
             "select $1::int4 as value",
@@ -125,7 +125,7 @@ async test "integration pool client wrappers cover prepared statements and porta
           prepared.query_all()
         },
       )
-      assert_eq(row_values(prepared_rows), [1, 2, 3])
+      @debug.assert_eq(row_values(prepared_rows), [1, 2, 3])
 
       let inserted = client.with_prepared(
         "insert into moon_pool_client_api (value) values (4)",
@@ -161,9 +161,7 @@ async test "integration pool transaction portals support pagination and cleanup"
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_portals : @async.Queue[@pgpool.Portal] = @async.Queue(
-      kind=Unbounded,
-    )
+    let stale_portals : @async.Queue[@pgpool.Portal] = Queue(kind=Unbounded)
 
     pool.with_client(client => {
       let tx = client.transaction()
@@ -180,8 +178,8 @@ async test "integration pool transaction portals support pagination and cleanup"
         let second = row_values(
           portal.with_stream(2, stream => stream.collect()),
         )
-        assert_eq(first, [1, 2])
-        assert_eq(second, [3])
+        @debug.assert_eq(first, [1, 2])
+        @debug.assert_eq(second, [3])
         portal.close()
         portal.close()
         expect_pool_lease_released(
@@ -190,7 +188,7 @@ async test "integration pool transaction portals support pagination and cleanup"
 
         prepared.with_portal(portal => {
           stale_portals.put(portal)
-          assert_eq(
+          @debug.assert_eq(
             row_values(portal.with_stream(2, stream => stream.collect())),
             [1, 2],
           )
@@ -228,7 +226,7 @@ async test "integration pool operation wrappers cover prepared helpers" {
           op.execute("insert into moon_pool_operation (value) values (1), (2)"),
           2,
         )
-        assert_eq(
+        @debug.assert_eq(
           row_values(
             op.query_all("select value from moon_pool_operation order by value"),
           ),
@@ -240,7 +238,7 @@ async test "integration pool operation wrappers cover prepared helpers" {
           is None else {
           fail("expected no operation row")
         }
-        assert_eq(
+        @debug.assert_eq(
           row_values(
             op.query_typed_all(
               "select $1::int4 as value",
@@ -281,7 +279,7 @@ async test "integration pool operation wrappers cover prepared helpers" {
       })
     })
 
-    assert_eq(values, (21, 34, 55, 89))
+    @debug.assert_eq(values, (21, 34, 55, 89))
 
     pool.close()
   })
@@ -299,8 +297,8 @@ async test "integration pool release waits for active stream cleanup and rejects
       make_pool_config(1),
     )
     let lease = pool.get()
-    let entered : @async.Queue[Unit] = @async.Queue(kind=Unbounded)
-    let finish_stream : @async.Queue[Unit] = @async.Queue(kind=Unbounded)
+    let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
+    let finish_stream : @async.Queue[Unit] = Queue(kind=Unbounded)
 
     let task = group.spawn(no_wait=true, () => {
       lease.with_stream(
@@ -351,10 +349,10 @@ async test "integration pool stale cancellable handles reject new work" {
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_operations : @async.Queue[@pgpool.Operation] = @async.Queue(
+    let stale_operations : @async.Queue[@pgpool.Operation] = Queue(
       kind=Unbounded,
     )
-    let stale_tokens : @async.Queue[@pgpool.OperationCancelToken] = @async.Queue(
+    let stale_tokens : @async.Queue[@pgpool.OperationCancelToken] = Queue(
       kind=Unbounded,
     )
 
@@ -395,7 +393,7 @@ async test "integration pool transaction wrappers cover row counts and cache gua
       as_client_config(config, application_name="moonbit-postgres"),
       make_pool_config(1),
     )
-    let stale_caches : @async.Queue[@pgpool.StatementCache] = @async.Queue(
+    let stale_caches : @async.Queue[@pgpool.StatementCache] = Queue(
       kind=Unbounded,
     )
 
@@ -408,7 +406,7 @@ async test "integration pool transaction wrappers cover row counts and cache gua
         ),
         3,
       )
-      assert_eq(
+      @debug.assert_eq(
         row_values(
           tx.query_all("select value from moon_pool_transaction order by value"),
         ),
@@ -432,7 +430,7 @@ async test "integration pool transaction wrappers cover row counts and cache gua
         is None else {
         fail("expected no transaction row")
       }
-      assert_eq(
+      @debug.assert_eq(
         row_values(
           tx.query_typed_all(
             "select $1::int4 as value",
@@ -554,7 +552,7 @@ async test "integration pool direct transaction builder and savepoints keep leas
           explicit.execute("insert into moon_pool_nested_tx(value) values (5)"),
           1,
         )
-        assert_eq(
+        @debug.assert_eq(
           row_values(
             explicit.query_all(
               "select value from moon_pool_nested_tx order by value",
@@ -729,30 +727,24 @@ async test "integration pool with_simple_query collect keeps connection reusable
       )
     })
 
-    guard messages[0]
-      is @client.SimpleQueryMessage::RowDescription(left_columns) else {
+    guard messages[0] is RowDescription(left_columns) else {
       fail("expected first row description")
     }
-    guard messages[1] is @client.SimpleQueryMessage::Row(left_row) else {
-      fail("expected first row")
-    }
-    guard messages[2] is @client.SimpleQueryMessage::CommandComplete(left_tag) else {
+    guard messages[1] is Row(left_row) else { fail("expected first row") }
+    guard messages[2] is CommandComplete(left_tag) else {
       fail("expected first command tag")
     }
-    guard messages[3]
-      is @client.SimpleQueryMessage::RowDescription(right_columns) else {
+    guard messages[3] is RowDescription(right_columns) else {
       fail("expected second row description")
     }
-    guard messages[4] is @client.SimpleQueryMessage::Row(right_row) else {
-      fail("expected second row")
-    }
-    guard messages[5] is @client.SimpleQueryMessage::CommandComplete(right_tag) else {
+    guard messages[4] is Row(right_row) else { fail("expected second row") }
+    guard messages[5] is CommandComplete(right_tag) else {
       fail("expected second command tag")
     }
-    assert_eq(left_columns, ["side"])
+    @debug.assert_eq(left_columns, ["side"])
     @debug.assert_eq(try! left_row.get_name("side"), Some("left"))
     assert_eq(left_tag, "SELECT 1")
-    assert_eq(right_columns, ["side"])
+    @debug.assert_eq(right_columns, ["side"])
     @debug.assert_eq(try! right_row.get_name("side"), Some("right"))
     assert_eq(right_tag, "SELECT 1")
 
@@ -782,12 +774,11 @@ async test "integration pool with_simple_query detach cleanup survives callback 
       client.with_simple_query(
         "select generate_series(1, 16)::int4 as value order by value",
         stream => {
-          guard stream.next()
-            is Some(@client.SimpleQueryMessage::RowDescription(columns)) else {
+          guard stream.next() is Some(RowDescription(columns)) else {
             fail("expected row description")
           }
-          assert_eq(columns, ["value"])
-          guard stream.next() is Some(@client.SimpleQueryMessage::Row(row)) else {
+          @debug.assert_eq(columns, ["value"])
+          guard stream.next() is Some(Row(row)) else {
             fail("expected first row")
           }
           @debug.assert_eq(try! row.get_name("value"), Some("1"))
@@ -884,7 +875,7 @@ async test "integration pool direct lease operation and default transaction scop
       1,
     )
     named.commit()
-    assert_eq(
+    @debug.assert_eq(
       row_values(
         tx.query_all("select value from moon_pool_direct_scope order by value"),
       ),
@@ -893,7 +884,7 @@ async test "integration pool direct lease operation and default transaction scop
     tx.commit()
 
     lease.check_connection()
-    assert_eq(
+    @debug.assert_eq(
       row_values(
         lease.query_all(
           "select value from moon_pool_direct_scope order by value",

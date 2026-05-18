@@ -24,7 +24,7 @@ async fn _quick_start() -> Unit {
       database="app",
       password="secret",
       port=5432,
-      ssl_mode=@client.SslMode::VerifyFull,
+      ssl_mode=VerifyFull,
       application_name="my-service",
     )
     let (client, connection) = @client.connect(config)
@@ -75,7 +75,7 @@ fn _config_example() -> @client.Config {
     database="app",
     password="secret",
     port=5432,
-    ssl_mode=@client.SslMode::VerifyFull,
+    ssl_mode=VerifyFull,
     application_name="my-service",
   )
 }
@@ -208,7 +208,7 @@ fn _tls_examples() -> (@client.Config, @client.Config) {
     user="postgres",
     database="app",
     password="secret",
-    ssl_mode=@client.SslMode::VerifyFull,
+    ssl_mode=VerifyFull,
     application_name="my-service",
   )
   let routed = @client.Config::new(
@@ -217,7 +217,7 @@ fn _tls_examples() -> (@client.Config, @client.Config) {
     user="postgres",
     database="app",
     password="secret",
-    ssl_mode=@client.SslMode::VerifyFull,
+    ssl_mode=VerifyFull,
     ssl_root_cert="/etc/postgres/root.crt",
     application_name="my-service",
   )
@@ -259,8 +259,8 @@ fn _channel_binding_example() -> @client.Config {
     user="postgres",
     database="app",
     password="secret",
-    ssl_mode=@client.SslMode::VerifyFull,
-    channel_binding=@client.ChannelBinding::Prefer,
+    ssl_mode=VerifyFull,
+    channel_binding=Prefer,
     application_name="my-service",
   )
 }
@@ -450,7 +450,7 @@ struct EmailText {
 
 ///|
 impl @client.ToSql for EmailText with format(_, _) {
-  @client.WireFormat::Text
+  Text
 }
 
 ///|
@@ -467,7 +467,7 @@ impl @client.ToSql for EmailText with moonbit_type_name(_) {
 ///|
 impl @client.ToSql for EmailText with to_sql(self, _, buf) {
   buf.write_bytes(@proto.utf8_encode(self.value))
-  @proto.IsNull::No
+  No
 }
 
 ///|

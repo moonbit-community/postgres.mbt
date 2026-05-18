@@ -56,7 +56,7 @@ fn write_cstr(
 ) -> Unit raise @proto.ProtocolError {
   for b in s {
     if b == 0 {
-      raise @proto.ProtocolError::InvalidInput("string contains embedded null")
+      raise InvalidInput("string contains embedded null")
     }
   }
   buf.write_bytesview(s)

@@ -51,7 +51,7 @@ fn make_row_description_body(
     parse_backend_message(
       parsing_backend_packet(@backend.ROW_DESCRIPTION_TAG, payload),
     ) {
-    @backend.Message::RowDescription(body) => body
+    RowDescription(body) => body
     _ => fail("expected RowDescription message")
   }
 }
@@ -73,7 +73,7 @@ fn make_data_row_body(values : Array[Bytes?]) -> @backend.DataRowBody raise {
     parse_backend_message(
       parsing_backend_packet(@backend.DATA_ROW_TAG, payload),
     ) {
-    @backend.Message::DataRow(body) => body
+    DataRow(body) => body
     _ => fail("expected DataRow message")
   }
 }
@@ -90,7 +90,7 @@ fn make_copy_formats(formats : Array[Int]) -> @backend.ColumnFormats raise {
     parse_backend_message(
       parsing_backend_packet(@backend.COPY_IN_RESPONSE_TAG, payload),
     ) {
-    @backend.Message::CopyInResponse(body) => body.column_formats()
+    CopyInResponse(body) => body.column_formats()
     _ => fail("expected CopyInResponse message")
   }
 }
@@ -111,7 +111,7 @@ fn make_error_fields(
     parse_backend_message(
       parsing_backend_packet(@backend.ERROR_RESPONSE_TAG, payload),
     ) {
-    @backend.Message::ErrorResponse(body) => body.fields()
+    ErrorResponse(body) => body.fields()
     _ => fail("expected ErrorResponse message")
   }
 }
@@ -145,9 +145,9 @@ test "backend parsing extracts columns and names from row descriptions" {
   @debug.assert_eq(columns[0].table_oid, 7U)
   @debug.assert_eq(columns[0].column_id, 1)
   assert_true(columns[0].type_ == Type::int4())
-  assert_true(columns[0].format == WireFormat::Text)
+  assert_true(columns[0].format == Text)
   assert_true(columns[1].type_ == Type::unknown(99999U, name="oid_99999"))
-  assert_true(columns[1].format == WireFormat::Binary)
+  assert_true(columns[1].format == Binary)
   @debug.assert_eq(parse_column_names(body), ["answer", "mystery"])
 }
 
@@ -245,14 +245,14 @@ test "backend parsing merges stream columns and reports mismatches" {
       type_: Type::unknown(23U, name="resolved_int4"),
       type_size: -1,
       type_modifier: -1,
-      format: WireFormat::Binary,
+      format: Binary,
     },
   ]
   let merged = merge_stream_columns(resolved, body)
   @debug.assert_eq(merged[0].name, "value")
   @debug.assert_eq(merged[0].table_oid, 11U)
   assert_true(merged[0].type_ == Type::unknown(23U, name="resolved_int4"))
-  assert_true(merged[0].format == WireFormat::Text)
+  assert_true(merged[0].format == Text)
 
   let mismatch_count : Result[Array[Column], Error] = try? merge_stream_columns(
     [resolved[0], resolved[0]],
@@ -279,7 +279,7 @@ test "backend parsing merges stream columns and reports mismatches" {
 
 ///|
 async test "backend parsing fail_response_stream closes queue with error" {
-  let responses : @async.Queue[Int] = @async.Queue(kind=Unbounded)
+  let responses : @async.Queue[Int] = Queue(kind=Unbounded)
   let result : Result[Unit, Error] = try? fail_response_stream(
     responses,
     ClientError::UnexpectedMessage("boom"),

@@ -93,7 +93,7 @@ async test "integration copy out finish drains large payload and keeps connectio
     let stream = client.copy_out(
       "copy (select repeat('x', 32768) from generate_series(1, 8)) to stdout",
     )
-    assert_true(stream.formats == [@client.WireFormat::Text])
+    assert_true(stream.formats == [Text])
     stream.finish()
 
     let probe : Int = client

@@ -227,20 +227,20 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   // survive across several backend auth messages.
   for msg = read_message(stream) {
     match msg {
-      @backend.Message::AuthenticationOk => {
+      AuthenticationOk => {
         verify_required_channel_binding(config, channel_binding_used)
         continue read_message(stream)
       }
-      @backend.Message::AuthenticationCleartextPassword => {
+      AuthenticationCleartextPassword => {
         reject_unsupported_channel_binding(config)
         send_password_message(stream, config.password)
         continue read_message(stream)
       }
-      @backend.Message::AuthenticationMd5Password(_) => {
+      AuthenticationMd5Password(_) => {
         reject_unsupported_channel_binding(config)
         raise ClientError::Authentication(deprecated_md5_authentication_message)
       }
-      @backend.Message::AuthenticationSasl(body) => {
+      AuthenticationSasl(body) => {
         let (next_scram, channel_bound) = begin_scram(
           stream,
           body,
@@ -252,32 +252,32 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
         scram_channel_bound = channel_bound
         continue read_message(stream)
       }
-      @backend.Message::AuthenticationSaslContinue(body) => {
+      AuthenticationSaslContinue(body) => {
         continue_scram(stream, scram, body.data())
         continue read_message(stream)
       }
-      @backend.Message::AuthenticationSaslFinal(body) => {
+      AuthenticationSaslFinal(body) => {
         finish_scram(scram, body.data())
         if scram_channel_bound {
           channel_binding_used = true
         }
         continue read_message(stream)
       }
-      @backend.Message::ParameterStatus(body) => {
+      ParameterStatus(body) => {
         // Capture the initial session parameter snapshot now so steady-state
         // runtime helpers start with the same view PostgreSQL advertised here.
         status[body.name_str()] = body.value_str()
         continue read_message(stream)
       }
-      @backend.Message::BackendKeyData(body) => {
+      BackendKeyData(body) => {
         // These values are later reused by `CancelToken` on a separate short-
         // lived control connection.
         process_id = body.process_id
         secret_key = body.secret_key
         continue read_message(stream)
       }
-      @backend.Message::NoticeResponse(_) => continue read_message(stream)
-      @backend.Message::ReadyForQuery(body) => {
+      NoticeResponse(_) => continue read_message(stream)
+      ReadyForQuery(body) => {
         verify_required_channel_binding(config, channel_binding_used)
         // `ReadyForQuery` is the handoff point from startup/authentication into
         // the ordinary request scheduling loop.
@@ -289,13 +289,13 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
           transaction_status,
         }
       }
-      @backend.Message::ErrorResponse(body) =>
+      ErrorResponse(body) =>
         raise ClientError::Database(parse_database_error(body.fields()))
-      @backend.Message::AuthenticationKerberosV5
-      | @backend.Message::AuthenticationScmCredential
-      | @backend.Message::AuthenticationGss
-      | @backend.Message::AuthenticationGssContinue(_)
-      | @backend.Message::AuthenticationSspi => {
+      AuthenticationKerberosV5
+      | AuthenticationScmCredential
+      | AuthenticationGss
+      | AuthenticationGssContinue(_)
+      | AuthenticationSspi => {
         reject_unsupported_channel_binding(config)
         raise ClientError::Authentication(
           "server requested an unsupported authentication method",
@@ -366,8 +366,7 @@ async fn begin_scram(
   let (mechanism, scram_binding) = choose_scram_binding(
     body, channel_binding, transport_binding,
   )
-  let channel_bound = scram_binding
-    is @auth.ChannelBinding::TlsServerEndPoint(_)
+  let channel_bound = scram_binding is TlsServerEndPoint(_)
   let scram = @auth.ScramSha256::new(
     @proto.utf8_encode(password)[:],
     scram_binding,

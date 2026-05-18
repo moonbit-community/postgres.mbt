@@ -57,17 +57,17 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
       let kind = if typtype == "e" {
         Kind::Enum(query_enum_labels(shared, oid))
       } else if typtype == "p" {
-        Kind::Pseudo
+        Pseudo
       } else if base_oid != 0U {
-        Kind::Domain(base_oid)
+        Domain(base_oid)
       } else if elem_oid != 0U {
-        Kind::Array(elem_oid)
+        Array(elem_oid)
       } else if relid != 0U {
-        Kind::Composite(query_composite_fields(shared, relid))
+        Composite(query_composite_fields(shared, relid))
       } else {
         match range_subtype {
-          Some(subtype) => Kind::Range(subtype)
-          None => Kind::Simple
+          Some(subtype) => Range(subtype)
+          None => Simple
         }
       }
       { oid, name, kind }

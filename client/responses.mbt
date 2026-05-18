@@ -50,10 +50,7 @@ fn make_statement_cleanup(client : Client, name : Bytes) -> StreamCleanup raise 
 /// This is used on early failures that happen before a `RowStream` can be
 /// returned to the caller and therefore before deferred cleanup is available.
 async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
-  let responses = client.send_request(
-    RequestKind::Messages,
-    close_bytes(b'S', name[:]),
-  )
+  let responses = client.send_request(Messages, close_bytes(b'S', name[:]))
   drain_close_response(responses)
 }
 
@@ -66,7 +63,7 @@ async fn start_copy_out(
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::CopyOutResponse(body) =>
+      CopyOutResponse(body) =>
         // The stream is valid only after PostgreSQL explicitly enters COPY OUT
         // mode and advertises the per-column wire formats.
         return {
@@ -77,11 +74,11 @@ async fn start_copy_out(
           detached: false,
           finished: false,
         }
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None =>
@@ -107,23 +104,23 @@ async fn read_prepare_response(
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::ParseComplete => continue responses.get()
-      @backend.Message::ParameterDescription(body) => {
+      ParseComplete => continue responses.get()
+      ParameterDescription(body) => {
         // Hold onto raw OIDs for now; the richer `Type` descriptors are loaded
         // only after PostgreSQL finishes the prepare exchange successfully.
         param_oids = parse_parameter_oids(body)
         continue responses.get()
       }
-      @backend.Message::RowDescription(body) => {
+      RowDescription(body) => {
         columns = parse_columns(body)
         continue responses.get()
       }
-      @backend.Message::NoData => continue responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      NoData => continue responses.get()
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => {
@@ -150,18 +147,18 @@ async fn collect_copy_in_completion(
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::CommandComplete(body) => {
+      CommandComplete(body) => {
         // COPY IN reports affected rows only through the trailing command tag,
         // after all client input has already been sent.
         command_tag = body.tag_str()
         continue responses.get()
       }
-      @backend.Message::CopyDone => continue responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      CopyDone => continue responses.get()
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => break rows_affected(command_tag)
@@ -179,12 +176,12 @@ async fn drain_close_response(
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
-      @backend.Message::CloseComplete => continue responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      CloseComplete => continue responses.get()
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => break ()
@@ -200,7 +197,7 @@ async fn drain_sync_response(
   responses : @async.Queue[@backend.Message],
 ) -> Unit {
   match responses.get() {
-    @backend.Message::ReadyForQuery(_) => ()
+    ReadyForQuery(_) => ()
     _ => raise ClientError::UnexpectedMessage("unexpected sync response")
   }
 }
@@ -213,15 +210,15 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
     match res {
       // `batch_execute` intentionally ignores per-statement rows and metadata;
       // only terminal success or database failure matters here.
-      @backend.Message::CommandComplete(_)
-      | @backend.Message::EmptyQueryResponse
-      | @backend.Message::RowDescription(_)
-      | @backend.Message::DataRow(_) => continue responses.get()
-      @backend.Message::ErrorResponse(body) => {
+      CommandComplete(_)
+      | EmptyQueryResponse
+      | RowDescription(_)
+      | DataRow(_) => continue responses.get()
+      ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
       }
-      @backend.Message::ReadyForQuery(_) =>
+      ReadyForQuery(_) =>
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => break ()

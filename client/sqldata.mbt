@@ -10,16 +10,16 @@ pub(all) enum WireFormat {
 ///|
 fn encode_wire_format(format : WireFormat) -> Int {
   match format {
-    WireFormat::Text => 0
-    WireFormat::Binary => 1
+    Text => 0
+    Binary => 1
   }
 }
 
 ///|
 fn decode_wire_format(code : Int) -> WireFormat raise {
   match code {
-    0 => WireFormat::Text
-    1 => WireFormat::Binary
+    0 => Text
+    1 => Binary
     _ =>
       raise ClientError::Protocol(
         "unsupported wire format code: \{code.to_string()}",
@@ -56,7 +56,7 @@ pub(open) trait ToSql {
 ///|
 /// Default `ToSql` implementations use PostgreSQL binary format.
 impl ToSql with format(_, _) {
-  WireFormat::Binary
+  Binary
 }
 
 ///|
@@ -87,7 +87,7 @@ impl FromSql with from_sql_null(type_, _) {
 /// Optional parameters encode `None` as SQL `NULL` and delegate `Some` values.
 pub impl[T : ToSql] ToSql for T? with format(self, type_) {
   match self {
-    None => WireFormat::Binary
+    None => Binary
     Some(value) => value.format(type_)
   }
 }
@@ -114,7 +114,7 @@ pub impl[T : ToSql] ToSql for T? with moonbit_type_name(self) {
 /// Optional parameters serialize `None` as SQL `NULL`.
 pub impl[T : ToSql] ToSql for T? with to_sql(self, type_, buf) {
   match self {
-    None => @proto.IsNull::Yes
+    None => Yes
     Some(value) => value.to_sql(type_, buf)
   }
 }
@@ -148,7 +148,7 @@ pub impl[T : FromSql] FromSql for T? with from_sql_null(_, _) {
 /// Built-in arrays use PostgreSQL's binary array payload and delegate element
 /// encoding to the existing scalar codecs.
 pub impl[T : ToSql] ToSql for Array[T] with format(_, _) {
-  WireFormat::Binary
+  Binary
 }
 
 ///|
@@ -179,7 +179,7 @@ pub impl[T : ToSql] ToSql for Array[T] with to_sql(self, type_, buf) {
     [@types.ArrayDimension::new(self.length(), 1)]
   }
   write_array_payload(dimensions, element_type.oid, self, element_type, buf)
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -201,9 +201,8 @@ pub impl[T : FromSql] FromSql for Array[T] with from_sql(type_, format, raw) {
     raise ClientError::Decode("cannot decode Array from \{type_.name}")
   }
   match format {
-    WireFormat::Text =>
-      raise ClientError::Decode("text array decoding is not supported")
-    WireFormat::Binary => {
+    Text => raise ClientError::Decode("text array decoding is not supported")
+    Binary => {
       let pg_array = @types.array_from_sql(raw)
       if pg_array.dimensions > 1 {
         raise ClientError::Decode("multidimensional arrays are not supported")
@@ -214,13 +213,11 @@ pub impl[T : FromSql] FromSql for Array[T] with from_sql(type_, format, raw) {
         match value {
           None => break values
           Some(None) => {
-            values.push(T::from_sql_null(element_type, WireFormat::Binary))
+            values.push(T::from_sql_null(element_type, Binary))
             continue array_values.next()
           }
           Some(Some(payload)) => {
-            values.push(
-              T::from_sql(element_type, WireFormat::Binary, payload[:]),
-            )
+            values.push(T::from_sql(element_type, Binary, payload[:]))
             continue array_values.next()
           }
         }
@@ -252,11 +249,11 @@ fn[T : ToSql] jsonb_array_element_to_sql(
 ) -> @proto.IsNull raise Error {
   let payload = @buffer.new()
   match element.to_sql(element_type, payload) {
-    @proto.IsNull::Yes => @proto.IsNull::Yes
-    @proto.IsNull::No => {
+    Yes => Yes
+    No => {
       buf.write_byte(b'\x01')
       buf.write_bytes(payload.to_bytes())
-      @proto.IsNull::No
+      No
     }
   }
 }
@@ -296,11 +293,11 @@ fn[T : ToSql] write_array_payload(
     let element_payload = @buffer.new()
     let is_null = array_element_to_sql(element, element_type, element_payload)
     match is_null {
-      @proto.IsNull::Yes => {
+      Yes => {
         has_nulls = true
         payload.write_int_be(-1)
       }
-      @proto.IsNull::No => {
+      No => {
         payload.write_int_be(@proto.i32_from_usize(element_payload.length()))
         payload.write_bytes(element_payload.to_bytes())
       }

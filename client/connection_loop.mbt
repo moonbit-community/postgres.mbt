@@ -90,13 +90,13 @@ async fn Connection::send_outbound_request(
 ) -> Bool {
   self.stream.write(request.bytes)
   match request.kind {
-    RequestKind::Terminate => {
+    Terminate => {
       // PostgreSQL closes the socket after `Terminate`; there is no matching
       // terminal `ReadyForQuery` for this synthetic request queue.
       request.responses.close()
       true
     }
-    RequestKind::Messages | RequestKind::CopyIn => {
+    Messages | CopyIn => {
       pending.push(request)
       false
     }
@@ -115,7 +115,7 @@ fn Connection::can_pipeline_requests(
   ignore(self)
   for request in pending {
     match request.kind {
-      RequestKind::Messages => ()
+      Messages => ()
       _ => return false
     }
   }
@@ -137,7 +137,7 @@ async fn Connection::pipeline_pending_requests(
         // Stop as soon as pipelining reaches a request that needs extra
         // mid-stream coordination, such as COPY IN or graceful shutdown.
         let is_barrier = match request.kind {
-          RequestKind::Messages => false
+          Messages => false
           _ => true
         }
         if sent_terminate || is_barrier {
@@ -169,19 +169,19 @@ async fn Connection::forward_pending_message(
   // All remaining frames belong to the request at the front of the protocol
   // timeline because PostgreSQL replies in request order.
   match request.kind {
-    RequestKind::Messages => {
+    Messages => {
       self.forward_message_to_request(request, message)
-      if message is @backend.Message::ReadyForQuery(_) {
+      if message is ReadyForQuery(_) {
         ignore(pending.remove(0))
       }
     }
-    RequestKind::CopyIn => {
+    CopyIn => {
       self.forward_copy_in_message(request, message)
-      if message is @backend.Message::ReadyForQuery(_) {
+      if message is ReadyForQuery(_) {
         ignore(pending.remove(0))
       }
     }
-    RequestKind::Terminate =>
+    Terminate =>
       raise ClientError::UnexpectedMessage("unexpected terminate request")
   }
 }
@@ -196,7 +196,7 @@ async fn Connection::forward_message_to_request(
   message : @backend.Message,
 ) -> Unit {
   match message {
-    @backend.Message::ReadyForQuery(body) => {
+    ReadyForQuery(body) => {
       self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
@@ -213,13 +213,13 @@ async fn Connection::forward_copy_in_message(
 ) -> Unit {
   let copy_input = request.copy_input.unwrap()
   match message {
-    @backend.Message::CopyInResponse(_) => {
+    CopyInResponse(_) => {
       request.responses.put(message)
       // Only after PostgreSQL enters COPY mode may the client start producing
       // `CopyData` / `CopyDone` / `CopyFail` frames for this request.
       self.drain_copy_input(copy_input)
     }
-    @backend.Message::ReadyForQuery(body) => {
+    ReadyForQuery(body) => {
       self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
@@ -239,7 +239,7 @@ async fn Connection::drain_copy_input(
 ) -> Unit {
   for act = input.get() {
     match act {
-      CopyInAction::Data(data) => {
+      Data(data) => {
         // Data chunks can flow indefinitely; keep consuming producer input
         // until it explicitly finishes or aborts this COPY exchange.
         let payload = @buffer.new()
@@ -247,7 +247,7 @@ async fn Connection::drain_copy_input(
         self.stream.write(payload.to_bytes())
         continue input.get()
       }
-      CopyInAction::Finish => {
+      Finish => {
         // After `CopyDone`, the request returns to normal backend completion
         // handling on the response queue.
         let payload = @buffer.new()
@@ -255,7 +255,7 @@ async fn Connection::drain_copy_input(
         self.stream.write(payload.to_bytes())
         return
       }
-      CopyInAction::Fail(message) => {
+      Fail(message) => {
         // PostgreSQL still sends trailing completion frames after `CopyFail`,
         // so the request stays pending until the backend catches up.
         let payload = @buffer.new()
@@ -334,26 +334,23 @@ fn Connection::handle_async_message(
   on_async : (AsyncMessage) -> Unit,
 ) -> Bool raise {
   match message {
-    @backend.Message::ParameterStatus(body) => {
+    ParameterStatus(body) => {
       let name = body.name_str()
       let value = body.value_str()
       self.shared.parameters[name] = value
+      self.push_async_message(ParameterStatus(name, value), on_async)
+      true
+    }
+    NoticeResponse(body) => {
       self.push_async_message(
-        AsyncMessage::ParameterStatus(name, value),
+        Notice(parse_database_error(body.fields())),
         on_async,
       )
       true
     }
-    @backend.Message::NoticeResponse(body) => {
+    NotificationResponse(body) => {
       self.push_async_message(
-        AsyncMessage::Notice(parse_database_error(body.fields())),
-        on_async,
-      )
-      true
-    }
-    @backend.Message::NotificationResponse(body) => {
-      self.push_async_message(
-        AsyncMessage::Notification({
+        Notification({
           process_id: body.process_id,
           channel: body.channel_str(),
           payload: body.message_str(),

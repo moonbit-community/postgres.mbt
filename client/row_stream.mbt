@@ -47,41 +47,38 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
   }
   for res = self.responses.get() {
     match res {
-      @backend.Message::ParseComplete
-      | @backend.Message::BindComplete
-      | @backend.Message::CloseComplete
-      | @backend.Message::ParameterDescription(_) =>
+      ParseComplete | BindComplete | CloseComplete | ParameterDescription(_) =>
         // Setup/bookkeeping frames do not carry row payloads once the stream is
         // active, so readers can skip them transparently.
         continue self.responses.get()
-      @backend.Message::NoData => continue self.responses.get()
-      @backend.Message::RowDescription(body) => {
+      NoData => continue self.responses.get()
+      RowDescription(body) => {
         // Execution may repeat column metadata. Merge it so previously resolved
         // rich types survive while protocol consistency is still checked.
         self.columns = merge_stream_columns(self.columns, body)
         continue self.responses.get()
       }
-      @backend.Message::DataRow(body) => {
+      DataRow(body) => {
         self.row_count += 1
         // Rows must copy their field bytes now because the backend message
         // buffer does not outlive this iteration step.
         return Some({ columns: self.columns, values: parse_binary_values(body) })
       }
-      @backend.Message::CommandComplete(body) => {
+      CommandComplete(body) => {
         self.command_tag = body.tag_str()
         continue self.responses.get()
       }
-      @backend.Message::PortalSuspended => {
+      PortalSuspended => {
         self.suspended = true
         continue self.responses.get()
       }
-      @backend.Message::ErrorResponse(body) => {
+      ErrorResponse(body) => {
         // PostgreSQL may still send the terminal ready message after an error,
         // so remember the failure but keep draining until the request ends.
         self.database_error = Some(parse_database_error(body.fields()))
         continue self.responses.get()
       }
-      @backend.Message::ReadyForQuery(_) => {
+      ReadyForQuery(_) => {
         self.summary = Some({
           command_tag: self.command_tag,
           row_count: self.row_count,
@@ -161,10 +158,7 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
         cleanup.done = true
         // Deferred cleanup is modeled as an ordinary request so it obeys the
         // same queueing and pipelining rules as user-visible work.
-        let responses = cleanup.client.send_request(
-          RequestKind::Messages,
-          cleanup.bytes,
-        )
+        let responses = cleanup.client.send_request(Messages, cleanup.bytes)
         drain_close_response(responses)
       }
     None => ()
@@ -183,29 +177,29 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
     None =>
       for res = self.responses.get() {
         match res {
-          @backend.Message::ParseComplete
-          | @backend.Message::BindComplete
-          | @backend.Message::CloseComplete
-          | @backend.Message::ParameterDescription(_)
-          | @backend.Message::NoData
-          | @backend.Message::RowDescription(_) => continue self.responses.get()
-          @backend.Message::DataRow(_) =>
+          ParseComplete
+          | BindComplete
+          | CloseComplete
+          | ParameterDescription(_)
+          | NoData
+          | RowDescription(_) => continue self.responses.get()
+          DataRow(_) =>
             // Detached drains intentionally skip row decoding because the
             // caller can no longer observe individual payloads.
             continue self.responses.get()
-          @backend.Message::CommandComplete(body) => {
+          CommandComplete(body) => {
             self.command_tag = body.tag_str()
             continue self.responses.get()
           }
-          @backend.Message::PortalSuspended => {
+          PortalSuspended => {
             self.suspended = true
             continue self.responses.get()
           }
-          @backend.Message::ErrorResponse(body) => {
+          ErrorResponse(body) => {
             self.database_error = Some(parse_database_error(body.fields()))
             continue self.responses.get()
           }
-          @backend.Message::ReadyForQuery(_) => {
+          ReadyForQuery(_) => {
             self.summary = Some({
               command_tag: self.command_tag,
               row_count: self.row_count,

@@ -4,9 +4,7 @@ async test "row stream detach does not swallow non-database drain failures" {
     let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(
       Some(group),
     )
-    let responses : @async.Queue[@backend.Message] = @async.Queue(
-      kind=Unbounded,
-    )
+    let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
     let stream = new_row_stream(background_group, responses)
     responses.close(error=ClientError::UnexpectedMessage("boom"), clear=true)
     stream.detach()
