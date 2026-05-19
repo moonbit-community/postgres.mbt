@@ -170,8 +170,9 @@ Recycling methods mean:
 
 Choose `fast` for simple stateless workloads, `verified` when broken idle
 connections are the main concern, and `clean` when borrowers regularly leave
-session-local state such as prepared statements, LISTEN state, advisory locks,
-or temporary objects behind.
+session-local state such as open portals/cursors, LISTEN state, advisory locks,
+or temporary objects behind. Cached prepared statements are managed separately
+through the statement-cache APIs.
 
 ## Builder Hooks
 
