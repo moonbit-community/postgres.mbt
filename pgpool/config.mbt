@@ -136,7 +136,7 @@ pub fn RecyclingMethod::verified() -> RecyclingMethod {
 ///
 /// The pool runs the same cleanup SQL sequence used by
 /// `deadpool-postgres`-style "clean" recycling. In practice this closes
-/// prepared statements, resets session settings, clears LISTEN state, releases
+/// open portals/cursors, resets session settings, clears LISTEN state, releases
 /// advisory locks, and discards temporary objects before reuse.
 pub fn RecyclingMethod::clean() -> RecyclingMethod {
   Clean

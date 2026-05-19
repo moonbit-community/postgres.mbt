@@ -193,8 +193,8 @@ Currently unsupported libpq TLS parameters:
 - Replace `require` with `verify_full` when the server certificate should match
   the target hostname or IP. Use `verify_ca` only when hostname validation is
   intentionally not part of the deployment model.
-- URL configuration now accepts only `disable`, `verify-ca`, and
-  `verify-full`.
+- When translating libpq-style `sslmode` values, use only `disable`,
+  `verify-ca`, and `verify-full`.
 - `VerifyFull` now requires an explicit `host` or `hostaddr`. Old code paths
   that relied on an implicit local default host become configuration errors.
 
@@ -266,8 +266,8 @@ fn _channel_binding_example() -> @client.Config {
 }
 ```
 
-The pool package accepts the same setting through declarative config and through
-URL parsing via the separate parameter `channel_binding=disable|prefer|require`.
+The pool package accepts the same setting through declarative config via
+`channel_binding=Disable|Prefer|Require`.
 
 Connection lifecycle APIs:
 
@@ -354,7 +354,10 @@ ships built-in `ToSql` and `FromSql` implementations for:
 - `Double`
 - `String`
 - `Bytes`
+- `Json`
 - `T?` for any existing `ToSql` / `FromSql` codec
+- one-dimensional `Array[T]` and `Array[T?]` over supported built-in element
+  codecs
 
 Typical mappings are:
 
@@ -368,7 +371,9 @@ Typical mappings are:
 | `Double` | `float8` |
 | `String` | `text`, `varchar`, `name`, and other text-like types |
 | `Bytes` | `bytea`, `uuid`, and raw byte-oriented formats |
+| `Json` | `json`, `jsonb` |
 | `T?` | `NULL` on encode, optional decode on read |
+| `Array[T]` / `Array[T?]` | one-dimensional arrays of supported built-in element types |
 
 Example:
 
@@ -785,7 +790,8 @@ type, method, or enum variant is for.
 - `SslMode::Disable`, `SslMode::VerifyCa`, `SslMode::VerifyFull`: TLS negotiation policies.
 - `ChannelBinding::Disable`, `ChannelBinding::Prefer`, `ChannelBinding::Require`: SCRAM channel-binding policies.
 - `Config { host, hostaddr, port, user, database, password, ssl_mode, ssl_root_cert, channel_binding, application_name, options, connect_timeout_ms, keepalives, keepalives_idle_s }`: immutable connection settings kept both for startup and later cancellation.
-- `Config::new(host, hostaddr?, user~, database?, password?, port?, ssl_mode?, ssl_root_cert?, channel_binding?, application_name~, options?, connect_timeout_ms?, keepalives?, keepalives_idle_s?)`: build a config with secure defaults and an explicit PostgreSQL `application_name`.
+- `Config::new(host, hostaddr?, port?, user~, database?, password?, ssl_mode?, ssl_root_cert?, channel_binding?, application_name~, options?, connect_timeout_ms?, keepalives?, keepalives_idle_s?)`: build a config with secure defaults and an explicit PostgreSQL `application_name`.
+- `Config::from_parts(host, hostaddr, port, user, database, password, ssl_mode, ssl_root_cert, channel_binding, application_name, options, connect_timeout_ms, keepalives, keepalives_idle_s)`: construct a fully resolved single-target config from explicit values.
 
 ### Client And Connection
 
@@ -830,10 +836,14 @@ type, method, or enum variant is for.
 - `Transaction::bind(statement, params~)`: bind a prepared statement while the transaction is still open.
 - `Transaction::commit()`: commit the transaction or release the current savepoint.
 - `Transaction::execute(sql, params~)`: execute SQL inside the transaction and return affected rows.
+- `Transaction::execute_raw(statement, params~)`: execute an already prepared statement inside the transaction.
 - `Transaction::prepare(sql)`: prepare a statement while the transaction is active.
+- `Transaction::prepare_typed(sql, types)`: prepare a statement with explicit parameter types while the transaction is active.
 - `Transaction::query(sql, params~)`: query rows inside the transaction.
 - `Transaction::query_portal(portal, max_rows)`: execute a portal while the transaction is active.
+- `Transaction::query_statement(statement, params~)`: execute a prepared statement while the transaction is active.
 - `Transaction::rollback()`: roll back the transaction or roll back to and release the savepoint.
+- `Transaction::savepoint(name)`: create a named savepoint and return a nested transaction handle.
 - `Transaction::transaction()`: create a nested transaction implemented with a PostgreSQL savepoint.
 - `TransactionBuilder::deferrable(enabled?)`: set `DEFERRABLE` or `NOT DEFERRABLE`.
 - `TransactionBuilder::isolation_level(level)`: set `ISOLATION LEVEL ...`.
