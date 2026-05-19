@@ -24,6 +24,20 @@ You can browse and install extra skills here:
 - Try to keep deprecated blocks in file called `deprecated.mbt` in each
   directory.
 
+## Documentation
+
+- After changing code, check whether documentation needs a corresponding update,
+  including `README.md`, `README.mbt.md`, package documentation, examples, and
+  user-facing and internal code comments.
+
+- Update documentation in the same change when behavior, public APIs,
+  configuration, examples, or workflows change. If no documentation update is
+  needed, make that explicit in the final summary.
+
+- Keep internal comments accurate when implementation details, invariants,
+  assumptions, or non-obvious control flow change. Remove stale comments instead
+  of preserving explanations that no longer match the code.
+
 ## Tooling
 
 - `moon fmt` is used to format your code properly.
