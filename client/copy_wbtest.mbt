@@ -3,7 +3,7 @@ fn copy_test_backend_packet(
   tag : Byte,
   payload : @buffer.Buffer,
 ) -> Bytes raise @proto.ProtocolError {
-  let packet = @buffer.new()
+  let packet = Buffer()
   packet.write_byte(tag)
   packet.write_int_be(@proto.i32_from_usize(payload.length() + 4))
   packet.write_bytes(payload.to_bytes())
@@ -22,7 +22,7 @@ fn copy_test_parse_backend_message(packet : Bytes) -> @backend.Message raise {
 fn copy_test_ready_for_query_message(
   status? : Byte = b'I',
 ) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_byte(status)
   copy_test_parse_backend_message(
     copy_test_backend_packet(@backend.READY_FOR_QUERY_TAG, payload),
@@ -34,7 +34,7 @@ fn copy_test_copy_response_message(
   tag : Byte,
   formats : Array[Int],
 ) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_byte(0)
   payload.write_int16_be(@proto.checked_i16(formats.length()))
   for format in formats {
@@ -59,7 +59,7 @@ fn copy_test_copy_out_response_message(
 
 ///|
 fn copy_test_copy_data_message(data : Bytes) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_bytes(data)
   copy_test_parse_backend_message(
     copy_test_backend_packet(@backend.COPY_DATA_TAG, payload),
@@ -69,13 +69,13 @@ fn copy_test_copy_data_message(data : Bytes) -> @backend.Message raise {
 ///|
 fn copy_test_copy_done_message() -> @backend.Message raise {
   copy_test_parse_backend_message(
-    copy_test_backend_packet(@backend.COPY_DONE_TAG, @buffer.new()),
+    copy_test_backend_packet(@backend.COPY_DONE_TAG, Buffer()),
   )
 }
 
 ///|
 fn copy_test_command_complete_message(tag : String) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_bytes(@proto.utf8_encode(tag))
   payload.write_byte(0)
   copy_test_parse_backend_message(
@@ -86,13 +86,13 @@ fn copy_test_command_complete_message(tag : String) -> @backend.Message raise {
 ///|
 fn copy_test_close_complete_message() -> @backend.Message raise {
   copy_test_parse_backend_message(
-    copy_test_backend_packet(@backend.CLOSE_COMPLETE_TAG, @buffer.new()),
+    copy_test_backend_packet(@backend.CLOSE_COMPLETE_TAG, Buffer()),
   )
 }
 
 ///|
 fn copy_test_error_response_message(message : String) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_byte(b'M')
   payload.write_bytes(@proto.utf8_encode(message))
   payload.write_byte(0)
@@ -112,7 +112,7 @@ fn copy_test_database_error(message : String) -> DatabaseError raise {
 
 ///|
 fn copy_test_row_description_message() -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int16_be(1)
   payload.write_bytes(b"value")
   payload.write_byte(0)
@@ -129,7 +129,7 @@ fn copy_test_row_description_message() -> @backend.Message raise {
 
 ///|
 fn copy_test_data_row_message(value : Bytes?) -> @backend.Message raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int16_be(1)
   match value {
     None => payload.write_int_be(-1)

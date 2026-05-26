@@ -17,7 +17,7 @@ fn write_body(
   buf : @buffer.Buffer,
   f : (@buffer.Buffer) -> Unit raise @proto.ProtocolError,
 ) -> Unit raise @proto.ProtocolError {
-  let body = @buffer.new()
+  let body = Buffer()
   f(body)
   let size = @proto.i32_from_usize(body.length() + 4)
   buf.write_int_be(size)
@@ -34,7 +34,7 @@ fn[T] write_counted(
   serializer : (T, @buffer.Buffer) -> Unit raise @proto.ProtocolError,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut count = 0
   for item in items {
     serializer(item, payload)

@@ -13,7 +13,7 @@ pub fn write_nullable(
   serializer : (@buffer.Buffer) -> IsNull raise ProtocolError,
   buf : @buffer.Buffer,
 ) -> Unit raise ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let is_null = serializer(payload)
   let size = match is_null {
     No => i32_from_usize(payload.length())

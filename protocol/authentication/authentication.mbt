@@ -147,7 +147,7 @@ pub fn hi(
   if iterations <= 0 {
     raise InvalidInput("iteration count must be positive")
   }
-  let buf = @buffer.new(size_hint=salt.length() + 4)
+  let buf = Buffer(size_hint=salt.length() + 4)
   buf.write_bytesview(salt)
   buf.write_bytesview(b"\x00\x00\x00\x01"[:])
   let mut prev = @crypto.hmac_sha256(str, buf.to_bytes()[:])
@@ -296,7 +296,7 @@ pub fn ScramSha256::new_inner(
   nonce : Bytes,
 ) -> ScramSha256 raise @proto.ProtocolError {
   validate_nonce(nonce[:])
-  let msg = @buffer.new(
+  let msg = Buffer(
     size_hint=channel_binding.gs2_header().length() + 4 + nonce.length(),
   )
   msg.write_bytesview(channel_binding.gs2_header())
@@ -380,7 +380,7 @@ pub fn ScramSha256::update(
   let salted_password = hi(password[:], salt[:], parsed.iteration_count)
   let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
   let stored_key = @crypto.sha256_bytes(client_key[:])
-  let cbind = @buffer.new(
+  let cbind = Buffer(
     size_hint=channel_binding.gs2_header().length() +
       channel_binding.cbind_data().length(),
   )
@@ -388,7 +388,7 @@ pub fn ScramSha256::update(
   cbind.write_bytesview(channel_binding.gs2_header())
   cbind.write_bytesview(channel_binding.cbind_data())
   let cbind_b64 = @proto.utf8_encode(@base64.encode(cbind.to_bytes()[:]))
-  let client_final = @buffer.new(
+  let client_final = Buffer(
     size_hint=2 + cbind_b64.length() + 3 + parsed.nonce.length(),
   )
   client_final.write_bytesview(b"c="[:])
@@ -399,7 +399,7 @@ pub fn ScramSha256::update(
   // SCRAM auth_message =
   // client-first-message-bare "," server-first-message ","
   // client-final-message-without-proof.
-  let auth = @buffer.new(
+  let auth = Buffer(
     size_hint=4 +
       client_nonce.length() +
       1 +
@@ -417,7 +417,7 @@ pub fn ScramSha256::update(
   let client_signature = @crypto.hmac_sha256(stored_key[:], auth_message[:])
   let client_proof = xor_bytes(client_key[:], client_signature[:])
   let client_proof_b64 = @proto.utf8_encode(@base64.encode(client_proof[:]))
-  let final_msg = @buffer.new(
+  let final_msg = Buffer(
     size_hint=client_final_without_proof.length() +
       3 +
       client_proof_b64.length(),

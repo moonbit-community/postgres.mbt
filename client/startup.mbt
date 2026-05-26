@@ -142,7 +142,7 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
   match config.ssl_mode {
     Disable => { stream: Plain(conn), channel_binding: NoBinding }
     VerifyCa | VerifyFull => {
-      let request = @buffer.new()
+      let request = Buffer()
       // PostgreSQL SSL negotiation is a one-byte capability probe that happens
       // before the normal startup packet.
       @frontend.ssl_request(request)
@@ -213,7 +213,7 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
       parameters.push((b"options"[:], @proto.utf8_encode(options)[:]))
     None => ()
   }
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.startup_message(parameters.iter(), buf)
   stream.write(buf.to_bytes())
   let status : Map[String, String] = {}
@@ -333,7 +333,7 @@ async fn read_message(stream : Stream) -> @backend.Message {
   let body = stream.read_exactly(body_len - 4)
   // Reassemble the full packet so startup uses the same parser and validation
   // path as the steady-state connection loop.
-  let packet = @buffer.new(size_hint=header.length() + body.length())
+  let packet = Buffer(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
   match @backend.Message::parse(packet.to_bytes()[:]) {
@@ -346,7 +346,7 @@ async fn read_message(stream : Stream) -> @backend.Message {
 /// Send a cleartext password response.
 async fn send_password_message(stream : Stream, password : String?) -> Unit {
   let password = require_password(password)
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.password_message(@proto.utf8_encode(password)[:], buf)
   stream.write(buf.to_bytes())
 }
@@ -372,7 +372,7 @@ async fn begin_scram(
     scram_binding,
     nonce[:],
   )
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
   stream.write(buf.to_bytes())
   (scram, channel_bound)
@@ -389,7 +389,7 @@ async fn continue_scram(
   // Each server challenge mutates the SCRAM state machine before the next
   // client proof is serialized and written.
   scram.update(data)
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.sasl_response(scram.message(), buf)
   stream.write(buf.to_bytes())
 }

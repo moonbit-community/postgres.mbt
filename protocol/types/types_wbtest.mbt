@@ -86,7 +86,7 @@ fn encode_array(
   dimensions : Array[ArrayDimension],
   values : Array[Bytes?],
 ) -> Bytes raise @proto.ProtocolError {
-  let buf = @buffer.new()
+  let buf = Buffer()
   array_to_sql(
     dimensions.iter(),
     25U,
@@ -110,7 +110,7 @@ fn encode_range(
   lower : RangeBound[Bytes?],
   upper : RangeBound[Bytes?],
 ) -> Bytes raise @proto.ProtocolError {
-  let buf = @buffer.new()
+  let buf = Buffer()
   range_to_sql(
     lower_buf => {
       match lower {
@@ -175,7 +175,7 @@ fn expect_nonempty_range(
 
 ///|
 test "protocol types scalar codecs handle boundaries and errors" {
-  let text_buf = @buffer.new()
+  let text_buf = Buffer()
   text_to_sql(b"moon"[:], text_buf)
   assert_eq(text_buf.to_bytes(), b"moon")
   assert_eq(text_from_sql(b"moon"[:]), b"moon")
@@ -188,24 +188,21 @@ test "protocol types scalar codecs handle boundaries and errors" {
   assert_eq(bool_from_sql(bytes_of([0])[:]), false)
   assert_invalid_input(try? bool_from_sql(b""[:]), "invalid buffer size")
 
-  let char_buf = @buffer.new()
+  let char_buf = Buffer()
   char_to_sql(-1, char_buf)
   assert_eq(char_buf.to_bytes(), bytes_of([255]))
   assert_eq(char_from_sql(bytes_of([255])[:]), -1)
   assert_eq(char_from_sql(bytes_of([65])[:]), 65)
-  assert_overflow(
-    try? char_to_sql(128, @buffer.new()),
-    "value out of range for i8",
-  )
+  assert_overflow(try? char_to_sql(128, Buffer()), "value out of range for i8")
   assert_invalid_input(try? char_from_sql(b""[:]), "invalid buffer size")
 
   let mac = bytes_of([1, 2, 3, 4, 5, 6])
-  let mac_buf = @buffer.new()
+  let mac_buf = Buffer()
   macaddr_to_sql(mac[:], mac_buf)
   assert_eq(mac_buf.to_bytes(), mac)
   assert_eq(macaddr_from_sql(mac[:]), mac)
   assert_invalid_input(
-    try? macaddr_to_sql(bytes_of([1, 2, 3])[:], @buffer.new()),
+    try? macaddr_to_sql(bytes_of([1, 2, 3])[:], Buffer()),
     "invalid MAC address length",
   )
   assert_invalid_input(
@@ -214,12 +211,12 @@ test "protocol types scalar codecs handle boundaries and errors" {
   )
 
   let uuid = bytes_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-  let uuid_buf = @buffer.new()
+  let uuid_buf = Buffer()
   uuid_to_sql(uuid[:], uuid_buf)
   assert_eq(uuid_buf.to_bytes(), uuid)
   assert_eq(uuid_from_sql(uuid[:]), uuid)
   assert_invalid_input(
-    try? uuid_to_sql(bytes_of([1, 2, 3])[:], @buffer.new()),
+    try? uuid_to_sql(bytes_of([1, 2, 3])[:], Buffer()),
     "invalid UUID length",
   )
   assert_invalid_input(
@@ -230,7 +227,7 @@ test "protocol types scalar codecs handle boundaries and errors" {
 
 ///|
 test "protocol types hstore and varbit codecs preserve values and reject malformed payloads" {
-  let hstore_buf = @buffer.new()
+  let hstore_buf = Buffer()
   hstore_to_sql([(b"a"[:], Some(b"1"[:])), (b"b"[:], None)].iter(), hstore_buf)
   let entries = collect_hstore(hstore_from_sql(hstore_buf.to_bytes()[:]))
   assert_true(entries == [(b"a", Some(b"1")), (b"b", None)])
@@ -239,13 +236,13 @@ test "protocol types hstore and varbit codecs preserve values and reject malform
     "invalid entry count",
   )
 
-  let broken_hstore = @buffer.new()
+  let broken_hstore = Buffer()
   broken_hstore.write_int_be(1)
   broken_hstore.write_int_be(-2)
   let broken_entries = hstore_from_sql(broken_hstore.to_bytes()[:])
   assert_invalid_input(try? broken_entries.next(), "invalid key length")
 
-  let varbit_buf = @buffer.new()
+  let varbit_buf = Buffer()
   varbit_to_sql(10, [b'\xAA', b'\x80'].iter(), varbit_buf)
   let varbit = varbit_from_sql(varbit_buf.to_bytes()[:])
   assert_eq(varbit.len, 10)
@@ -303,7 +300,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
     "invalid dimension count",
   )
 
-  let invalid_size = @buffer.new()
+  let invalid_size = Buffer()
   invalid_size.write_int_be(1)
   invalid_size.write_int_be(0)
   invalid_size.write_uint_be(25U)
@@ -314,7 +311,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
     "invalid dimension size",
   )
 
-  let invalid_value = @buffer.new()
+  let invalid_value = Buffer()
   invalid_value.write_int_be(1)
   invalid_value.write_int_be(0)
   invalid_value.write_uint_be(25U)
@@ -325,7 +322,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
   let invalid_values = invalid_array.values()
   assert_invalid_input(try? invalid_values.next(), "invalid value length")
 
-  let undrained = @buffer.new()
+  let undrained = Buffer()
   undrained.write_int_be(0)
   undrained.write_int_be(0)
   undrained.write_uint_be(25U)
@@ -339,7 +336,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
 
 ///|
 test "protocol types range codecs handle empty, bounded, null, and malformed payloads" {
-  let empty_buf = @buffer.new()
+  let empty_buf = Buffer()
   empty_range_to_sql(empty_buf)
   assert_true(range_from_sql(empty_buf.to_bytes()[:]) is Empty)
   assert_invalid_input(
@@ -361,7 +358,7 @@ test "protocol types range codecs handle empty, bounded, null, and malformed pay
     Inclusive(Some(b"hi")),
   )
 
-  let trailing = @buffer.new()
+  let trailing = Buffer()
   trailing.write_bytes(bounded)
   trailing.write_byte(0)
   assert_invalid_input(
@@ -376,13 +373,13 @@ test "protocol types range codecs handle empty, bounded, null, and malformed pay
 
 ///|
 test "protocol types geometry codecs round trip" {
-  let point_buf = @buffer.new()
+  let point_buf = Buffer()
   point_to_sql(1.5, -2.0, point_buf)
   let point = point_from_sql(point_buf.to_bytes()[:])
   assert_eq(point.x, 1.5)
   assert_eq(point.y, -2.0)
 
-  let box_buf = @buffer.new()
+  let box_buf = Buffer()
   box_to_sql(4.0, 5.0, -1.0, -2.0, box_buf)
   let box = box_from_sql(box_buf.to_bytes()[:])
   assert_eq(box.upper_right.x, 4.0)
@@ -390,14 +387,14 @@ test "protocol types geometry codecs round trip" {
   assert_eq(box.lower_left.x, -1.0)
   assert_eq(box.lower_left.y, -2.0)
 
-  let path_buf = @buffer.new()
+  let path_buf = Buffer()
   path_to_sql(true, [(1.0, 2.0), (3.0, 4.0)].iter(), path_buf)
   let path = path_from_sql(path_buf.to_bytes()[:])
   assert_eq(path.closed, true)
   assert_eq(path.points, 2)
   assert_true(collect_path_points(path.points()) == [(1.0, 2.0), (3.0, 4.0)])
 
-  let broken_path = @buffer.new()
+  let broken_path = Buffer()
   broken_path.write_byte(0)
   broken_path.write_int_be(-1)
   assert_invalid_input(
@@ -405,7 +402,7 @@ test "protocol types geometry codecs round trip" {
     "invalid point count",
   )
 
-  let wrong_path_len = @buffer.new()
+  let wrong_path_len = Buffer()
   wrong_path_len.write_byte(0)
   wrong_path_len.write_int_be(2)
   wrong_path_len.write_bytes(bytes_of([0, 1, 2]))
@@ -419,7 +416,7 @@ test "protocol types geometry codecs round trip" {
 test "protocol types inet codecs cover ipv4, ipv6, and validation" {
   let ipv4 = Ipv4Addr::from_octets(bytes_of([127, 0, 0, 1])[:])
   assert_eq(ipv4.octets(), bytes_of([127, 0, 0, 1])[:])
-  let inet4_buf = @buffer.new()
+  let inet4_buf = Buffer()
   inet_to_sql(V4(ipv4), 24, inet4_buf)
   let inet4 = inet_from_sql(inet4_buf.to_bytes()[:])
   assert_eq(inet4.netmask, (24).to_byte())
@@ -433,7 +430,7 @@ test "protocol types inet codecs cover ipv4, ipv6, and validation" {
     ipv6.octets(),
     bytes_of([0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8])[:],
   )
-  let inet6_buf = @buffer.new()
+  let inet6_buf = Buffer()
   inet_to_sql(V6(ipv6), 64, inet6_buf)
   let inet6 = inet_from_sql(inet6_buf.to_bytes()[:])
   assert_eq(inet6.netmask, (64).to_byte())
@@ -469,7 +466,7 @@ test "protocol types inet codecs cover ipv4, ipv6, and validation" {
 
 ///|
 test "protocol types tree-query codecs require version byte 1" {
-  let ltree_buf = @buffer.new()
+  let ltree_buf = Buffer()
   ltree_to_sql(b"a.b"[:], ltree_buf)
   assert_eq(ltree_from_sql(ltree_buf.to_bytes()[:]), b"a.b")
   assert_invalid_input(
@@ -477,7 +474,7 @@ test "protocol types tree-query codecs require version byte 1" {
     "ltree version 1 only supported",
   )
 
-  let lquery_buf = @buffer.new()
+  let lquery_buf = Buffer()
   lquery_to_sql(b"*.x"[:], lquery_buf)
   assert_eq(lquery_from_sql(lquery_buf.to_bytes()[:]), b"*.x")
   assert_invalid_input(
@@ -485,7 +482,7 @@ test "protocol types tree-query codecs require version byte 1" {
     "lquery version 1 only supported",
   )
 
-  let ltxtquery_buf = @buffer.new()
+  let ltxtquery_buf = Buffer()
   ltxtquery_to_sql(b"foo & bar"[:], ltxtquery_buf)
   assert_eq(ltxtquery_from_sql(ltxtquery_buf.to_bytes()[:]), b"foo & bar")
   assert_invalid_input(

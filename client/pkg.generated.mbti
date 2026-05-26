@@ -292,10 +292,10 @@ pub struct WrongTypeError {
 
 // Traits
 pub(open) trait FromSql {
-  from_sql(Type, WireFormat, BytesView) -> Self raise
-  accepts(Type) -> Bool
-  moonbit_type_name() -> String
-  from_sql_null(Type, WireFormat) -> Self raise = _
+  fn from_sql(Type, WireFormat, BytesView) -> Self raise
+  fn accepts(Type) -> Bool
+  fn moonbit_type_name() -> String
+  fn from_sql_null(Type, WireFormat) -> Self raise = _
 }
 pub impl FromSql for Bool
 pub impl FromSql for Int
@@ -310,10 +310,10 @@ pub impl[T : FromSql] FromSql for Array[T]
 pub impl FromSql for Json
 
 pub(open) trait ToSql {
-  format(Self, Type) -> WireFormat = _
-  accepts(Self, Type) -> Bool
-  moonbit_type_name(Self) -> String
-  to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
+  fn format(Self, Type) -> WireFormat = _
+  fn accepts(Self, Type) -> Bool
+  fn moonbit_type_name(Self) -> String
+  fn to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
 }
 pub impl ToSql for Bool
 pub impl ToSql for Int

@@ -298,12 +298,12 @@ pub async fn TransactionBuilder::start(Self) -> Transaction
 
 // Traits
 pub(open) trait GenericClient {
-  async query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-  async query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-  async query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-  async query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-  async execute(Self, String, params? : Array[&@client.ToSql]) -> Int
-  async batch_execute(Self, String) -> Unit
-  async check_connection(Self) -> Unit
+  async fn query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
+  async fn query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
+  async fn query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
+  async fn query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
+  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+  async fn batch_execute(Self, String) -> Unit
+  async fn check_connection(Self) -> Unit
 }
 

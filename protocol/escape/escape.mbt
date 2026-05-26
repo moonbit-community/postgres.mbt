@@ -28,7 +28,7 @@ fn escape_internal(input : BytesView, as_ident : Bool) -> Bytes {
   if !as_ident && num_backslashes > 0 {
     result_size = result_size + num_backslashes + 2
   }
-  let out = @buffer.new(size_hint=result_size)
+  let out = Buffer(size_hint=result_size)
   if !as_ident && num_backslashes > 0 {
     out.write_bytesview(b" "[:])
     out.write_bytesview(b"E"[:])

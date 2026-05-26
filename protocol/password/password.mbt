@@ -45,7 +45,7 @@ pub fn scram_sha_256_salt(
   let salt_b64 = @proto.utf8_encode(@base64.encode(salt))
   let stored_b64 = @proto.utf8_encode(@base64.encode(stored_key[:]))
   let server_b64 = @proto.utf8_encode(@base64.encode(server_key[:]))
-  let out = @buffer.new(
+  let out = Buffer(
     size_hint=11 +
       1 +
       4 +

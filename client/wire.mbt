@@ -3,7 +3,7 @@
 ///|
 /// Encode a simple-query protocol request.
 fn simple_query_bytes(sql : String) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.query(@proto.utf8_encode(sql)[:], buf)
   buf.to_bytes()
 }
@@ -11,7 +11,7 @@ fn simple_query_bytes(sql : String) -> Bytes raise {
 ///|
 /// Encode a standalone `Sync`.
 fn sync_bytes() -> Bytes {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.sync(buf)
   buf.to_bytes()
 }
@@ -19,7 +19,7 @@ fn sync_bytes() -> Bytes {
 ///|
 /// Encode a graceful connection termination request.
 fn terminate_bytes() -> Bytes {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.terminate(buf)
   buf.to_bytes()
 }
@@ -27,7 +27,7 @@ fn terminate_bytes() -> Bytes {
 ///|
 /// Encode `Close` followed by `Sync` for a statement or portal.
 fn close_bytes(kind : Byte, name : BytesView) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.close(kind, name, buf)
   @frontend.sync(buf)
   buf.to_bytes()
@@ -40,7 +40,7 @@ fn prepare_bytes(
   sql : String,
   types : Array[Type],
 ) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.parse(
     name,
     @proto.utf8_encode(sql)[:],
@@ -59,7 +59,7 @@ fn execute_statement_bytes(
   param_types : Array[Type],
   params : Array[&ToSql],
 ) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   write_bind(buf, b""[:], statement_name, param_types, params, true)
   @frontend.execute(b""[:], 0, buf)
   @frontend.sync(buf)
@@ -74,7 +74,7 @@ fn bind_portal_bytes(
   param_types : Array[Type],
   params : Array[&ToSql],
 ) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   write_bind(buf, portal_name, statement_name, param_types, params, true)
   @frontend.sync(buf)
   buf.to_bytes()
@@ -83,7 +83,7 @@ fn bind_portal_bytes(
 ///|
 /// Encode Execute + Sync for portal execution.
 fn execute_portal_bytes(portal_name : BytesView, max_rows : Int) -> Bytes raise {
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.execute(portal_name, max_rows, buf)
   @frontend.sync(buf)
   buf.to_bytes()
@@ -102,7 +102,7 @@ fn encode_param(param : &ToSql, type_ : Type) -> EncodedParam raise {
   guard param.accepts(type_) else {
     raise wrong_type_error(param.moonbit_type_name(), type_)
   }
-  let payload = @buffer.new()
+  let payload = Buffer()
   let value = match param.to_sql(type_, payload) {
     Yes => None
     No => Some(payload.to_bytes())

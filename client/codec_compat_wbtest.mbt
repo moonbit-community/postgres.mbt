@@ -124,7 +124,7 @@ test "built-in FromSql compatibility remains stable" {
     Json::object({ "lang": Json::string("moonbit"), "ok": Json::boolean(true) }),
   )
 
-  let jsonb_payload = @buffer.new()
+  let jsonb_payload = Buffer()
   jsonb_payload.write_byte(b'\x01')
   jsonb_payload.write_bytes(b"{\"lang\":\"moonbit\",\"ok\":true}")
   let jsonb_value : Json = make_row(

@@ -1377,7 +1377,7 @@ async test "integration copy out" {
       "copy (select id, name from moon_driver_copy_out order by id) to stdout",
     )
     let chunks : Array[Bytes] = []
-    let payload = @buffer.new()
+    let payload = Buffer()
     for chunk = stream.next() {
       match chunk {
         None => break ()
@@ -1540,13 +1540,13 @@ async test "integration copy in large" {
     // Send in three chunks on purpose to cover the repeated-write path on the sink.
     sink.send(b"0\tname0\n")
 
-    let first = @buffer.new()
+    let first = Buffer()
     for i in 1..<5000 {
       first.write_bytes(@proto.utf8_encode("\{i}\tname\{i}\n"))
     }
     sink.send(first.contents())
 
-    let second = @buffer.new()
+    let second = Buffer()
     for i in 5000..<10000 {
       second.write_bytes(@proto.utf8_encode("\{i}\tname\{i}\n"))
     }

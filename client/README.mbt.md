@@ -454,40 +454,40 @@ struct EmailText {
 } derive(Debug, Eq)
 
 ///|
-impl @client.ToSql for EmailText with format(_, _) {
+impl @client.ToSql for EmailText with fn format(_, _) {
   Text
 }
 
 ///|
-impl @client.ToSql for EmailText with accepts(_, type_) {
+impl @client.ToSql for EmailText with fn accepts(_, type_) {
   type_.oid == @client.Type::text().oid ||
   type_.oid == @client.Type::varchar().oid
 }
 
 ///|
-impl @client.ToSql for EmailText with moonbit_type_name(_) {
+impl @client.ToSql for EmailText with fn moonbit_type_name(_) {
   "EmailText"
 }
 
 ///|
-impl @client.ToSql for EmailText with to_sql(self, _, buf) {
+impl @client.ToSql for EmailText with fn to_sql(self, _, buf) {
   buf.write_bytes(@proto.utf8_encode(self.value))
   No
 }
 
 ///|
-impl @client.FromSql for EmailText with accepts(type_) {
+impl @client.FromSql for EmailText with fn accepts(type_) {
   type_.oid == @client.Type::text().oid ||
   type_.oid == @client.Type::varchar().oid
 }
 
 ///|
-impl @client.FromSql for EmailText with moonbit_type_name() {
+impl @client.FromSql for EmailText with fn moonbit_type_name() {
   "EmailText"
 }
 
 ///|
-impl @client.FromSql for EmailText with from_sql(_, _, raw) {
+impl @client.FromSql for EmailText with fn from_sql(_, _, raw) {
   { value: @utf8.decode(raw) }
 }
 

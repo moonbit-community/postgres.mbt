@@ -229,7 +229,7 @@ pub fn hstore_to_sql(
   values : Iter[(BytesView, BytesView?)],
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut count = 0
   for entry in values {
     let (key, value) = entry
@@ -461,7 +461,7 @@ pub fn[T] array_to_sql(
   serializer : (T, @buffer.Buffer) -> @proto.IsNull raise @proto.ProtocolError,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut num_dimensions = 0
   let mut expected_elements = 1
   for dimension in dimensions {
@@ -655,7 +655,7 @@ pub fn range_to_sql(
   upper : (@buffer.Buffer) -> RangeBound[@proto.IsNull] raise @proto.ProtocolError,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut tag : Byte = 0
   match write_bound(lower, payload) {
     Inclusive(_) => tag = tag | range_lower_inclusive
@@ -676,7 +676,7 @@ fn write_bound(
   bound : (@buffer.Buffer) -> RangeBound[@proto.IsNull] raise @proto.ProtocolError,
   buf : @buffer.Buffer,
 ) -> RangeBound[Unit] raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let (null, ret) = match bound(payload) {
     Inclusive(null) => (Some(null), RangeBound::Inclusive(()))
     Exclusive(null) => (Some(null), Exclusive(()))
@@ -828,7 +828,7 @@ pub fn path_to_sql(
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(if closed { 1 } else { 0 })
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut num_points = 0
   for point in points {
     let (x, y) = point

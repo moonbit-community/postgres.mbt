@@ -13,11 +13,11 @@ async fn read_startup_packet(conn : @socket.Tcp) -> Unit {
 
 ///|
 fn authentication_md5_packet(salt : BytesView) -> Bytes {
-  let payload = @buffer.new(size_hint=4 + salt.length())
+  let payload = Buffer(size_hint=4 + salt.length())
   payload.write_int_be(authentication_md5_password_subtype)
   payload.write_bytesview(salt)
 
-  let packet = @buffer.new(size_hint=1 + 4 + payload.length())
+  let packet = Buffer(size_hint=1 + 4 + payload.length())
   packet.write_byte(@backend.AUTHENTICATION_TAG)
   packet.write_int_be(12)
   packet.write_bytes(payload.to_bytes())
@@ -29,7 +29,7 @@ fn startup_backend_packet(
   tag : Byte,
   payload : @buffer.Buffer,
 ) -> Bytes raise @proto.ProtocolError {
-  let packet = @buffer.new()
+  let packet = Buffer()
   packet.write_byte(tag)
   packet.write_int_be(@proto.i32_from_usize(payload.length() + 4))
   packet.write_bytes(payload.to_bytes())
@@ -38,14 +38,14 @@ fn startup_backend_packet(
 
 ///|
 fn authentication_cleartext_password_packet() -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new(size_hint=4)
+  let payload = Buffer(size_hint=4)
   payload.write_int_be(authentication_cleartext_password_subtype)
   startup_backend_packet(@backend.AUTHENTICATION_TAG, payload)
 }
 
 ///|
 fn startup_auth_ok_packet() -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new(size_hint=4)
+  let payload = Buffer(size_hint=4)
   payload.write_int_be(0)
   startup_backend_packet(@backend.AUTHENTICATION_TAG, payload)
 }

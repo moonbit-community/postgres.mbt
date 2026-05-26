@@ -44,18 +44,18 @@ fn decode_wire_format(code : Int) -> WireFormat raise {
 /// returns `IsNull::No`.
 pub(open) trait ToSql {
   /// Return the PostgreSQL wire format to use for this value.
-  format(Self, Type) -> WireFormat = _
+  fn format(Self, Type) -> WireFormat = _
   /// Return whether this value can be encoded for the provided PostgreSQL type.
-  accepts(Self, Type) -> Bool
+  fn accepts(Self, Type) -> Bool
   /// Human-readable type name used in `WrongTypeError`.
-  moonbit_type_name(Self) -> String
+  fn moonbit_type_name(Self) -> String
   /// Serialize the value into `buf`, or return `IsNull::Yes` for `NULL`.
-  to_sql(Self, Type, @buffer.Buffer) -> @proto.IsNull raise Error
+  fn to_sql(Self, Type, @buffer.Buffer) -> @proto.IsNull raise Error
 }
 
 ///|
 /// Default `ToSql` implementations use PostgreSQL binary format.
-impl ToSql with format(_, _) {
+impl ToSql with fn format(_, _) {
   Binary
 }
 
@@ -68,24 +68,24 @@ impl ToSql with format(_, _) {
 /// into `T?` or implement `from_sql_null` directly.
 pub(open) trait FromSql {
   /// Decode a non-NULL value.
-  from_sql(Type, WireFormat, BytesView) -> Self raise Error
+  fn from_sql(Type, WireFormat, BytesView) -> Self raise Error
   /// Return whether this decoder accepts the PostgreSQL column type.
-  accepts(Type) -> Bool
+  fn accepts(Type) -> Bool
   /// Human-readable type name used in `WrongTypeError`.
-  moonbit_type_name() -> String
+  fn moonbit_type_name() -> String
   /// Decode a `NULL` value. The default implementation rejects `NULL`.
-  from_sql_null(Type, WireFormat) -> Self raise Error = _
+  fn from_sql_null(Type, WireFormat) -> Self raise Error = _
 }
 
 ///|
 /// The default NULL decoder rejects nullable database values.
-impl FromSql with from_sql_null(type_, _) {
+impl FromSql with fn from_sql_null(type_, _) {
   raise ClientError::Decode("unexpected NULL for type \{type_.name}")
 }
 
 ///|
 /// Optional parameters encode `None` as SQL `NULL` and delegate `Some` values.
-pub impl[T : ToSql] ToSql for T? with format(self, type_) {
+pub impl[T : ToSql] ToSql for T? with fn format(self, type_) {
   match self {
     None => Binary
     Some(value) => value.format(type_)
@@ -94,7 +94,7 @@ pub impl[T : ToSql] ToSql for T? with format(self, type_) {
 
 ///|
 /// Optional parameters accept every PostgreSQL type when the value is `None`.
-pub impl[T : ToSql] ToSql for T? with accepts(self, type_) {
+pub impl[T : ToSql] ToSql for T? with fn accepts(self, type_) {
   match self {
     None => true
     Some(value) => value.accepts(type_)
@@ -103,7 +103,7 @@ pub impl[T : ToSql] ToSql for T? with accepts(self, type_) {
 
 ///|
 /// Optional parameters include the wrapped type name in diagnostics when present.
-pub impl[T : ToSql] ToSql for T? with moonbit_type_name(self) {
+pub impl[T : ToSql] ToSql for T? with fn moonbit_type_name(self) {
   match self {
     None => "Option"
     Some(value) => "\{value.moonbit_type_name()}?"
@@ -112,7 +112,7 @@ pub impl[T : ToSql] ToSql for T? with moonbit_type_name(self) {
 
 ///|
 /// Optional parameters serialize `None` as SQL `NULL`.
-pub impl[T : ToSql] ToSql for T? with to_sql(self, type_, buf) {
+pub impl[T : ToSql] ToSql for T? with fn to_sql(self, type_, buf) {
   match self {
     None => Yes
     Some(value) => value.to_sql(type_, buf)
@@ -121,38 +121,38 @@ pub impl[T : ToSql] ToSql for T? with to_sql(self, type_, buf) {
 
 ///|
 /// Optional decoders wrap successful non-NULL decoding in `Some`.
-pub impl[T : FromSql] FromSql for T? with from_sql(type_, format, raw) {
+pub impl[T : FromSql] FromSql for T? with fn from_sql(type_, format, raw) {
   let value : T = FromSql::from_sql(type_, format, raw)
   Some(value)
 }
 
 ///|
 /// Optional decoders accept the same PostgreSQL types as their wrapped decoder.
-pub impl[T : FromSql] FromSql for T? with accepts(type_) {
+pub impl[T : FromSql] FromSql for T? with fn accepts(type_) {
   T::accepts(type_)
 }
 
 ///|
 /// Optional decoders annotate the wrapped type name in diagnostics.
-pub impl[T : FromSql] FromSql for T? with moonbit_type_name() {
+pub impl[T : FromSql] FromSql for T? with fn moonbit_type_name() {
   "\{T::moonbit_type_name()}?"
 }
 
 ///|
 /// Optional decoders map SQL `NULL` to `None`.
-pub impl[T : FromSql] FromSql for T? with from_sql_null(_, _) {
+pub impl[T : FromSql] FromSql for T? with fn from_sql_null(_, _) {
   None
 }
 
 ///|
 /// Built-in arrays use PostgreSQL's binary array payload and delegate element
 /// encoding to the existing scalar codecs.
-pub impl[T : ToSql] ToSql for Array[T] with format(_, _) {
+pub impl[T : ToSql] ToSql for Array[T] with fn format(_, _) {
   Binary
 }
 
 ///|
-pub impl[T : ToSql] ToSql for Array[T] with accepts(self, type_) {
+pub impl[T : ToSql] ToSql for Array[T] with fn accepts(self, type_) {
   match array_element_type(type_) {
     None => false
     Some(element_type) => self.all(element => element.accepts(element_type))
@@ -160,7 +160,7 @@ pub impl[T : ToSql] ToSql for Array[T] with accepts(self, type_) {
 }
 
 ///|
-pub impl[T : ToSql] ToSql for Array[T] with moonbit_type_name(self) {
+pub impl[T : ToSql] ToSql for Array[T] with fn moonbit_type_name(self) {
   if self.length() == 0 {
     "Array"
   } else {
@@ -169,7 +169,7 @@ pub impl[T : ToSql] ToSql for Array[T] with moonbit_type_name(self) {
 }
 
 ///|
-pub impl[T : ToSql] ToSql for Array[T] with to_sql(self, type_, buf) {
+pub impl[T : ToSql] ToSql for Array[T] with fn to_sql(self, type_, buf) {
   guard array_element_type(type_) is Some(element_type) else {
     raise ClientError::Encode("cannot encode Array for type \{type_.name}")
   }
@@ -183,7 +183,7 @@ pub impl[T : ToSql] ToSql for Array[T] with to_sql(self, type_, buf) {
 }
 
 ///|
-pub impl[T : FromSql] FromSql for Array[T] with accepts(type_) {
+pub impl[T : FromSql] FromSql for Array[T] with fn accepts(type_) {
   match array_element_type(type_) {
     None => false
     Some(element_type) => T::accepts(element_type)
@@ -191,12 +191,12 @@ pub impl[T : FromSql] FromSql for Array[T] with accepts(type_) {
 }
 
 ///|
-pub impl[T : FromSql] FromSql for Array[T] with moonbit_type_name() {
+pub impl[T : FromSql] FromSql for Array[T] with fn moonbit_type_name() {
   "Array[\{T::moonbit_type_name()}]"
 }
 
 ///|
-pub impl[T : FromSql] FromSql for Array[T] with from_sql(type_, format, raw) {
+pub impl[T : FromSql] FromSql for Array[T] with fn from_sql(type_, format, raw) {
   guard array_element_type(type_) is Some(element_type) else {
     raise ClientError::Decode("cannot decode Array from \{type_.name}")
   }
@@ -247,7 +247,7 @@ fn[T : ToSql] jsonb_array_element_to_sql(
   element_type : Type,
   buf : @buffer.Buffer,
 ) -> @proto.IsNull raise Error {
-  let payload = @buffer.new()
+  let payload = Buffer()
   match element.to_sql(element_type, payload) {
     Yes => Yes
     No => {
@@ -266,7 +266,7 @@ fn[T : ToSql] write_array_payload(
   element_type : Type,
   buf : @buffer.Buffer,
 ) -> Unit raise Error {
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut expected_elements = 1
   for dimension in dimensions {
     if dimension.len < 0 {
@@ -290,7 +290,7 @@ fn[T : ToSql] write_array_payload(
   }
   let mut has_nulls = false
   for element in elements {
-    let element_payload = @buffer.new()
+    let element_payload = Buffer()
     let is_null = array_element_to_sql(element, element_type, element_payload)
     match is_null {
       Yes => {

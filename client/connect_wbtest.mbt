@@ -3,7 +3,7 @@ fn connect_backend_packet(
   tag : Byte,
   payload : @buffer.Buffer,
 ) -> Bytes raise @proto.ProtocolError {
-  let packet = @buffer.new()
+  let packet = Buffer()
   packet.write_byte(tag)
   packet.write_int_be(@proto.i32_from_usize(payload.length() + 4))
   packet.write_bytes(payload.to_bytes())
@@ -12,7 +12,7 @@ fn connect_backend_packet(
 
 ///|
 fn auth_ok_packet() -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int_be(0)
   connect_backend_packet(@backend.AUTHENTICATION_TAG, payload)
 }
@@ -22,7 +22,7 @@ fn parameter_status_packet(
   name : String,
   value : String,
 ) -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_bytes(@proto.utf8_encode(name))
   payload.write_byte(0)
   payload.write_bytes(@proto.utf8_encode(value))
@@ -35,7 +35,7 @@ fn backend_key_data_packet(
   process_id : Int,
   secret_key : Int,
 ) -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int_be(process_id)
   payload.write_int_be(secret_key)
   connect_backend_packet(@backend.BACKEND_KEY_DATA_TAG, payload)
@@ -43,7 +43,7 @@ fn backend_key_data_packet(
 
 ///|
 fn ready_for_query_packet(status : Byte) -> Bytes raise @proto.ProtocolError {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_byte(status)
   connect_backend_packet(@backend.READY_FOR_QUERY_TAG, payload)
 }

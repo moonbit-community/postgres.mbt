@@ -150,7 +150,7 @@ pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
     port=self.config.port,
   )
   defer conn.close()
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.cancel_request(self.process_id.val, self.secret_key.val, buf)
   conn.write(buf.to_bytes())
 }

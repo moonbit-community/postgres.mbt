@@ -21,7 +21,7 @@ fn Stream::close(self : Stream) -> Unit {
 
 ///|
 /// Forward raw reads to the active transport implementation.
-impl @io.Reader for Stream with _direct_read(self, buf, offset~, max_len~) {
+impl @io.Reader for Stream with fn _direct_read(self, buf, offset~, max_len~) {
   match self {
     Plain(conn) => conn._direct_read(buf, offset~, max_len~)
     Secure(conn) => conn._direct_read(buf, offset~, max_len~)
@@ -30,7 +30,7 @@ impl @io.Reader for Stream with _direct_read(self, buf, offset~, max_len~) {
 
 ///|
 /// Reuse the underlying transport's internal read buffer.
-impl @io.Reader for Stream with _get_internal_buffer(self) {
+impl @io.Reader for Stream with fn _get_internal_buffer(self) {
   match self {
     Plain(conn) => conn._get_internal_buffer()
     Secure(conn) => conn._get_internal_buffer()
@@ -39,7 +39,7 @@ impl @io.Reader for Stream with _get_internal_buffer(self) {
 
 ///|
 /// Forward writes to the active transport implementation.
-impl @io.Writer for Stream with write_once(self, buf, offset~, len~) {
+impl @io.Writer for Stream with fn write_once(self, buf, offset~, len~) {
   match self {
     Plain(conn) => conn.write_once(buf, offset~, len~)
     Secure(conn) => conn.write_once(buf, offset~, len~)

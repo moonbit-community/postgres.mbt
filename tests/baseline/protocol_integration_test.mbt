@@ -40,7 +40,7 @@ async fn read_socket_packet(socket : @socket.Tcp) -> Bytes {
   let header = socket.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = socket.read_exactly(body_len - 4)
-  let packet = @buffer.new(size_hint=header.length() + body.length())
+  let packet = Buffer(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
   packet.to_bytes()
@@ -105,7 +105,7 @@ async fn WireConnection::simple_query(
   flush? : Bool = false,
 ) -> Array[@backend.Message] {
   let sql_bytes = @proto.utf8_encode(sql)
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.query(sql_bytes[:], buf)
   if flush {
     @frontend.flush(buf)
@@ -137,7 +137,7 @@ async fn wire_connect(
     (b"client_encoding"[:], b"UTF8"[:]),
     (b"application_name"[:], application_name_bytes[:]),
   ]
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.startup_message(parameters.iter(), buf)
   connection.write_buffer(buf)
 
@@ -198,7 +198,7 @@ async fn wire_send_password(
   password : String,
 ) -> Unit {
   let password_bytes = @proto.utf8_encode(password)
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.password_message(password_bytes[:], buf)
   connection.write_buffer(buf)
 }
@@ -221,7 +221,7 @@ async fn wire_begin_scram(
     @auth.ChannelBinding::unsupported(),
     nonce[:],
   )
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.sasl_initial_response(@auth.SCRAM_SHA_256[:], scram.message(), buf)
   connection.write_buffer(buf)
   scram
@@ -236,7 +236,7 @@ async fn wire_continue_scram(
 ) -> Unit {
   let scram = wire_require_scram(scram)
   scram.update(data)
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.sasl_response(scram.message(), buf)
   connection.write_buffer(buf)
 }
@@ -421,7 +421,7 @@ async test "integration protocol ssl request reports tls support" {
   let socket = @socket.Tcp::connect_to_host(config.host, port=config.port)
   defer socket.close()
 
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.ssl_request(buf)
   socket.write(buf.to_bytes())
   let response = socket.read_exactly(1)
@@ -456,7 +456,7 @@ async test "integration protocol startup packet header parsing" {
     (b"client_encoding"[:], b"UTF8"[:]),
     (b"application_name"[:], application_name_bytes[:]),
   ]
-  let startup = @buffer.new()
+  let startup = Buffer()
   @frontend.startup_message(parameters.iter(), startup)
   socket.write(startup.to_bytes())
 
@@ -518,7 +518,7 @@ async test "integration cancel request uses protocol frontend" {
     wait_for_backend_query(observer, backend_pid, "select pg_sleep(5)")
     let cancel = @socket.Tcp::connect_to_host(config.host, port=config.port)
     defer cancel.close()
-    let buf = @buffer.new()
+    let buf = Buffer()
     @frontend.cancel_request(token.process_id(), token.secret_key(), buf)
     cancel.write(buf.to_bytes())
     let err = expect_database_error(task.wait())
@@ -561,7 +561,7 @@ async test "integration protocol empty query and no data" {
   let sql_bytes = @proto.utf8_encode(
     "insert into wire_no_data (value) values ($1::int4)",
   )
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.parse(b"stmt_no_data"[:], sql_bytes[:], [23U].iter(), buf)
   @frontend.describe(b'S', b"stmt_no_data"[:], buf)
   @frontend.sync(buf)
@@ -606,7 +606,7 @@ async test "integration protocol copy out flush and terminate" {
     _ => fail("expected CopyOutResponse")
   }
   // Flags make it clear that this test cares about the full message set, not a fragile fixed index for every packet.
-  let payload = @buffer.new()
+  let payload = Buffer()
   let mut saw_copy_data = false
   let mut saw_copy_done = false
   let mut saw_command_complete = false
@@ -636,7 +636,7 @@ async test "integration protocol copy out flush and terminate" {
   assert_true(saw_command_complete)
   assert_true(saw_ready)
 
-  let terminate = @buffer.new()
+  let terminate = Buffer()
   @frontend.terminate(terminate)
   wire.write_buffer(terminate)
   wire.close()
@@ -658,7 +658,7 @@ async test "integration protocol copy in success" {
     _ => fail("expected CREATE TABLE")
   }
 
-  let start = @buffer.new()
+  let start = Buffer()
   @frontend.query(b"copy wire_copy_in from stdin"[:], start)
   wire.write_buffer(start)
   match wire.read_message() {
@@ -672,7 +672,7 @@ async test "integration protocol copy in success" {
     _ => fail("expected CopyInResponse")
   }
 
-  let copy_payload = @buffer.new()
+  let copy_payload = Buffer()
   let first = @frontend.CopyData::new(b"alpha\n"[:])
   first.write(copy_payload)
   let second = @frontend.CopyData::new(b"beta\n"[:])
@@ -709,12 +709,12 @@ async test "integration protocol copy fail surfaces backend error" {
     _ => fail("expected CREATE TABLE")
   }
 
-  let start = @buffer.new()
+  let start = Buffer()
   @frontend.query(b"copy wire_copy_fail from stdin"[:], start)
   wire.write_buffer(start)
   assert_true(wire.read_message() is CopyInResponse(_))
 
-  let fail_buf = @buffer.new()
+  let fail_buf = Buffer()
   @frontend.copy_fail(b"integration copy failure"[:], fail_buf)
   let fail_messages = wire.send_and_collect(fail_buf)
   match fail_messages[0] {
@@ -740,7 +740,7 @@ async test "integration protocol describe close and parameter description" {
   defer wire.close()
 
   let sql_bytes = @proto.utf8_encode("select $1::int4 as value")
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.parse(b"stmt1"[:], sql_bytes[:], [23U].iter(), buf)
   @frontend.describe(b'S', b"stmt1"[:], buf)
   @frontend.close(b'S', b"stmt1"[:], buf)
@@ -812,7 +812,7 @@ async test "integration protocol bind text formats and null row ranges" {
   let formats : Array[Int] = [0]
   let params : Array[String?] = [Some("7")]
   let result_formats : Array[Int] = [0, 0]
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.parse(b"stmt_formats"[:], sql_bytes[:], [23U].iter(), buf)
   @frontend.bind(
     b"portal_formats"[:],
@@ -901,7 +901,7 @@ async test "integration protocol portal suspended" {
   let formats : Array[Int] = []
   let params : Array[String?] = []
   let result_formats : Array[Int] = []
-  let buf = @buffer.new()
+  let buf = Buffer()
   @frontend.parse(b"stmt_portal"[:], sql_bytes[:], [].iter(), buf)
   @frontend.bind(
     b"portal1"[:],

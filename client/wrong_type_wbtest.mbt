@@ -4,17 +4,17 @@ struct OnlyInt8Value {
 } derive(Debug, Eq)
 
 ///|
-impl FromSql for OnlyInt8Value with accepts(type_) {
+impl FromSql for OnlyInt8Value with fn accepts(type_) {
   type_.oid == INT8_OID
 }
 
 ///|
-impl FromSql for OnlyInt8Value with moonbit_type_name() {
+impl FromSql for OnlyInt8Value with fn moonbit_type_name() {
   "OnlyInt8Value"
 }
 
 ///|
-impl FromSql for OnlyInt8Value with from_sql(_, _, _) {
+impl FromSql for OnlyInt8Value with fn from_sql(_, _, _) {
   { value: 0L }
 }
 

@@ -2,7 +2,7 @@
 fn auth_sasl_body(
   mechanisms : Array[Bytes],
 ) -> @backend.AuthenticationSaslBody raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int_be(10)
   for mechanism in mechanisms {
     payload.write_bytes(mechanism)
@@ -10,7 +10,7 @@ fn auth_sasl_body(
   }
   payload.write_byte(b'\x00')
 
-  let packet = @buffer.new()
+  let packet = Buffer()
   packet.write_byte(@backend.AUTHENTICATION_TAG)
   packet.write_int_be(@proto.i32_from_usize(payload.length() + 4))
   packet.write_bytes(payload.to_bytes())

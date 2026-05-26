@@ -6,24 +6,24 @@ struct TextOnlyParam {
 } derive(Debug, Eq)
 
 ///|
-impl @client.ToSql for TextOnlyParam with format(_, _) {
+impl @client.ToSql for TextOnlyParam with fn format(_, _) {
   Text
 }
 
 ///|
-impl @client.ToSql for TextOnlyParam with accepts(_, type_) {
+impl @client.ToSql for TextOnlyParam with fn accepts(_, type_) {
   type_.oid == 25U
 }
 
 ///|
-impl @client.ToSql for TextOnlyParam with moonbit_type_name(_) {
+impl @client.ToSql for TextOnlyParam with fn moonbit_type_name(_) {
   "TextOnlyParam"
 }
 
 ///|
 /// This encoder should never run.
 /// If the test reaches encoding, the earlier type check failed to stop the bad parameter.
-impl @client.ToSql for TextOnlyParam with to_sql(_, _, _) {
+impl @client.ToSql for TextOnlyParam with fn to_sql(_, _, _) {
   fail("unexpected encode")
 }
 

@@ -2369,25 +2369,25 @@ pub async fn PreparedStatement::close(self : PreparedStatement) -> Unit {
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with query_all(self, sql, params?) {
+pub impl GenericClient for Client with fn query_all(self, sql, params?) {
   self.query_all(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with query_one(self, sql, params?) {
+pub impl GenericClient for Client with fn query_one(self, sql, params?) {
   self.query_one(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with query_opt(self, sql, params?) {
+pub impl GenericClient for Client with fn query_opt(self, sql, params?) {
   self.query_opt(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with query_typed_all(
+pub impl GenericClient for Client with fn query_typed_all(
   self,
   sql,
   param_types,
@@ -2398,43 +2398,43 @@ pub impl GenericClient for Client with query_typed_all(
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with execute(self, sql, params?) {
+pub impl GenericClient for Client with fn execute(self, sql, params?) {
   self.execute(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with batch_execute(self, sql) {
+pub impl GenericClient for Client with fn batch_execute(self, sql) {
   self.batch_execute(sql)
 }
 
 ///|
 /// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Client with check_connection(self) {
+pub impl GenericClient for Client with fn check_connection(self) {
   self.check_connection()
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with query_all(self, sql, params?) {
+pub impl GenericClient for Transaction with fn query_all(self, sql, params?) {
   self.query_all(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with query_one(self, sql, params?) {
+pub impl GenericClient for Transaction with fn query_one(self, sql, params?) {
   self.query_one(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with query_opt(self, sql, params?) {
+pub impl GenericClient for Transaction with fn query_opt(self, sql, params?) {
   self.query_opt(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with query_typed_all(
+pub impl GenericClient for Transaction with fn query_typed_all(
   self,
   sql,
   param_types,
@@ -2445,18 +2445,18 @@ pub impl GenericClient for Transaction with query_typed_all(
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with execute(self, sql, params?) {
+pub impl GenericClient for Transaction with fn execute(self, sql, params?) {
   self.execute(sql, params=params.unwrap_or([]))
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with batch_execute(self, sql) {
+pub impl GenericClient for Transaction with fn batch_execute(self, sql) {
   self.batch_execute(sql)
 }
 
 ///|
 /// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with check_connection(self) {
+pub impl GenericClient for Transaction with fn check_connection(self) {
   self.check_connection()
 }

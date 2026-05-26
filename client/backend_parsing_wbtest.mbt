@@ -16,7 +16,7 @@ fn bytes_of(bytes : ArrayView[Byte]) -> Bytes {
 
 ///|
 fn parsing_backend_packet(tag : Byte, payload : @buffer.Buffer) -> Bytes raise {
-  let packet = @buffer.new()
+  let packet = Buffer()
   packet.write_byte(tag)
   packet.write_int_be(@proto.i32_from_usize(payload.length() + 4))
   packet.write_bytes(payload.to_bytes())
@@ -35,7 +35,7 @@ fn parse_backend_message(packet : Bytes) -> @backend.Message raise {
 fn make_row_description_body(
   columns : Array[TestColumnSpec],
 ) -> @backend.RowDescriptionBody raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int16_be(@proto.checked_i16(columns.length()))
   for column in columns {
     payload.write_bytes(column.name)
@@ -58,7 +58,7 @@ fn make_row_description_body(
 
 ///|
 fn make_data_row_body(values : Array[Bytes?]) -> @backend.DataRowBody raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_int16_be(@proto.checked_i16(values.length()))
   for value in values {
     match value {
@@ -80,7 +80,7 @@ fn make_data_row_body(values : Array[Bytes?]) -> @backend.DataRowBody raise {
 
 ///|
 fn make_copy_formats(formats : Array[Int]) -> @backend.ColumnFormats raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   payload.write_byte(0)
   payload.write_int16_be(@proto.checked_i16(formats.length()))
   for format in formats {
@@ -99,7 +99,7 @@ fn make_copy_formats(formats : Array[Int]) -> @backend.ColumnFormats raise {
 fn make_error_fields(
   fields : Array[(Byte, Bytes)],
 ) -> @backend.ErrorFields raise {
-  let payload = @buffer.new()
+  let payload = Buffer()
   for field in fields {
     let (type_, value) = field
     payload.write_byte(type_)

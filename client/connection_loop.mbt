@@ -242,7 +242,7 @@ async fn Connection::drain_copy_input(
       Data(data) => {
         // Data chunks can flow indefinitely; keep consuming producer input
         // until it explicitly finishes or aborts this COPY exchange.
-        let payload = @buffer.new()
+        let payload = Buffer()
         @frontend.CopyData::new(data[:]).write(payload)
         self.stream.write(payload.to_bytes())
         continue input.get()
@@ -250,7 +250,7 @@ async fn Connection::drain_copy_input(
       Finish => {
         // After `CopyDone`, the request returns to normal backend completion
         // handling on the response queue.
-        let payload = @buffer.new()
+        let payload = Buffer()
         @frontend.copy_done(payload)
         self.stream.write(payload.to_bytes())
         return
@@ -258,7 +258,7 @@ async fn Connection::drain_copy_input(
       Fail(message) => {
         // PostgreSQL still sends trailing completion frames after `CopyFail`,
         // so the request stays pending until the backend catches up.
-        let payload = @buffer.new()
+        let payload = Buffer()
         @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
         self.stream.write(payload.to_bytes())
         return
@@ -382,7 +382,7 @@ async fn Connection::read_message(self : Connection) -> @backend.Message {
   let header = self.stream.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = self.stream.read_exactly(body_len - 4)
-  let packet = @buffer.new(size_hint=header.length() + body.length())
+  let packet = Buffer(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
   match @backend.Message::parse(packet.to_bytes()[:]) {
