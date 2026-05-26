@@ -1,41 +1,4 @@
 ///|
-fn[T] expect_pool_lease_released(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(PoolError::LeaseReleased) else {
-    fail("expected lease released error")
-  }
-}
-
-///|
-fn[T] expect_pool_operation_in_progress(
-  result : Result[T, Error],
-) -> Unit raise {
-  guard result is Err(PoolError::OperationInProgress) else {
-    fail("expected operation in progress error")
-  }
-}
-
-///|
-fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
-  Config::new(
-    "db.example",
-    user="moon",
-    dbname="moondb",
-    application_name="pgpool-client-api-wbtest",
-    pool=PoolConfig::new(1),
-  )
-  .builder(group)
-  .build()
-}
-
-///|
-fn client_api_test_connection(
-  group : @async.TaskGroup[Unit],
-  id? : Int = 1,
-) -> ConnectionState {
-  { id, group, client: @ref.new(None), statement_cache: [] }
-}
-
-///|
 async test "pgpool client lease state rejects released busy and empty connections" {
   @async.with_task_group(group => {
     let pool = client_api_test_pool(group)
@@ -134,76 +97,6 @@ async test "pgpool client lease finish helpers finalize delayed release" {
     assert_false(transaction_state.scope_active.val)
     assert_eq(transaction_state.active_ops.val, 0)
     assert_true(transaction_state.released.val)
-
-    pool.close()
-  })
-}
-
-///|
-async test "pgpool client wrapper helpers cover release and detach guards" {
-  @async.with_task_group(group => {
-    let pool = client_api_test_pool(group)
-
-    let released_connection = client_api_test_connection(group, id=10)
-    pool.shared.connections.push(released_connection)
-    let released_state : ClientLeaseState = {
-      pool: pool.shared,
-      connection: released_connection,
-      active_ops: @ref.new(0),
-      scope_active: @ref.new(false),
-      releasing: @ref.new(false),
-      released: @ref.new(false),
-    }
-    let released_client : Client = { state: released_state }
-    let cache = released_client.statement_cache()
-    assert_eq(cache.connection.id, 10)
-    released_client.release()
-    assert_true(released_state.releasing.val)
-    assert_true(released_state.released.val)
-    released_client.release()
-    expect_pool_lease_released(try? released_client.statement_cache())
-
-    let delaying_connection = client_api_test_connection(group, id=11)
-    pool.shared.connections.push(delaying_connection)
-    let delaying_state : ClientLeaseState = {
-      pool: pool.shared,
-      connection: delaying_connection,
-      active_ops: @ref.new(1),
-      scope_active: @ref.new(false),
-      releasing: @ref.new(false),
-      released: @ref.new(false),
-    }
-    let delaying_client : Client = { state: delaying_state }
-    delaying_client.release()
-    assert_true(delaying_state.releasing.val)
-    assert_false(delaying_state.released.val)
-    expect_pool_lease_released(try? delaying_client.detach_raw())
-
-    let busy_connection = client_api_test_connection(group, id=12)
-    let busy_client : Client = {
-      state: {
-        pool: pool.shared,
-        connection: busy_connection,
-        active_ops: @ref.new(0),
-        scope_active: @ref.new(true),
-        releasing: @ref.new(false),
-        released: @ref.new(false),
-      },
-    }
-    expect_pool_operation_in_progress(try? busy_client.detach_raw())
-
-    let empty_connection = client_api_test_connection(group, id=13)
-    let empty_client : Client = {
-      state: {
-        pool: pool.shared,
-        connection: empty_connection,
-        active_ops: @ref.new(0),
-        scope_active: @ref.new(false),
-        releasing: @ref.new(false),
-        released: @ref.new(false),
-      },
-    }
-    expect_pool_lease_released(try? empty_client.detach_raw())
 
     pool.close()
   })
