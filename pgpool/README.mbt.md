@@ -33,7 +33,7 @@ async fn _pool_quick_start(
       application_name="my-service",
       pool=PoolConfig::new(2),
     )
-    let pool = config.create_pool(group)
+    let pool = Pool::new(config, group)
 
     let value : Int = pool.with_client(client => {
       client.query_one("select 1::int4 as value").get_name("value")
@@ -174,9 +174,9 @@ session-local state such as open portals/cursors, LISTEN state, advisory locks,
 or temporary objects behind. Cached prepared statements are managed separately
 through the statement-cache APIs.
 
-## Builder Hooks
+## Pool Options
 
-`Config::builder(group)` exposes three hook points:
+`Pool::new(config, group, options?)` accepts runtime extension hooks:
 
 - `post_create`: run after a brand-new connection opens
 - `pre_recycle`: run before recycle-time validation / cleanup of an idle
@@ -188,7 +188,7 @@ are `SET search_path`, session GUCs, or a custom validation query.
 
 ```mbt check
 ///|
-fn _pool_builder_hook_example(group : @async.TaskGroup[Unit]) -> Pool raise {
+fn _pool_options_hook_example(group : @async.TaskGroup[Unit]) -> Pool raise {
   let config = Config::new(
     "db.example",
     user="moon",
@@ -196,11 +196,11 @@ fn _pool_builder_hook_example(group : @async.TaskGroup[Unit]) -> Pool raise {
     application_name="my-service",
     pool=PoolConfig::new(2),
   )
-  config
-  .builder(group)
-  .post_create(client => client.batch_execute("set search_path to app, public"))
-  .pre_recycle(client => client.check_connection())
-  .build()
+  let options = PoolOptions::new(
+    post_create=client => client.batch_execute("set search_path to app, public"),
+    pre_recycle=client => client.check_connection(),
+  )
+  Pool::new(config, group, options~)
 }
 ```
 

@@ -101,9 +101,9 @@ test "integration pool config validation rejects invalid settings" {
 }
 
 ///|
-/// This verifies builder hooks, LIFO idle reuse, resize behavior, and a custom connector over a real PostgreSQL server.
+/// This verifies pool options hooks, LIFO idle reuse, resize behavior, and a custom connector over a real PostgreSQL server.
 /// It also exercises `target_session_attrs=read_write` and random host ordering on multi-target declarative config.
-async test "integration pool builder hooks resize and custom connector" {
+async test "integration pool options hooks resize and custom connector" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let connect_calls : Array[Int] = []
@@ -115,41 +115,45 @@ async test "integration pool builder hooks resize and custom connector" {
       connect_calls.push(1)
       @client.connect(target)
     })
-    let pool = @pgpool.Config::new(
-        config.host,
-        user=config.user,
-        dbname=config.database,
-        password=config.password,
-        port=config.port,
-        application_name="moonbit-postgres-pool-builder-extra",
-        hosts=[config.host],
-        ports=[config.port, config.port],
-        target_session_attrs=@pgpool.TargetSessionAttrs::read_write(),
-        load_balance_hosts=Random,
-        pool=@pgpool.PoolConfig::new(
-          2,
-          recycling_method=@pgpool.RecyclingMethod::verified(),
-        ),
-      )
-      .builder(group)
-      .wait_timeout(Some(11))
-      .create_timeout(Some(2_000))
-      .recycle_timeout(Some(2_000))
-      .queue_mode(@pgpool.QueueMode::lifo())
-      .connector(connector)
-      .post_create(client => {
+    let pool_config = @pgpool.PoolConfig::new(
+      2,
+      timeouts=@pgpool.Timeouts::new(
+        wait_ms=Some(11),
+        create_ms=Some(2_000),
+        recycle_ms=Some(2_000),
+      ),
+      queue_mode=@pgpool.QueueMode::lifo(),
+      recycling_method=@pgpool.RecyclingMethod::verified(),
+    )
+    let declarative_config = @pgpool.Config::new(
+      config.host,
+      user=config.user,
+      dbname=config.database,
+      password=config.password,
+      port=config.port,
+      application_name="moonbit-postgres-pool-options-extra",
+      hosts=[config.host],
+      ports=[config.port, config.port],
+      target_session_attrs=@pgpool.TargetSessionAttrs::read_write(),
+      load_balance_hosts=Random,
+      pool=pool_config,
+    )
+    let options = @pgpool.PoolOptions::new(
+      connector~,
+      post_create=client => {
         post_create_calls.push(1)
         client.check_connection()
-      })
-      .pre_recycle(client => {
+      },
+      pre_recycle=client => {
         pre_recycle_calls.push(1)
         client.check_connection()
-      })
-      .post_recycle(client => {
+      },
+      post_recycle=client => {
         post_recycle_calls.push(1)
         client.check_connection()
-      })
-      .build()
+      },
+    )
+    let pool = @pgpool.Pool::new(declarative_config, group, options~)
 
     @debug.assert_eq(pool.status().max_size, 2)
     @debug.assert_eq(pool.timeouts().wait_ms, Some(11))
@@ -234,21 +238,7 @@ async test "integration pool declarative config fails over to later target" {
         @client.connect(target)
       }
     })
-    let pool = @pgpool.Config::new(
-        config.host,
-        user=config.user,
-        dbname=config.database,
-        password=config.password,
-        port=config.port,
-        application_name="moonbit-postgres-pool-failover-extra",
-        hosts=[config.host],
-        ports=[config.port, config.port],
-        pool=@pgpool.PoolConfig::new(1),
-      )
-      .builder(group)
-      .connector(connector)
-      .build()
-    let targets = @pgpool.Config::new(
+    let pool_config = @pgpool.Config::new(
       config.host,
       user=config.user,
       dbname=config.database,
@@ -258,7 +248,13 @@ async test "integration pool declarative config fails over to later target" {
       hosts=[config.host],
       ports=[config.port, config.port],
       pool=@pgpool.PoolConfig::new(1),
-    ).get_connection_targets()
+    )
+    let pool = @pgpool.Pool::new(
+      pool_config,
+      group,
+      options=@pgpool.PoolOptions::new(connector~),
+    )
+    let targets = pool_config.get_connection_targets()
     @debug.assert_eq(targets.length(), 2)
     @debug.assert_eq(targets[0].port, config.port)
     @debug.assert_eq(targets[1].port, config.port)

@@ -16,15 +16,14 @@ fn[T] expect_pool_operation_in_progress(
 
 ///|
 fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
-  Config::new(
+  let config = Config::new(
     "db.example",
     user="moon",
     dbname="moondb",
     application_name="pgpool-client-api-wbtest",
     pool=PoolConfig::new(1),
   )
-  .builder(group)
-  .build()
+  Pool::new(config, group)
 }
 
 ///|

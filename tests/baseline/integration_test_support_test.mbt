@@ -113,7 +113,7 @@ fn make_pool(
   config : @client.Config,
   pool_config : @pgpool.PoolConfig,
 ) -> @pgpool.Pool raise {
-  @pgpool.Config::new(
+  let config = @pgpool.Config::new(
     config.host,
     hostaddr?=config.hostaddr,
     user=config.user,
@@ -131,7 +131,8 @@ fn make_pool(
     target_session_attrs=@pgpool.TargetSessionAttrs::any(),
     load_balance_hosts=Disable,
     pool=pool_config,
-  ).create_pool(group)
+  )
+  @pgpool.Pool::new(config, group)
 }
 
 ///|

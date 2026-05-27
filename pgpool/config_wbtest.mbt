@@ -157,23 +157,25 @@ test "pool config rejects sslrootcert system without verify_full" {
 }
 
 ///|
-async test "pool builder updates status and manager config without connecting" {
+async test "pool new updates status and config without connecting" {
   @async.with_task_group(group => {
     let config = Config::new(
       "db.example",
       user="moon",
       dbname="moondb",
-      application_name="pool-builder",
-      pool=PoolConfig::new(1, recycling_method=RecyclingMethod::verified()),
+      application_name="pool-new",
+      pool=PoolConfig::new(
+        3,
+        timeouts=Timeouts::new(
+          wait_ms=Some(11),
+          create_ms=Some(22),
+          recycle_ms=Some(33),
+        ),
+        queue_mode=QueueMode::lifo(),
+        recycling_method=RecyclingMethod::verified(),
+      ),
     )
-    let pool = config
-      .builder(group)
-      .max_size(3)
-      .wait_timeout(Some(11))
-      .create_timeout(Some(22))
-      .recycle_timeout(Some(33))
-      .queue_mode(QueueMode::lifo())
-      .build()
+    let pool = Pool::new(config, group)
     let timeouts = pool.timeouts()
     @debug.assert_eq(pool.status().max_size, 3)
     @debug.assert_eq(timeouts.wait_ms, Some(11))

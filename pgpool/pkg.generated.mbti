@@ -74,8 +74,6 @@ pub struct Config {
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
 } derive(Eq, @debug.Debug)
-pub fn Config::builder(Self, @async.TaskGroup[Unit]) -> PoolBuilder raise
-pub fn Config::create_pool(Self, @async.TaskGroup[Unit]) -> Pool raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config] raise
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self
@@ -138,25 +136,12 @@ pub fn Pool::config(Self) -> PoolConfig
 pub async fn Pool::get(Self) -> Client
 pub fn Pool::is_closed(Self) -> Bool
 pub fn Pool::manager(Self) -> Manager
+pub fn Pool::new(Config, @async.TaskGroup[Unit], options? : PoolOptions) -> Self raise
 pub fn Pool::resize(Self, Int) -> Unit raise
 pub fn Pool::status(Self) -> Status
 pub async fn Pool::timeout_get(Self, Timeouts) -> Client
 pub fn Pool::timeouts(Self) -> Timeouts
 pub async fn[T] Pool::with_client(Self, async (Client) -> T) -> T
-
-type PoolBuilder
-pub fn PoolBuilder::build(Self) -> Pool raise
-pub fn PoolBuilder::config(Self, PoolConfig) -> Self
-pub fn PoolBuilder::connector(Self, Connector) -> Self
-pub fn PoolBuilder::create_timeout(Self, Int?) -> Self
-pub fn PoolBuilder::max_size(Self, Int) -> Self
-pub fn PoolBuilder::post_create(Self, async (@client.Client) -> Unit) -> Self
-pub fn PoolBuilder::post_recycle(Self, async (@client.Client) -> Unit) -> Self
-pub fn PoolBuilder::pre_recycle(Self, async (@client.Client) -> Unit) -> Self
-pub fn PoolBuilder::queue_mode(Self, QueueMode) -> Self
-pub fn PoolBuilder::recycle_timeout(Self, Int?) -> Self
-pub fn PoolBuilder::timeouts(Self, Timeouts) -> Self
-pub fn PoolBuilder::wait_timeout(Self, Int?) -> Self
 
 pub struct PoolConfig {
   max_size : Int
@@ -165,6 +150,14 @@ pub struct PoolConfig {
   recycling_method : RecyclingMethod
 } derive(Eq, @debug.Debug)
 pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod) -> Self raise
+
+pub struct PoolOptions {
+  connector : Connector?
+  post_create : (async (@client.Client) -> Unit)?
+  pre_recycle : (async (@client.Client) -> Unit)?
+  post_recycle : (async (@client.Client) -> Unit)?
+}
+pub fn PoolOptions::new(connector? : Connector, post_create? : async (@client.Client) -> Unit, pre_recycle? : async (@client.Client) -> Unit, post_recycle? : async (@client.Client) -> Unit) -> Self
 
 pub struct Portal {
   columns : Array[@client.Column]

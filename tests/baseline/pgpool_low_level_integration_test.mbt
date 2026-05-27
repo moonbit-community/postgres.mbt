@@ -16,7 +16,7 @@ fn make_decl_pool(
     application_name~,
     pool=make_pool_config(max_size),
   )
-  pool_config.create_pool(group)
+  @pgpool.Pool::new(pool_config, group)
 }
 
 ///|

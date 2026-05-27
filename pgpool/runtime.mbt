@@ -38,27 +38,23 @@ struct Pool {
 ///|
 /// Wrapper around the callback that opens one physical PostgreSQL connection.
 ///
-/// `PoolBuilder` stores this so callers can replace the default
-/// `@client.connect` path during tests or custom integration.
+/// Pool options can replace the default `@client.connect` path during tests or
+/// custom integration.
 struct Connector {
   run : async (@client.Config) -> (@client.Client, @client.Connection)
 }
 
 ///|
-/// Immutable builder value used to finish pool construction.
-///
-/// Each setter returns a new `PoolBuilder` with one field changed. The builder
-/// itself does not own any live connection until `build()` runs.
-struct PoolBuilder {
-  group : @async.TaskGroup[Unit]
-  targets : Array[@client.Config]
-  pool_config : PoolConfig
-  connector : Connector
+/// Runtime extension points used when constructing a pool.
+pub struct PoolOptions {
+  /// Custom connector used when checkout needs to open a new physical session.
+  connector : Connector?
+  /// Hook that runs after a new connection opens successfully.
   post_create : (async (@client.Client) -> Unit)?
+  /// Hook that runs before checkout-time recycling of an idle connection.
   pre_recycle : (async (@client.Client) -> Unit)?
+  /// Hook that runs after the configured recycling step succeeds.
   post_recycle : (async (@client.Client) -> Unit)?
-  target_session_attrs : TargetSessionAttrs
-  load_balance_hosts : LoadBalanceHosts
 }
 
 ///|

@@ -251,7 +251,7 @@ pub(all) enum LoadBalanceHosts {
 /// connection targets.
 ///
 /// All fields are explicit. Validation is deferred until callers ask for
-/// normalized output via `builder`, `create_pool`, `get_pool_config`, or
+/// normalized output via `Pool::new`, `get_pool_config`, or
 /// `get_connection_targets`.
 pub struct Config {
   user : String

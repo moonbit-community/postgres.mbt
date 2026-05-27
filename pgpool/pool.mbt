@@ -13,186 +13,44 @@ pub fn Connector::new(
 }
 
 ///|
-/// Normalize declarative config and create a `PoolBuilder`.
-///
-/// This validates the top-level pool config, expands host settings into
-/// concrete targets, and stores the task group that will host background
-/// connection-driver tasks. No network connection is opened yet.
-pub fn Config::builder(
-  self : Config,
-  group : @async.TaskGroup[Unit],
-) -> PoolBuilder raise {
-  let normalized = normalize_config(self)
-  {
-    group,
-    targets: self.get_connection_targets(),
-    pool_config: self.get_pool_config(),
-    connector: default_connector(),
-    post_create: None,
-    pre_recycle: None,
-    post_recycle: None,
-    target_session_attrs: normalized.target_session_attrs,
-    load_balance_hosts: normalized.load_balance_hosts,
-  }
+/// Build runtime options for pool construction.
+pub fn PoolOptions::new(
+  connector? : Connector,
+  post_create? : async (@client.Client) -> Unit,
+  pre_recycle? : async (@client.Client) -> Unit,
+  post_recycle? : async (@client.Client) -> Unit,
+) -> PoolOptions {
+  { connector, post_create, pre_recycle, post_recycle }
 }
 
 ///|
-/// Build a pool directly from declarative config.
-///
-/// This is equivalent to `self.builder(group).build()`: configuration is
-/// normalized immediately, but physical connections are still opened lazily on
-/// the first checkout.
-pub fn Config::create_pool(
-  self : Config,
-  group : @async.TaskGroup[Unit],
-) -> Pool raise {
-  self.builder(group).build()
-}
-
-///|
-/// Replace the builder's full pool-capacity config.
-///
-/// The new value is stored without validation here. Invalid settings are
-/// rejected later by `build()`.
-pub fn PoolBuilder::config(
-  self : PoolBuilder,
-  config : PoolConfig,
-) -> PoolBuilder {
-  { ..self, pool_config: config }
-}
-
-///|
-/// Replace only the builder's `max_size`.
-///
-/// Validation is deferred until `build()`.
-pub fn PoolBuilder::max_size(self : PoolBuilder, max_size : Int) -> PoolBuilder {
-  self.config({ ..self.pool_config, max_size, })
-}
-
-///|
-/// Replace only the builder's default timeout policy.
-///
-/// The new record affects future `Pool::get()` calls on the built pool. It does
-/// not validate timeout values yet.
-pub fn PoolBuilder::timeouts(
-  self : PoolBuilder,
-  timeouts : Timeouts,
-) -> PoolBuilder {
-  self.config({ ..self.pool_config, timeouts, })
-}
-
-///|
-/// Replace only the default wait timeout used by `Pool::get()`.
-///
-/// `None` disables the wait timeout. Validation is deferred until `build()`.
-pub fn PoolBuilder::wait_timeout(
-  self : PoolBuilder,
-  timeout_ms : Int?,
-) -> PoolBuilder {
-  self.timeouts({ ..self.pool_config.timeouts, wait_ms: timeout_ms })
-}
-
-///|
-/// Replace only the default connection-creation timeout used by `Pool::get()`.
-pub fn PoolBuilder::create_timeout(
-  self : PoolBuilder,
-  timeout_ms : Int?,
-) -> PoolBuilder {
-  self.timeouts({ ..self.pool_config.timeouts, create_ms: timeout_ms })
-}
-
-///|
-/// Replace only the default idle-connection recycle timeout used by `Pool::get()`.
-pub fn PoolBuilder::recycle_timeout(
-  self : PoolBuilder,
-  timeout_ms : Int?,
-) -> PoolBuilder {
-  self.timeouts({ ..self.pool_config.timeouts, recycle_ms: timeout_ms })
-}
-
-///|
-/// Replace the idle-connection queue mode used by the future pool.
-pub fn PoolBuilder::queue_mode(
-  self : PoolBuilder,
-  queue_mode : QueueMode,
-) -> PoolBuilder {
-  self.config({ ..self.pool_config, queue_mode, })
-}
-
-///|
-/// Replace the connector used to open new physical connections.
-///
-/// The callback is not invoked until checkout needs a new connection.
-pub fn PoolBuilder::connector(
-  self : PoolBuilder,
-  connector : Connector,
-) -> PoolBuilder {
-  { ..self, connector, }
-}
-
-///|
-/// Install a hook that runs after a new connection opens successfully.
-///
-/// The hook runs before the connection enters the pool. If it raises, the new
-/// connection is closed and checkout fails or continues with another target.
-/// Use this for short session setup such as `SET search_path ...`, and leave
-/// the connection idle when the hook returns.
-pub fn PoolBuilder::post_create(
-  self : PoolBuilder,
-  hook : async (@client.Client) -> Unit,
-) -> PoolBuilder {
-  { ..self, post_create: Some(hook) }
-}
-
-///|
-/// Install a hook that runs before checkout-time recycling of an idle connection.
-///
-/// If the hook raises or times out, that idle connection is discarded instead of
-/// being handed out. Keep this hook short and deterministic; it should validate
-/// or normalize session state, not start long-lived work.
-pub fn PoolBuilder::pre_recycle(
-  self : PoolBuilder,
-  hook : async (@client.Client) -> Unit,
-) -> PoolBuilder {
-  { ..self, pre_recycle: Some(hook) }
-}
-
-///|
-/// Install a hook that runs after the configured recycling step succeeds.
-///
-/// If the hook raises or times out, that idle connection is discarded instead of
-/// being handed out. This is the place for final per-checkout setup that should
-/// happen only after the connection already passed recycling.
-pub fn PoolBuilder::post_recycle(
-  self : PoolBuilder,
-  hook : async (@client.Client) -> Unit,
-) -> PoolBuilder {
-  { ..self, post_recycle: Some(hook) }
-}
-
-///|
-/// Validate the builder and create a pool handle.
+/// Create a pool from declarative config and runtime options.
 ///
 /// This allocates bookkeeping state and checkout slots only. It does not open
 /// any physical PostgreSQL connection, so network failures still happen later
 /// during checkout.
-pub fn PoolBuilder::build(self : PoolBuilder) -> Pool raise {
-  validate_pool_config(self.pool_config)
+pub fn Pool::new(
+  config : Config,
+  group : @async.TaskGroup[Unit],
+  options? : PoolOptions = PoolOptions::new(),
+) -> Pool raise {
+  let normalized = normalize_config(config)
+  let pool_config = config.get_pool_config()
   let slots : @async.Queue[Unit] = Queue(kind=Unbounded)
-  for _ in 0..<self.pool_config.max_size {
+  for _ in 0..<pool_config.max_size {
     ignore(slots.try_put(()))
   }
   {
     shared: {
-      group: self.group,
-      targets: self.targets,
-      connector: self.connector,
-      post_create: self.post_create,
-      pre_recycle: self.pre_recycle,
-      post_recycle: self.post_recycle,
-      target_session_attrs: self.target_session_attrs,
-      load_balance_hosts: self.load_balance_hosts,
-      pool_config: @ref.new(self.pool_config),
+      group,
+      targets: config.get_connection_targets(),
+      connector: options.connector.unwrap_or(default_connector()),
+      post_create: options.post_create,
+      pre_recycle: options.pre_recycle,
+      post_recycle: options.post_recycle,
+      target_session_attrs: normalized.target_session_attrs,
+      load_balance_hosts: normalized.load_balance_hosts,
+      pool_config: @ref.new(pool_config),
       slots,
       idle: [],
       connections: [],
