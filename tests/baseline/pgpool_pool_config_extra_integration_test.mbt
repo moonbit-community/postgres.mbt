@@ -57,8 +57,7 @@ test "integration pool config constructors and normalization" {
   assert_true(targets[0].ssl_mode == VerifyCa)
   @debug.assert_eq(targets[0].ssl_root_cert, Some("/tmp/root.crt"))
   assert_true(
-    config.get_manager_config().recycling_method ==
-    @pgpool.RecyclingMethod::fast(),
+    config.get_pool_config().recycling_method == @pgpool.RecyclingMethod::fast(),
   )
 }
 
@@ -127,19 +126,16 @@ async test "integration pool builder hooks resize and custom connector" {
         ports=[config.port, config.port],
         target_session_attrs=@pgpool.TargetSessionAttrs::read_write(),
         load_balance_hosts=Random,
-        pool=@pgpool.PoolConfig::new(1),
+        pool=@pgpool.PoolConfig::new(
+          2,
+          recycling_method=@pgpool.RecyclingMethod::verified(),
+        ),
       )
       .builder(group)
-      .config(@pgpool.PoolConfig::new(2))
       .wait_timeout(Some(11))
       .create_timeout(Some(2_000))
       .recycle_timeout(Some(2_000))
       .queue_mode(@pgpool.QueueMode::lifo())
-      .manager_config(
-        @pgpool.ManagerConfig::new(
-          recycling_method=@pgpool.RecyclingMethod::verified(),
-        ),
-      )
       .connector(connector)
       .post_create(client => {
         post_create_calls.push(1)
@@ -160,8 +156,7 @@ async test "integration pool builder hooks resize and custom connector" {
     @debug.assert_eq(pool.timeouts().create_ms, Some(2_000))
     @debug.assert_eq(pool.timeouts().recycle_ms, Some(2_000))
     assert_true(
-      pool.manager().config().recycling_method ==
-      @pgpool.RecyclingMethod::verified(),
+      pool.config().recycling_method == @pgpool.RecyclingMethod::verified(),
     )
 
     let first = pool.get()

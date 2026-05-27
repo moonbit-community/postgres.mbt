@@ -27,7 +27,6 @@ pub fn Config::builder(
     group,
     targets: self.get_connection_targets(),
     pool_config: self.get_pool_config(),
-    manager_config: self.get_manager_config(),
     connector: default_connector(),
     post_create: None,
     pre_recycle: None,
@@ -121,15 +120,6 @@ pub fn PoolBuilder::queue_mode(
 }
 
 ///|
-/// Replace checkout-time manager policy for the future pool.
-pub fn PoolBuilder::manager_config(
-  self : PoolBuilder,
-  manager_config : ManagerConfig,
-) -> PoolBuilder {
-  { ..self, manager_config, }
-}
-
-///|
 /// Replace the connector used to open new physical connections.
 ///
 /// The callback is not invoked until checkout needs a new connection.
@@ -203,7 +193,6 @@ pub fn PoolBuilder::build(self : PoolBuilder) -> Pool raise {
       target_session_attrs: self.target_session_attrs,
       load_balance_hosts: self.load_balance_hosts,
       pool_config: @ref.new(self.pool_config),
-      manager_config: self.manager_config,
       slots,
       idle: [],
       connections: [],
@@ -236,6 +225,7 @@ pub async fn Pool::timeout_get(self : Pool, timeouts : Timeouts) -> Client {
     max_size: self.shared.pool_config.val.max_size,
     timeouts,
     queue_mode: self.shared.pool_config.val.queue_mode,
+    recycling_method: self.shared.pool_config.val.recycling_method,
   })
   self.assert_open()
   self.acquire_slot(timeouts.wait_ms)
@@ -290,15 +280,15 @@ pub fn Pool::timeouts(self : Pool) -> Timeouts {
 }
 
 ///|
-/// Return the administrative manager handle for this pool.
-pub fn Pool::manager(self : Pool) -> Manager {
-  { shared: self.shared }
+/// Return the full pool config currently used by this pool.
+pub fn Pool::config(self : Pool) -> PoolConfig {
+  self.shared.pool_config.val
 }
 
 ///|
-/// Return the checkout-time manager policy for this pool.
-pub fn Manager::config(self : Manager) -> ManagerConfig {
-  self.shared.manager_config
+/// Return the administrative manager handle for this pool.
+pub fn Pool::manager(self : Pool) -> Manager {
+  { shared: self.shared }
 }
 
 ///|
@@ -501,7 +491,7 @@ async fn Pool::try_recycle_client(
   }
   self.run_recycle(connection, recycle_ms, () => {
     run_client_hook(self.shared.pre_recycle, client)
-    match self.shared.manager_config.recycling_method {
+    match self.shared.pool_config.val.recycling_method {
       Fast => ()
       Verified => client.check_connection()
       Clean => client.batch_execute(clean_recycle_sql)

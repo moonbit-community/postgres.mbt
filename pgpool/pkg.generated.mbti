@@ -72,15 +72,13 @@ pub struct Config {
   keepalives_idle_s : Int?
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
-  manager : ManagerConfig?
   pool : PoolConfig
 } derive(Eq, @debug.Debug)
 pub fn Config::builder(Self, @async.TaskGroup[Unit]) -> PoolBuilder raise
 pub fn Config::create_pool(Self, @async.TaskGroup[Unit]) -> Pool raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config] raise
-pub fn Config::get_manager_config(Self) -> ManagerConfig
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
-pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, manager? : ManagerConfig, pool~ : PoolConfig) -> Self
+pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self
 
 type Connector
 pub fn Connector::new(async (@client.Config) -> (@client.Client, @client.Connection)) -> Self
@@ -116,13 +114,7 @@ pub(all) enum LoadBalanceHosts {
 } derive(Eq, @debug.Debug)
 
 type Manager
-pub fn Manager::config(Self) -> ManagerConfig
 pub fn Manager::statement_caches(Self) -> StatementCaches
-
-pub struct ManagerConfig {
-  recycling_method : RecyclingMethod
-} derive(Eq, @debug.Debug)
-pub fn ManagerConfig::new(recycling_method? : RecyclingMethod) -> Self
 
 type Operation
 pub async fn Operation::batch_execute(Self, String) -> Unit
@@ -142,6 +134,7 @@ pub async fn OperationCancelToken::cancel(Self) -> Unit
 
 type Pool
 pub fn Pool::close(Self) -> Unit
+pub fn Pool::config(Self) -> PoolConfig
 pub async fn Pool::get(Self) -> Client
 pub fn Pool::is_closed(Self) -> Bool
 pub fn Pool::manager(Self) -> Manager
@@ -156,7 +149,6 @@ pub fn PoolBuilder::build(Self) -> Pool raise
 pub fn PoolBuilder::config(Self, PoolConfig) -> Self
 pub fn PoolBuilder::connector(Self, Connector) -> Self
 pub fn PoolBuilder::create_timeout(Self, Int?) -> Self
-pub fn PoolBuilder::manager_config(Self, ManagerConfig) -> Self
 pub fn PoolBuilder::max_size(Self, Int) -> Self
 pub fn PoolBuilder::post_create(Self, async (@client.Client) -> Unit) -> Self
 pub fn PoolBuilder::post_recycle(Self, async (@client.Client) -> Unit) -> Self
@@ -170,8 +162,9 @@ pub struct PoolConfig {
   max_size : Int
   timeouts : Timeouts
   queue_mode : QueueMode
+  recycling_method : RecyclingMethod
 } derive(Eq, @debug.Debug)
-pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode) -> Self raise
+pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod) -> Self raise
 
 pub struct Portal {
   columns : Array[@client.Column]

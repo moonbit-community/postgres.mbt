@@ -7,11 +7,13 @@ fn make_pool_config(
   create_ms? : Int? = None,
   recycle_ms? : Int? = None,
   queue_mode? : @pgpool.QueueMode = @pgpool.QueueMode::fifo(),
+  recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
 ) -> @pgpool.PoolConfig raise {
   @pgpool.PoolConfig::new(
     max_size,
     timeouts=@pgpool.Timeouts::new(wait_ms~, create_ms~, recycle_ms~),
     queue_mode~,
+    recycling_method~,
   )
 }
 
@@ -220,10 +222,7 @@ async test "integration pool clean recycle resets session state" {
     let pool = make_pool(
       group,
       as_client_config(config, application_name~),
-      make_pool_config(1),
-      manager=@pgpool.ManagerConfig::new(
-        recycling_method=@pgpool.RecyclingMethod::clean(),
-      ),
+      make_pool_config(1, recycling_method=@pgpool.RecyclingMethod::clean()),
     )
 
     // Deliberately dirty the session state during the first checkout.

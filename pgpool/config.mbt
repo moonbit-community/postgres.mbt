@@ -173,24 +173,6 @@ pub fn RecyclingMethod::custom(sql : String) -> RecyclingMethod {
 }
 
 ///|
-/// Per-pool policy used by the manager during idle-connection recycling.
-pub struct ManagerConfig {
-  /// Cleanup strategy applied when reusing an idle connection.
-  recycling_method : RecyclingMethod
-} derive(Eq, Debug)
-
-///|
-/// Construct manager settings for one pool.
-///
-/// The default is `RecyclingMethod::fast()`, which performs no checkout-time
-/// validation of idle connections.
-pub fn ManagerConfig::new(
-  recycling_method? : RecyclingMethod = Fast,
-) -> ManagerConfig {
-  { recycling_method, }
-}
-
-///|
 /// Capacity and checkout policy for one pool instance.
 pub struct PoolConfig {
   /// Maximum number of live physical PostgreSQL sessions owned by the pool.
@@ -199,6 +181,8 @@ pub struct PoolConfig {
   timeouts : Timeouts
   /// Strategy used when selecting from the idle connection list.
   queue_mode : QueueMode
+  /// Cleanup strategy applied when reusing an idle connection.
+  recycling_method : RecyclingMethod
 } derive(Eq, Debug)
 
 ///|
@@ -210,9 +194,10 @@ pub fn PoolConfig::new(
   max_size : Int,
   timeouts? : Timeouts = Timeouts::new(),
   queue_mode? : QueueMode = Fifo,
+  recycling_method? : RecyclingMethod = Fast,
 ) -> PoolConfig raise {
-  validate_pool_config({ max_size, timeouts, queue_mode })
-  { max_size, timeouts, queue_mode }
+  validate_pool_config({ max_size, timeouts, queue_mode, recycling_method })
+  { max_size, timeouts, queue_mode, recycling_method }
 }
 
 ///|
@@ -290,7 +275,6 @@ pub struct Config {
   keepalives_idle_s : Int?
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
-  manager : ManagerConfig?
   pool : PoolConfig
 } derive(Eq, Debug)
 
@@ -298,9 +282,9 @@ pub struct Config {
 /// Build declarative pool config with client-style required inputs.
 ///
 /// The first target is described by the same core fields as `@client.Config`,
-/// then optional pool-specific multi-target and manager settings can be added
-/// on top. Defaults keep the secure client path: port `5432`,
-/// `ssl_mode = VerifyFull`, and `dbname = user`.
+/// then optional pool-specific multi-target settings can be added on top.
+/// Defaults keep the secure client path: port `5432`, `ssl_mode = VerifyFull`,
+/// and `dbname = user`.
 pub fn Config::new(
   host : String,
   hostaddr? : String,
@@ -321,7 +305,6 @@ pub fn Config::new(
   ports? : Array[Int],
   target_session_attrs? : TargetSessionAttrs = Any,
   load_balance_hosts? : LoadBalanceHosts = Disable,
-  manager? : ManagerConfig,
   pool~ : PoolConfig,
 ) -> Config {
   {
@@ -344,7 +327,6 @@ pub fn Config::new(
     keepalives_idle_s,
     target_session_attrs: Some(target_session_attrs),
     load_balance_hosts: Some(load_balance_hosts),
-    manager,
     pool,
   }
 }
@@ -421,16 +403,6 @@ priv struct NormalizedConfig {
   keepalives_idle_s : Int?
   target_session_attrs : TargetSessionAttrs
   load_balance_hosts : LoadBalanceHosts
-}
-
-///|
-/// Return the manager config that will be used for this pool.
-///
-/// When `self.manager` is absent this function synthesizes the default
-/// `ManagerConfig::new()` value. It does not open any connection or validate
-/// other parts of the declarative config.
-pub fn Config::get_manager_config(self : Config) -> ManagerConfig {
-  self.manager.unwrap_or(ManagerConfig::new())
 }
 
 ///|

@@ -17,7 +17,6 @@ priv struct Shared {
   target_session_attrs : TargetSessionAttrs
   load_balance_hosts : LoadBalanceHosts
   pool_config : @ref.Ref[PoolConfig]
-  manager_config : ManagerConfig
   slots : @async.Queue[Unit]
   idle : Array[ConnectionState]
   connections : Array[ConnectionState]
@@ -54,7 +53,6 @@ struct PoolBuilder {
   group : @async.TaskGroup[Unit]
   targets : Array[@client.Config]
   pool_config : PoolConfig
-  manager_config : ManagerConfig
   connector : Connector
   post_create : (async (@client.Client) -> Unit)?
   pre_recycle : (async (@client.Client) -> Unit)?

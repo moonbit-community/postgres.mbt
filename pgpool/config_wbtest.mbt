@@ -164,8 +164,7 @@ async test "pool builder updates status and manager config without connecting" {
       user="moon",
       dbname="moondb",
       application_name="pool-builder",
-      pool=PoolConfig::new(1),
-      manager=ManagerConfig::new(recycling_method=RecyclingMethod::verified()),
+      pool=PoolConfig::new(1, recycling_method=RecyclingMethod::verified()),
     )
     let pool = config
       .builder(group)
@@ -180,9 +179,7 @@ async test "pool builder updates status and manager config without connecting" {
     @debug.assert_eq(timeouts.wait_ms, Some(11))
     @debug.assert_eq(timeouts.create_ms, Some(22))
     @debug.assert_eq(timeouts.recycle_ms, Some(33))
-    assert_true(
-      pool.manager().config().recycling_method == RecyclingMethod::verified(),
-    )
+    assert_true(pool.config().recycling_method == RecyclingMethod::verified())
     assert_false(pool.is_closed())
     pool.manager().statement_caches().clear()
     pool.close()

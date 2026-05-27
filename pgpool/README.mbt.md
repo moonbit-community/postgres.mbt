@@ -136,8 +136,8 @@ fn _multi_target_config() -> Config raise {
         recycle_ms=Some(250),
       ),
       queue_mode=QueueMode::lifo(),
+      recycling_method=RecyclingMethod::verified(),
     ),
-    manager=ManagerConfig::new(recycling_method=RecyclingMethod::verified()),
   )
 }
 ```

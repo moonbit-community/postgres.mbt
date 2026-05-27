@@ -112,7 +112,6 @@ fn make_pool(
   group : @async.TaskGroup[Unit],
   config : @client.Config,
   pool_config : @pgpool.PoolConfig,
-  manager? : @pgpool.ManagerConfig = @pgpool.ManagerConfig::new(),
 ) -> @pgpool.Pool raise {
   @pgpool.Config::new(
     config.host,
@@ -131,7 +130,6 @@ fn make_pool(
     keepalives_idle_s?=config.keepalives_idle_s,
     target_session_attrs=@pgpool.TargetSessionAttrs::any(),
     load_balance_hosts=Disable,
-    manager~,
     pool=pool_config,
   ).create_pool(group)
 }
