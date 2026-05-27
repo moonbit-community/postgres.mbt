@@ -204,12 +204,3 @@ struct Transaction {
   savepoint : String?
   finished : @ref.Ref[Bool]
 }
-
-///|
-/// Builder for `BEGIN` options such as isolation level and read-only mode.
-struct TransactionBuilder {
-  client : Client
-  isolation_level : String?
-  read_only : Bool?
-  deferrable : Bool?
-}

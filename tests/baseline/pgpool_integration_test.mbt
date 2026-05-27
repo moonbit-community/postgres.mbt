@@ -872,9 +872,9 @@ async test "integration pool remove cached statement keeps unrelated entries" {
 }
 
 ///|
-/// This verifies that the pool-side transaction builder really applies isolation level, read-only, and deferrable options to the database session.
+/// This verifies that pool-side transaction options apply isolation level, read-only, and deferrable settings to the database session.
 /// The test reads them back with `current_setting`, then performs a write to show that the transaction object itself still works.
-async test "integration pool transaction builder applies options" {
+async test "integration pool transaction options apply settings" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
@@ -884,29 +884,31 @@ async test "integration pool transaction builder applies options" {
     )
 
     let (isolation, read_only, deferrable) = pool.with_client(client => {
-      client
-      .build_transaction()
-      .isolation_level(@pgpool.IsolationLevel::serializable())
-      .read_only()
-      .deferrable()
-      .run(tx => {
-        let isolation : String = tx
-          .query_one(
-            "select current_setting('transaction_isolation')::text as value",
-          )
-          .get_name("value")
-        let read_only : String = tx
-          .query_one(
-            "select current_setting('transaction_read_only')::text as value",
-          )
-          .get_name("value")
-        let deferrable : String = tx
-          .query_one(
-            "select current_setting('transaction_deferrable')::text as value",
-          )
-          .get_name("value")
-        (isolation, read_only, deferrable)
-      })
+      client.with_transaction(
+        tx => {
+          let isolation : String = tx
+            .query_one(
+              "select current_setting('transaction_isolation')::text as value",
+            )
+            .get_name("value")
+          let read_only : String = tx
+            .query_one(
+              "select current_setting('transaction_read_only')::text as value",
+            )
+            .get_name("value")
+          let deferrable : String = tx
+            .query_one(
+              "select current_setting('transaction_deferrable')::text as value",
+            )
+            .get_name("value")
+          (isolation, read_only, deferrable)
+        },
+        options=@pgpool.TransactionOptions::new(
+          isolation_level=@pgpool.IsolationLevel::serializable(),
+          read_only=true,
+          deferrable=true,
+        ),
+      )
     })
 
     assert_eq(isolation, "serializable")
@@ -929,9 +931,7 @@ async test "integration pool savepoint rollback keeps outer transaction work" {
     )
 
     let count : Int = pool.with_client(client => {
-      client
-      .build_transaction()
-      .run(tx => {
+      client.with_transaction(tx => {
         tx.batch_execute(
           "create temp table moon_pool_savepoint (value int4 not null) on commit drop",
         )
@@ -1003,10 +1003,11 @@ async test "integration pool direct transaction keeps lease checked out until co
       make_pool_config(1),
     )
     let lease = pool.get()
-    let tx = lease
-      .build_transaction()
-      .isolation_level(@pgpool.IsolationLevel::serializable())
-      .start()
+    let tx = lease.transaction(
+      options=@pgpool.TransactionOptions::new(
+        isolation_level=@pgpool.IsolationLevel::serializable(),
+      ),
+    )
 
     let isolation : String = tx
       .query_one(

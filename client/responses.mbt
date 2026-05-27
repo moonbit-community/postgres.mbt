@@ -241,7 +241,7 @@ fn rows_affected(command_tag : String) -> Int {
 }
 
 ///|
-/// Join transaction builder clauses with spaces.
+/// Join transaction option clauses with spaces.
 fn join_clauses(clauses : Array[String]) -> String {
   let mut out = ""
   for index, clause in clauses {

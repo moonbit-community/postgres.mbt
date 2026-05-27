@@ -184,26 +184,26 @@ pub struct PreparedStatement {
 /// without handling raw protocol streams directly.
 pub(open) trait GenericClient {
   /// Run one query and collect every returned row before the call completes.
-  async query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[
+  async fn query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[
     @client.Row,
   ]
   /// Run one query and require exactly one row.
-  async query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
+  async fn query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
   /// Run one query and allow zero or one rows.
-  async query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
+  async fn query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
   /// Run one typed query and collect every returned row.
-  async query_typed_all(
+  async fn query_typed_all(
     Self,
     String,
     Array[@client.Type],
     params? : Array[&@client.ToSql],
   ) -> Array[@client.Row]
   /// Execute one command and return its affected row count.
-  async execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int
   /// Execute one or more SQL commands that do not return rows.
-  async batch_execute(Self, String) -> Unit
+  async fn batch_execute(Self, String) -> Unit
   /// Perform a lightweight round-trip health check.
-  async check_connection(Self) -> Unit
+  async fn check_connection(Self) -> Unit
 }
 
 ///|
@@ -337,18 +337,6 @@ struct Transaction {
 }
 
 ///|
-/// Builder for pooled transaction options before opening the transaction.
-///
-/// The builder stores SQL `BEGIN` modifiers and then starts the transaction on
-/// the same checked-out client lease.
-struct TransactionBuilder {
-  client : Client
-  isolation_level : IsolationLevel?
-  read_only : Bool?
-  deferrable : Bool?
-}
-
-///|
 /// Create a pooled client wrapper around one checked-out client.
 fn make_pooled_client(pool : Shared, connection : ConnectionState) -> Client {
   {
@@ -405,12 +393,6 @@ fn make_pooled_transaction(
       owner_released: @ref.new(false),
     },
   }
-}
-
-///|
-/// Create a pooled transaction builder attached to one leased client.
-fn make_transaction_builder(client : Client) -> TransactionBuilder {
-  { client, isolation_level: None, read_only: None, deferrable: None }
 }
 
 ///|

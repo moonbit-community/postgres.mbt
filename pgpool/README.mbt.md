@@ -84,8 +84,8 @@ Start with the smallest API that matches the ownership you need:
   callback and release it automatically
 - `Pool::get()`: manual lease management when the client must outlive one
   callback
-- `Client::with_transaction(...)`: run one callback inside a transaction that
-  auto-commits on success and rolls back best-effort on error
+- `Client::with_transaction(f, options?)`: run one callback inside a transaction
+  that auto-commits on success and rolls back best-effort on error
 - `Client::with_stream(...)`, `with_simple_query(...)`, `with_copy_in(...)`,
   `with_copy_out(...)`: callback-scoped access to low-level streaming APIs
 - `Client::run_cancellable(...)`: exclusive one-request-at-a-time scope with a
@@ -212,8 +212,8 @@ scope-safe:
 - fully-drained query helpers such as `query_all`, `query_one`, `query_opt`,
   and `query_typed_all`
 - command helpers such as `execute`, `batch_execute`, and `check_connection`
-- transaction helpers such as `transaction`, `build_transaction`,
-  `with_transaction`, and `with_savepoint`
+- transaction helpers such as `transaction`, `with_transaction`, and
+  `with_savepoint`
 - scope-bound prepared statement helpers such as `with_prepared(...)` and
   `with_prepared_cached(...)`
 - scope-bound low-level helpers such as `with_stream(...)`,

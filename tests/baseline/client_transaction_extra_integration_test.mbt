@@ -8,9 +8,9 @@ fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int] raise {
 }
 
 ///|
-/// This verifies the client-side transaction helpers around explicit builders, savepoints, prepared statements, portals, and rollback.
-/// The test starts one builder-configured transaction, exercises both named and unnamed savepoints, and then opens a second plain transaction to cover the default `BEGIN` path.
-async test "integration transaction builder savepoints and raw statement helpers" {
+/// This verifies the client-side transaction helpers around explicit options, savepoints, prepared statements, portals, and rollback.
+/// The test starts one option-configured transaction, exercises both named and unnamed savepoints, and then opens a second plain transaction to cover the default `BEGIN` path.
+async test "integration transaction options savepoints and raw statement helpers" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let (client, connection) = @client.connect(
@@ -21,12 +21,13 @@ async test "integration transaction builder savepoints and raw statement helpers
     )
     group.spawn_bg(() => connection.run())
 
-    let tx = client
-      .build_transaction()
-      .isolation_level("SERIALIZABLE")
-      .read_only(enabled=false)
-      .deferrable(enabled=false)
-      .start()
+    let tx = client.transaction(
+      options=@client.TransactionOptions::new(
+        isolation_level="SERIALIZABLE",
+        read_only=false,
+        deferrable=false,
+      ),
+    )
     tx.batch_execute("create temp table moon_client_tx_extra(value int4)")
 
     let insert_statement = tx.prepare(
@@ -130,9 +131,9 @@ async test "integration transaction builder savepoints and raw statement helpers
 }
 
 ///|
-/// This verifies the default transaction-builder path together with direct named-savepoint commit and nested rollback.
-/// The outer transaction starts from `build_transaction().start()` with no clauses, commits one named savepoint, rolls back one unnamed nested scope, and then commits the surviving rows.
-async test "integration transaction default builder and named savepoint commit" {
+/// This verifies the default transaction path together with direct named-savepoint commit and nested rollback.
+/// The outer transaction starts from `transaction()` with no clauses, commits one named savepoint, rolls back one unnamed nested scope, and then commits the surviving rows.
+async test "integration transaction default path and named savepoint commit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let (client, connection) = @client.connect(
@@ -143,7 +144,7 @@ async test "integration transaction default builder and named savepoint commit" 
     )
     group.spawn_bg(() => connection.run())
 
-    let tx = client.build_transaction().start()
+    let tx = client.transaction()
     tx.batch_execute("create temp table moon_client_tx_default(value int4)")
     assert_eq(
       tx.execute(

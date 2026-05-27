@@ -40,7 +40,7 @@ pub enum TimeoutKind {
 } derive(Eq, Debug)
 
 ///|
-/// PostgreSQL transaction isolation level accepted by `TransactionBuilder`.
+/// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
 pub enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
@@ -70,6 +70,27 @@ pub fn IsolationLevel::repeatable_read() -> IsolationLevel {
 /// Construct `SERIALIZABLE`.
 pub fn IsolationLevel::serializable() -> IsolationLevel {
   Serializable
+}
+
+///|
+/// Options for the `BEGIN` command used when opening a pooled transaction.
+pub struct TransactionOptions {
+  /// Optional transaction isolation level.
+  isolation_level : IsolationLevel?
+  /// `Some(true)` emits `READ ONLY`; `Some(false)` emits `READ WRITE`.
+  read_only : Bool?
+  /// `Some(true)` emits `DEFERRABLE`; `Some(false)` emits `NOT DEFERRABLE`.
+  deferrable : Bool?
+} derive(Eq, Debug)
+
+///|
+/// Build transaction options for a future `BEGIN` command.
+pub fn TransactionOptions::new(
+  isolation_level? : IsolationLevel,
+  read_only? : Bool,
+  deferrable? : Bool,
+) -> TransactionOptions {
+  { isolation_level, read_only, deferrable }
 }
 
 ///|

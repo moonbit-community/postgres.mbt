@@ -1,9 +1,9 @@
 import {
-  "moonbit-community/postgres/client" @client,
-  "moonbitlang/async" @async,
-  "moonbitlang/core/debug" @debug,
-  "moonbitlang/core/random" @random,
-  "moonbitlang/core/ref" @ref,
+  "moonbit-community/postgres/client",
+  "moonbitlang/async",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/random",
+  "moonbitlang/core/ref",
   "moonbitlang/core/string",
 }
 

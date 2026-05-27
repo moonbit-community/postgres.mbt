@@ -493,9 +493,9 @@ async test "integration pool transaction wrappers cover row counts and cache gua
 }
 
 ///|
-/// This verifies direct pooled transaction builders together with named and unnamed savepoints.
+/// This verifies direct pooled transaction options together with named and unnamed savepoints.
 /// The test keeps one pooled lease checked out explicitly, exercises rollback and auto-commit on nested transaction helpers, and then confirms the released lease rejects new work while the pool stays reusable.
-async test "integration pool direct transaction builder and savepoints keep lease reusable" {
+async test "integration pool direct transaction options and savepoints keep lease reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_decl_pool(
@@ -506,12 +506,8 @@ async test "integration pool direct transaction builder and savepoints keep leas
     )
 
     let client = pool.get()
-    let total : Int = client
-      .build_transaction()
-      .isolation_level(@pgpool.IsolationLevel::serializable())
-      .read_only(enabled=false)
-      .deferrable(enabled=false)
-      .run(tx => {
+    let total : Int = client.with_transaction(
+      tx => {
         tx.batch_execute("create temp table moon_pool_nested_tx(value int4)")
         assert_eq(
           tx.execute("insert into moon_pool_nested_tx(value) values (1)"),
@@ -583,7 +579,13 @@ async test "integration pool direct transaction builder and savepoints keep leas
         tx
         .query_one("select sum(value)::int4 as value from moon_pool_nested_tx")
         .get_name("value")
-      })
+      },
+      options=@pgpool.TransactionOptions::new(
+        isolation_level=@pgpool.IsolationLevel::serializable(),
+        read_only=false,
+        deferrable=false,
+      ),
+    )
     assert_eq(total, 12)
 
     client.release()
@@ -864,7 +866,7 @@ async test "integration pool direct lease operation and default transaction scop
     })
     assert_eq(initial_count, 2)
 
-    let tx = lease.build_transaction().start()
+    let tx = lease.transaction()
     assert_eq(
       tx.execute("insert into moon_pool_direct_scope(value) values (3)"),
       1,

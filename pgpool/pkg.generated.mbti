@@ -29,7 +29,6 @@ pub suberror PoolError {
 // Types and methods
 type Client
 pub async fn Client::batch_execute(Self, String) -> Unit
-pub fn Client::build_transaction(Self) -> TransactionBuilder
 pub async fn Client::check_connection(Self) -> Unit
 pub fn Client::detach_raw(Self) -> @client.Client raise
 pub async fn Client::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
@@ -40,7 +39,7 @@ pub async fn Client::query_typed_all(Self, String, Array[@client.Type], params? 
 pub fn Client::release(Self) -> Unit
 pub async fn[T] Client::run_cancellable(Self, async (Operation, OperationCancelToken) -> T) -> T
 pub fn Client::statement_cache(Self) -> StatementCache raise
-pub async fn Client::transaction(Self) -> Transaction
+pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
 pub async fn[T] Client::with_copy_in(Self, String, async (CopyInSink) -> T) -> T
 pub async fn[T] Client::with_copy_out(Self, String, async (CopyOutStream) -> T) -> T
 pub async fn[T] Client::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
@@ -49,7 +48,7 @@ pub async fn[T] Client::with_prepared_typed(Self, String, Array[@client.Type], a
 pub async fn[T] Client::with_prepared_typed_cached(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
 pub async fn[T] Client::with_simple_query(Self, String, async (SimpleQueryStream) -> T) -> T
 pub async fn[T] Client::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
-pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T) -> T
+pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 pub async fn[T] Client::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
 pub impl GenericClient for Client
 
@@ -287,12 +286,12 @@ pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
 pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
 pub impl GenericClient for Transaction
 
-type TransactionBuilder
-pub fn TransactionBuilder::deferrable(Self, enabled? : Bool) -> Self
-pub fn TransactionBuilder::isolation_level(Self, IsolationLevel) -> Self
-pub fn TransactionBuilder::read_only(Self, enabled? : Bool) -> Self
-pub async fn[T] TransactionBuilder::run(Self, async (Transaction) -> T) -> T
-pub async fn TransactionBuilder::start(Self) -> Transaction
+pub struct TransactionOptions {
+  isolation_level : IsolationLevel?
+  read_only : Bool?
+  deferrable : Bool?
+} derive(Eq, @debug.Debug)
+pub fn TransactionOptions::new(isolation_level? : IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
 // Type aliases
 

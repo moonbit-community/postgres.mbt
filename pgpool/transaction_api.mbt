@@ -1,4 +1,4 @@
-// Pooled transaction and transaction-builder APIs.
+// Pooled transaction APIs.
 
 ///|
 /// Convert one pooled isolation level into the SQL clause expected by `BEGIN`.
@@ -12,111 +12,45 @@ fn isolation_level_sql(level : IsolationLevel) -> String {
 }
 
 ///|
-/// Create a transaction builder bound to this checked-out client lease.
-///
-/// This has no side effects yet; the SQL `BEGIN` is sent only when `start()` or
-/// `run()` is called on the builder.
-pub fn Client::build_transaction(self : Client) -> TransactionBuilder {
-  make_transaction_builder(self)
-}
-
-///|
-/// Start one transaction using PostgreSQL's default `BEGIN` settings.
+/// Start one transaction using PostgreSQL's default `BEGIN` settings or the
+/// given `BEGIN` options.
 ///
 /// Preconditions: no exclusive scope may already be active on this lease. The
 /// returned `Transaction` keeps the connection checked out until it is
 /// committed or rolled back.
-pub async fn Client::transaction(self : Client) -> Transaction {
-  self.build_transaction().start()
-}
-
-///|
-/// Set the isolation level clause for the future transaction.
-///
-/// This only changes the builder value. No SQL is sent until the transaction is
-/// started.
-pub fn TransactionBuilder::isolation_level(
-  self : TransactionBuilder,
-  level : IsolationLevel,
-) -> TransactionBuilder {
-  { ..self, isolation_level: Some(level) }
-}
-
-///|
-/// Set whether the future transaction should be `READ ONLY`.
-///
-/// This records the option on the builder; it has no side effects until start.
-pub fn TransactionBuilder::read_only(
-  self : TransactionBuilder,
-  enabled? : Bool = true,
-) -> TransactionBuilder {
-  { ..self, read_only: Some(enabled) }
-}
-
-///|
-/// Set whether the future transaction should be `DEFERRABLE`.
-///
-/// PostgreSQL applies this only where that clause is valid for the final `BEGIN`
-/// command.
-pub fn TransactionBuilder::deferrable(
-  self : TransactionBuilder,
-  enabled? : Bool = true,
-) -> TransactionBuilder {
-  { ..self, deferrable: Some(enabled) }
-}
-
-///|
-/// Start the configured transaction and keep the client lease checked out.
-///
-/// Preconditions: the client lease must still be active and no other exclusive
-/// scope may already be open on it. Side effects: sends `BEGIN` with the
-/// configured clauses and returns a `Transaction` handle that must later be
-/// committed or rolled back. If startup fails, the outer client scope is
-/// released before the error is re-raised.
-pub async fn TransactionBuilder::start(
-  self : TransactionBuilder,
+pub async fn Client::transaction(
+  self : Client,
+  options? : TransactionOptions = TransactionOptions::new(),
 ) -> Transaction {
-  let (client, connection) = self.client.state.begin_transaction_scope()
+  let (client, connection) = self.state.begin_transaction_scope()
   try {
-    let mut builder = client.build_transaction()
-    match self.isolation_level {
-      Some(level) =>
-        builder = builder.isolation_level(isolation_level_sql(level))
-      None => ()
-    }
-    match self.read_only {
-      Some(enabled) => builder = builder.read_only(enabled~)
-      None => ()
-    }
-    match self.deferrable {
-      Some(enabled) => builder = builder.deferrable(enabled~)
-      None => ()
-    }
-    let transaction = builder.start()
-    make_pooled_transaction(
-      connection,
-      transaction,
-      ClientLease(self.client.state),
+    let client_options = @client.TransactionOptions::new(
+      isolation_level?=options.isolation_level.map(isolation_level_sql),
+      read_only?=options.read_only,
+      deferrable?=options.deferrable,
     )
+    let transaction = client.transaction(options=client_options)
+    make_pooled_transaction(connection, transaction, ClientLease(self.state))
   } catch {
     err => {
-      self.client.state.finish_transaction_scope()
+      self.state.finish_transaction_scope()
       raise err
     }
   }
 }
 
 ///|
-/// Run one callback inside a configured transaction and auto-complete it.
+/// Run one callback inside a transaction and auto-complete it.
 ///
 /// On normal return, the transaction is committed if the callback did not
 /// already finish it explicitly. If the callback raises, the transaction is
 /// rolled back best-effort unless it was already finished.
-pub async fn[T] TransactionBuilder::run(
-  self : TransactionBuilder,
+pub async fn[T] Client::with_transaction(
+  self : Client,
   f : async (Transaction) -> T,
+  options? : TransactionOptions = TransactionOptions::new(),
 ) -> T {
-  let transaction = self.start()
+  let transaction = self.transaction(options~)
   try {
     let result = f(transaction)
     if !transaction.state.finished.val {
@@ -267,17 +201,6 @@ async fn[T] Transaction::run_operation(
   let transaction = self.state.begin_operation()
   defer self.state.finish_operation()
   @async.protect_from_cancel(() => op(transaction), resume_on_cancel=true)
-}
-
-///|
-/// Run one callback inside a transaction and auto-complete it.
-///
-/// This is a convenience wrapper for `build_transaction().run(...)`.
-pub async fn[T] Client::with_transaction(
-  self : Client,
-  f : async (Transaction) -> T,
-) -> T {
-  self.build_transaction().run(f)
 }
 
 ///|

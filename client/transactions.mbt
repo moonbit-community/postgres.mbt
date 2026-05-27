@@ -1,64 +1,44 @@
 // Transaction and savepoint helpers layered on top of the client API.
 
 ///|
-/// Begin a transaction with PostgreSQL's default `BEGIN` settings.
-pub async fn Client::transaction(self : Client) -> Transaction {
-  self.batch_execute("BEGIN")
-  { client: self, savepoint: None, finished: @ref.new(false) }
+/// Options for the `BEGIN` command used when opening a transaction.
+pub struct TransactionOptions {
+  /// Optional SQL fragment after `ISOLATION LEVEL`, such as `"SERIALIZABLE"`.
+  isolation_level : String?
+  /// `Some(true)` emits `READ ONLY`; `Some(false)` emits `READ WRITE`.
+  read_only : Bool?
+  /// `Some(true)` emits `DEFERRABLE`; `Some(false)` emits `NOT DEFERRABLE`.
+  deferrable : Bool?
+} derive(Eq, Debug)
+
+///|
+/// Build transaction options for a future `BEGIN` command.
+pub fn TransactionOptions::new(
+  isolation_level? : String,
+  read_only? : Bool,
+  deferrable? : Bool,
+) -> TransactionOptions {
+  { isolation_level, read_only, deferrable }
 }
 
 ///|
-/// Build a transaction with custom `BEGIN` clauses.
-///
-/// This keeps the common `client.transaction()` path small while still exposing
-/// explicit control over isolation level and read-only / deferrable flags.
-pub fn Client::build_transaction(self : Client) -> TransactionBuilder {
-  { client: self, isolation_level: None, read_only: None, deferrable: None }
-}
-
-///|
-/// Set the `ISOLATION LEVEL` clause for the future transaction.
-pub fn TransactionBuilder::isolation_level(
-  self : TransactionBuilder,
-  level : String,
-) -> TransactionBuilder {
-  { ..self, isolation_level: Some(level) }
-}
-
-///|
-/// Set whether the future transaction should be read only.
-pub fn TransactionBuilder::read_only(
-  self : TransactionBuilder,
-  enabled? : Bool = true,
-) -> TransactionBuilder {
-  { ..self, read_only: Some(enabled) }
-}
-
-///|
-/// Set whether the future transaction should be deferrable.
-pub fn TransactionBuilder::deferrable(
-  self : TransactionBuilder,
-  enabled? : Bool = true,
-) -> TransactionBuilder {
-  { ..self, deferrable: Some(enabled) }
-}
-
-///|
-/// Issue `BEGIN ...` with the builder's accumulated clauses.
-pub async fn TransactionBuilder::start(
-  self : TransactionBuilder,
+/// Begin a transaction with PostgreSQL's default `BEGIN` settings or the given
+/// `BEGIN` options.
+pub async fn Client::transaction(
+  self : Client,
+  options? : TransactionOptions = TransactionOptions::new(),
 ) -> Transaction {
   let clauses : Array[String] = []
-  match self.isolation_level {
+  match options.isolation_level {
     Some(level) => clauses.push("ISOLATION LEVEL \{level}")
     None => ()
   }
-  match self.read_only {
+  match options.read_only {
     Some(true) => clauses.push("READ ONLY")
     Some(false) => clauses.push("READ WRITE")
     None => ()
   }
-  match self.deferrable {
+  match options.deferrable {
     Some(true) => clauses.push("DEFERRABLE")
     Some(false) => clauses.push("NOT DEFERRABLE")
     None => ()
@@ -68,8 +48,36 @@ pub async fn TransactionBuilder::start(
   } else {
     "BEGIN " + join_clauses(clauses)
   }
-  self.client.batch_execute(sql)
-  { client: self.client, savepoint: None, finished: @ref.new(false) }
+  self.batch_execute(sql)
+  { client: self, savepoint: None, finished: @ref.new(false) }
+}
+
+///|
+/// Run one callback inside a transaction and auto-complete it.
+///
+/// On normal return, the transaction is committed if the callback did not
+/// already finish it explicitly. If the callback raises, the transaction is
+/// rolled back best-effort unless it was already finished.
+pub async fn[T] Client::with_transaction(
+  self : Client,
+  f : async (Transaction) -> T,
+  options? : TransactionOptions = TransactionOptions::new(),
+) -> T {
+  let transaction = self.transaction(options~)
+  try {
+    let result = f(transaction)
+    if !transaction.finished.val {
+      transaction.commit()
+    }
+    result
+  } catch {
+    err => {
+      if !transaction.finished.val {
+        let _ = transaction.rollback() catch { _ => () }
+      }
+      raise err
+    }
+  }
 }
 
 ///|

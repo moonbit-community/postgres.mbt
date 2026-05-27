@@ -58,7 +58,7 @@ These are the main entry points and the situations they are designed for:
 | Raw SQL batch with no parameters | `Client::batch_execute` | Schema setup, `BEGIN` / `COMMIT`, temp tables, session settings, or other statement batches |
 | Reuse SQL many times | `Client::prepare` + `Client::query_statement` / `Client::execute_raw` | The same SQL text is executed repeatedly and you want PostgreSQL to keep a named prepared statement |
 | Fetch rows in chunks | `Client::bind` + `Client::query_portal` | Large result sets where you want explicit fetch windows instead of collecting everything |
-| Multiple statements with atomicity | `Client::transaction` or `Client::build_transaction` | Business logic must commit or roll back as one unit |
+| Multiple statements with atomicity | `Client::transaction` or `Client::with_transaction` | Business logic must commit or roll back as one unit |
 | PostgreSQL simple protocol | `Client::simple_query` | Multiple statements in one SQL string, or direct access to text-format frames |
 | Bulk import / export | `Client::copy_in` / `Client::copy_out` | High-volume streaming I/O with PostgreSQL `COPY` |
 
@@ -573,18 +573,18 @@ returned `Transaction` handle is a thin guard around the client API that:
 - rejects further work after `commit()` or `rollback()`
 - lets you open nested transactions via PostgreSQL savepoints with `tx.transaction()`
 
-Reach for `build_transaction()` when you need `BEGIN` options such as
-`SERIALIZABLE`, `READ ONLY`, or `DEFERRABLE`.
+Pass `TransactionOptions` when you need `BEGIN` options such as `SERIALIZABLE`,
+`READ ONLY`, or `DEFERRABLE`.
 
 ```mbt check
 ///|
 async fn _transaction_example(client : @client.Client) -> Unit {
-  let tx = client
-    .build_transaction()
-    .isolation_level("SERIALIZABLE")
-    .read_only()
-    .deferrable()
-    .start()
+  let options = @client.TransactionOptions::new(
+    isolation_level="SERIALIZABLE",
+    read_only=true,
+    deferrable=true,
+  )
+  let tx = client.transaction(options~)
 
   let nested = tx.transaction()
   nested.batch_execute("select 1")
@@ -797,7 +797,6 @@ type, method, or enum variant is for.
 
 - `Client::batch_execute(sql)`: run one or more simple-protocol SQL commands and discard rows.
 - `Client::bind(statement, params~)`: bind parameters to a prepared statement and return a reusable `Portal`.
-- `Client::build_transaction()`: create a `TransactionBuilder` for custom `BEGIN` clauses.
 - `Client::cancel_token()`: create a `CancelToken` for out-of-band PostgreSQL cancellation.
 - `Client::check_connection()`: perform a round trip that confirms the request/response path is still healthy.
 - `Client::clear_type_cache()`: drop cached user-defined type metadata and keep only built-ins.
@@ -818,7 +817,8 @@ type, method, or enum variant is for.
 - `Client::query_typed(sql, param_types, params~)`: execute SQL with explicit parameter OIDs.
 - `Client::query_typed_raw(sql, param_types, params~)`: backward-compatible alias for `query_typed`; prefer `query_typed` in new code.
 - `Client::simple_query(sql)`: execute SQL via the simple protocol and inspect raw text frames.
-- `Client::transaction()`: begin a transaction with plain `BEGIN`.
+- `Client::transaction(options?)`: begin a transaction with plain `BEGIN` or custom `TransactionOptions`.
+- `Client::with_transaction(f, options?)`: run a callback inside a transaction and auto-complete it.
 - `Connection::next_message()`: read the next queued `AsyncMessage`, or `None` after the connection loop closes.
 - `Connection::parameter(name)`: read the latest server parameter value from the connection handle.
 - `Connection::run(on_async?)`: run the socket-owning event loop and optionally receive async messages via callback.
@@ -845,10 +845,7 @@ type, method, or enum variant is for.
 - `Transaction::rollback()`: roll back the transaction or roll back to and release the savepoint.
 - `Transaction::savepoint(name)`: create a named savepoint and return a nested transaction handle.
 - `Transaction::transaction()`: create a nested transaction implemented with a PostgreSQL savepoint.
-- `TransactionBuilder::deferrable(enabled?)`: set `DEFERRABLE` or `NOT DEFERRABLE`.
-- `TransactionBuilder::isolation_level(level)`: set `ISOLATION LEVEL ...`.
-- `TransactionBuilder::read_only(enabled?)`: set `READ ONLY` or `READ WRITE`.
-- `TransactionBuilder::start()`: issue `BEGIN ...` with the accumulated options and return a `Transaction`.
+- `TransactionOptions::new(isolation_level?, read_only?, deferrable?)`: configure custom `BEGIN` clauses.
 
 ### Row Streams And Row Data
 

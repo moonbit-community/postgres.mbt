@@ -1212,9 +1212,9 @@ async test "integration transaction rollback" {
 }
 
 ///|
-/// This verifies that the transaction builder carries isolation level, read-only, and deferrable options into the transaction.
+/// This verifies that transaction options carry isolation level, read-only, and deferrable settings into the transaction.
 /// The test reads the settings back with `show`, then performs a write and commits to prove the transaction object itself still works.
-async test "integration transaction builder" {
+async test "integration transaction options" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let (client, connection) = @client.connect(
@@ -1225,12 +1225,13 @@ async test "integration transaction builder" {
     client.batch_execute(
       "create temp table moon_driver_tx_builder (id serial, name text)",
     )
-    let tx = client
-      .build_transaction()
-      .isolation_level("SERIALIZABLE")
-      .read_only()
-      .deferrable()
-      .start()
+    let tx = client.transaction(
+      options=@client.TransactionOptions::new(
+        isolation_level="SERIALIZABLE",
+        read_only=true,
+        deferrable=true,
+      ),
+    )
     let isolation : String = tx.query("show transaction_isolation").collect()[0].get_name(
       "transaction_isolation",
     )
