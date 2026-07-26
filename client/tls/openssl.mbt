@@ -242,19 +242,18 @@ fn BIO::read(bio : BIO, dst : @c_buffer.Buffer, len : Int) -> Int {
     Closed => return 0
     Error(_) => return -1
   }
-  let read_buf = ep.reader._get_internal_buffer().repr()
-  guard read_buf.len > 0 else {
+  guard ep.read_buf.len > 0 else {
     bio.set_flags(BIO_FLAGS_READ | BIO_FLAGS_SHOULD_RETRY)
     -1
   }
-  let len = @cmp.minimum(read_buf.len, len)
+  let n = @cmp.minimum(ep.read_buf.len, len)
   dst.blit_from_bytes(
-    src=read_buf.buf.unsafe_reinterpret_as_bytes(),
-    offset=read_buf.start,
-    len~,
+    src=ep.read_buf.buf.unsafe_reinterpret_as_bytes(),
+    offset=ep.read_buf.start,
+    len=n,
   )
-  read_buf.drop(len)
-  len
+  ep.read_buf.drop(n)
+  n
 }
 
 ///|
@@ -552,7 +551,7 @@ pub impl @io.Reader for Tls with _direct_read(self, buf, offset~, max_len~) {
       break 0
     }
     if self.transport.state is Closed &&
-      self.transport.reader._get_internal_buffer().repr().len is 0 {
+      self.transport.read_buf.len is 0 {
       // Not all TLS client/servers close the connection properly.
       // Some peers just close the underlying TCP connection
       // without performing a TLS closure.

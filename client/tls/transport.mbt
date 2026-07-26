@@ -24,6 +24,7 @@ priv struct Transport {
   mut state : TransportState
   reader : &@io.Reader
   read_lock : @semaphore.Semaphore
+  read_buf : @io_buffer.Buffer
   write_buf : @io_buffer.Buffer
   writer : &@io.Writer
   write_lock : @semaphore.Semaphore
@@ -33,15 +34,12 @@ priv struct Transport {
 const BUFFER_SIZE = 4096
 
 ///|
-fn @io.ReaderBuffer::repr(buf : Self) -> @io_buffer.Buffer = "%identity"
-
-///|
 fn Transport::new(reader : &@io.Reader, writer : &@io.Writer) -> Transport {
-  reader._get_internal_buffer().repr().enlarge_to(BUFFER_SIZE)
   {
     state: Normal,
     reader,
     read_lock: @semaphore.Semaphore::new(1),
+    read_buf: @io_buffer.new(BUFFER_SIZE),
     write_buf: @io_buffer.new(BUFFER_SIZE),
     writer,
     write_lock: @semaphore.Semaphore::new(1),
@@ -57,11 +55,9 @@ async fn Transport::read_more(self : Transport) -> Unit {
     Closed => raise ConnectionClosed
     Error(err) => raise err
   }
-  let read_buf = self.reader._get_internal_buffer().repr()
-  read_buf.enlarge_to(read_buf.len + 1)
-  let end = read_buf.start + read_buf.len
-  let max_len = @cmp.minimum(BUFFER_SIZE, read_buf.buf.length() - end)
-  let n = self.reader._direct_read(read_buf.buf, offset=end, max_len~) catch {
+  let end = self.read_buf.start + self.read_buf.len
+  let max_len = @cmp.minimum(BUFFER_SIZE, self.read_buf.buf.length() - end)
+  let n = self.reader._direct_read(self.read_buf.buf, offset=end, max_len~) catch {
     err => {
       self.state = Error(err)
       raise err
@@ -70,7 +66,7 @@ async fn Transport::read_more(self : Transport) -> Unit {
   if n is 0 {
     self.state = Closed
   } else {
-    read_buf.len += n
+    self.read_buf.len += n
   }
 }
 
