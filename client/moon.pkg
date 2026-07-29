@@ -5,8 +5,9 @@ import {
   "moonbit-community/postgres/protocol/message/frontend",
   "moonbit-community/postgres/protocol/types",
   "moonbitlang/core/buffer",
-  "moonbitlang/core/json",
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
   "moonbitlang/core/ref",
   "moonbitlang/core/string",
   "moonbitlang/async",
@@ -20,7 +21,3 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/core/test",
 } for "wbtest"
-
-options(
-  "native-stub": [ "secure_random.c" ],
-)
