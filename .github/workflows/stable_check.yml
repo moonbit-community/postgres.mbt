@@ -34,7 +34,9 @@ jobs:
           moon update
 
       - name: moon check
-        run: moon check
+        run: |
+          moon check
+          moon check --target native
 
       - name: format diff
         run: |
