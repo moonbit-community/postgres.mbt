@@ -514,7 +514,9 @@ async test "integration cancel request uses protocol frontend" {
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
 
-    let task = group.spawn(() => try? client.query_one("select pg_sleep(5)"))
+    let task = group.spawn(() => {
+      expect_error_async(() => client.query_one("select pg_sleep(5)"))
+    })
     wait_for_backend_query(observer, backend_pid, "select pg_sleep(5)")
     let cancel = @socket.Tcp::connect_to_host(config.host, port=config.port)
     defer cancel.close()

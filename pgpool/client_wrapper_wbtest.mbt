@@ -20,7 +20,9 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
     assert_true(released_state.releasing.val)
     assert_true(released_state.released.val)
     released_client.release()
-    expect_pool_lease_released(try? released_client.statement_cache())
+    expect_pool_lease_released(
+      @test.expect_error(() => released_client.statement_cache()),
+    )
 
     let delaying_connection = client_api_test_connection(group, id=11)
     pool.shared.connections.push(delaying_connection)
@@ -36,7 +38,9 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
     delaying_client.release()
     assert_true(delaying_state.releasing.val)
     assert_false(delaying_state.released.val)
-    expect_pool_lease_released(try? delaying_client.detach_raw())
+    expect_pool_lease_released(
+      @test.expect_error(() => delaying_client.detach_raw()),
+    )
 
     let busy_connection = client_api_test_connection(group, id=12)
     let busy_client : Client = {
@@ -49,7 +53,9 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
         released: @ref.new(false),
       },
     }
-    expect_pool_operation_in_progress(try? busy_client.detach_raw())
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => busy_client.detach_raw()),
+    )
 
     let empty_connection = client_api_test_connection(group, id=13)
     let empty_client : Client = {
@@ -62,7 +68,9 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
         released: @ref.new(false),
       },
     }
-    expect_pool_lease_released(try? empty_client.detach_raw())
+    expect_pool_lease_released(
+      @test.expect_error(() => empty_client.detach_raw()),
+    )
 
     pool.close()
   })

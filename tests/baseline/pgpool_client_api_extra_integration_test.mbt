@@ -1,6 +1,6 @@
 ///|
-fn[T] expect_pool_row_count(result : Result[T, Error]) -> String raise {
-  guard result is Err(@pgpool.PoolError::RowCount(message)) else {
+fn expect_pool_row_count(error : Error) -> String raise {
+  guard error is @pgpool.PoolError::RowCount(message) else {
     fail("expected pool row count error")
   }
   message
@@ -33,9 +33,13 @@ async test "integration pool with_copy_in explicit finish keeps connection reusa
       let inserted = client.with_copy_in("copy pool_copy_finish from stdin", sink => {
         sink.send(b"1\n2\n"[:])
         let inserted = sink.finish()
-        let send_closed = expect_closed_error(try? sink.send(b"3\n"[:]))
+        let send_closed = expect_closed_error(
+          expect_error_async(() => sink.send(b"3\n"[:])),
+        )
         assert_eq(send_closed, "copy sink already finished")
-        let finish_closed = expect_closed_error(try? sink.finish())
+        let finish_closed = expect_closed_error(
+          expect_error_async(() => sink.finish()),
+        )
         assert_eq(finish_closed, "copy sink already finished")
         inserted
       })
@@ -115,11 +119,15 @@ async test "integration pool client wrappers cover prepared statements and porta
         "select value from moon_pool_client_api order by value",
         prepared => {
           assert_eq(
-            expect_pool_row_count(try? prepared.query_one()),
+            expect_pool_row_count(
+              expect_error_async(() => prepared.query_one()),
+            ),
             "expected exactly one row, got 3",
           )
           assert_eq(
-            expect_pool_row_count(try? prepared.query_opt()),
+            expect_pool_row_count(
+              expect_error_async(() => prepared.query_opt()),
+            ),
             "expected zero or one row, got 3",
           )
           prepared.query_all()
@@ -137,7 +145,9 @@ async test "integration pool client wrappers cover prepared statements and porta
         assert_eq(prepared.query_one().get_name("value"), 41)
         prepared.close()
         prepared.close()
-        expect_pool_lease_released(try? prepared.query_one())
+        expect_pool_lease_released(
+          expect_error_async(() => prepared.query_one()),
+        )
       })
     })
 
@@ -183,7 +193,9 @@ async test "integration pool transaction portals support pagination and cleanup"
         portal.close()
         portal.close()
         expect_pool_lease_released(
-          try? portal.with_stream(1, stream => stream.collect()),
+          expect_error_async(() => {
+            portal.with_stream(1, stream => stream.collect())
+          }),
         )
 
         prepared.with_portal(portal => {
@@ -200,7 +212,9 @@ async test "integration pool transaction portals support pagination and cleanup"
 
     let stale_portal = stale_portals.get()
     expect_pool_lease_released(
-      try? stale_portal.with_stream(1, stream => stream.collect()),
+      expect_error_async(() => {
+        stale_portal.with_stream(1, stream => stream.collect())
+      }),
     )
 
     pool.close()
@@ -316,12 +330,16 @@ async test "integration pool release waits for active stream cleanup and rejects
     })
 
     entered.get()
-    expect_pool_operation_in_progress(try? lease.detach_raw())
+    expect_pool_operation_in_progress(
+      expect_error_async(() => lease.detach_raw()),
+    )
 
     lease.release()
     lease.release()
-    expect_pool_lease_released(try? lease.query_one("select 1::int4 as value"))
-    expect_pool_lease_released(try? lease.detach_raw())
+    expect_pool_lease_released(
+      expect_error_async(() => lease.query_one("select 1::int4 as value")),
+    )
+    expect_pool_lease_released(expect_error_async(() => lease.detach_raw()))
 
     finish_stream.put(())
     assert_eq(
@@ -368,7 +386,7 @@ async test "integration pool stale cancellable handles reject new work" {
     let stale_op = stale_operations.get()
     let stale_token = stale_tokens.get()
     expect_pool_lease_released(
-      try? stale_op.query_one("select 62::int4 as value"),
+      expect_error_async(() => stale_op.query_one("select 62::int4 as value")),
     )
     stale_token.cancel()
     stale_token.cancel()
@@ -414,13 +432,17 @@ async test "integration pool transaction wrappers cover row counts and cache gua
       )
       assert_eq(
         expect_pool_row_count(
-          try? tx.query_one("select value from moon_pool_transaction"),
+          expect_error_async(() => {
+            tx.query_one("select value from moon_pool_transaction")
+          }),
         ),
         "expected exactly one row, got 3",
       )
       assert_eq(
         expect_pool_row_count(
-          try? tx.query_opt("select value from moon_pool_transaction"),
+          expect_error_async(() => {
+            tx.query_opt("select value from moon_pool_transaction")
+          }),
         ),
         "expected zero or one row, got 3",
       )
@@ -479,14 +501,16 @@ async test "integration pool transaction wrappers cover row counts and cache gua
       stale_caches.put(cache)
       assert_true(cache.size() >= 1)
       tx.commit()
-      guard (try? tx.statement_cache()) is Err(@pgpool.PoolError::LeaseReleased) else {
+      guard expect_error_async(() => tx.statement_cache())
+        is @pgpool.PoolError::LeaseReleased else {
         fail("expected finished transaction cache guard")
       }
     })
 
     let stale_cache = stale_caches.get()
     pool.close()
-    guard (try? stale_cache.size()) is Err(@pgpool.PoolError::LeaseReleased) else {
+    guard expect_error_async(() => stale_cache.size())
+      is @pgpool.PoolError::LeaseReleased else {
       fail("expected stale cache size guard")
     }
   })
@@ -589,8 +613,8 @@ async test "integration pool direct transaction options and savepoints keep leas
     assert_eq(total, 12)
 
     client.release()
-    guard (try? client.query_one("select 1::int4 as value"))
-      is Err(@pgpool.PoolError::LeaseReleased) else {
+    guard expect_error_async(() => client.query_one("select 1::int4 as value"))
+      is @pgpool.PoolError::LeaseReleased else {
       fail("expected released pooled client to reject new work")
     }
 
@@ -645,19 +669,21 @@ async test "integration pool with_stream detach cleanup survives callback error"
       application_name="moonbit-postgres-pool-low-level",
     )
 
-    let detached_err : Result[Unit, Error] = try? pool.with_client(client => {
-      client.with_stream(
-        "select generate_series(1, 16)::int4 as value order by value",
-        stream => {
-          guard stream.next() is Some(row) else {
-            fail("expected first streamed row")
-          }
-          assert_eq(row.get_name("value"), 1)
-          stream.detach()
-          stream.detach()
-          ignore(stream.next())
-        },
-      )
+    let detached_err = expect_error_async(() => {
+      pool.with_client(client => {
+        client.with_stream(
+          "select generate_series(1, 16)::int4 as value order by value",
+          stream => {
+            guard stream.next() is Some(row) else {
+              fail("expected first streamed row")
+            }
+            assert_eq(row.get_name("value"), 1)
+            stream.detach()
+            stream.detach()
+            ignore(stream.next())
+          },
+        )
+      })
     })
     expect_pool_lease_released(detached_err)
 
@@ -685,20 +711,22 @@ async test "integration pool transaction typed stream detach cleanup survives ca
 
     let value : Int = pool.with_client(client => {
       client.with_transaction(tx => {
-        let detached_err : Result[Unit, Error] = try? tx.with_typed_stream(
-          "select $1::int4 as value union all select 99::int4 as value order by value",
-          [@client.Type::int4()],
-          params=[77 as &@client.ToSql],
-          stream => {
-            guard stream.next() is Some(row) else {
-              fail("expected first typed streamed row")
-            }
-            assert_eq(row.get_name("value"), 77)
-            stream.detach()
-            stream.detach()
-            ignore(stream.next())
-          },
-        )
+        let detached_err = expect_error_async(() => {
+          tx.with_typed_stream(
+            "select $1::int4 as value union all select 99::int4 as value order by value",
+            [@client.Type::int4()],
+            params=[77 as &@client.ToSql],
+            stream => {
+              guard stream.next() is Some(row) else {
+                fail("expected first typed streamed row")
+              }
+              assert_eq(row.get_name("value"), 77)
+              stream.detach()
+              stream.detach()
+              ignore(stream.next())
+            },
+          )
+        })
         expect_pool_lease_released(detached_err)
         tx.query_one("select 78::int4 as value").get_name("value")
       })
@@ -772,23 +800,25 @@ async test "integration pool with_simple_query detach cleanup survives callback 
       application_name="moonbit-postgres-pool-low-level",
     )
 
-    let detached_err : Result[Unit, Error] = try? pool.with_client(client => {
-      client.with_simple_query(
-        "select generate_series(1, 16)::int4 as value order by value",
-        stream => {
-          guard stream.next() is Some(RowDescription(columns)) else {
-            fail("expected row description")
-          }
-          @debug.assert_eq(columns, ["value"])
-          guard stream.next() is Some(Row(row)) else {
-            fail("expected first row")
-          }
-          @debug.assert_eq(try! row.get_name("value"), Some("1"))
-          stream.detach()
-          stream.detach()
-          ignore(stream.next())
-        },
-      )
+    let detached_err = expect_error_async(() => {
+      pool.with_client(client => {
+        client.with_simple_query(
+          "select generate_series(1, 16)::int4 as value order by value",
+          stream => {
+            guard stream.next() is Some(RowDescription(columns)) else {
+              fail("expected row description")
+            }
+            @debug.assert_eq(columns, ["value"])
+            guard stream.next() is Some(Row(row)) else {
+              fail("expected first row")
+            }
+            @debug.assert_eq(try! row.get_name("value"), Some("1"))
+            stream.detach()
+            stream.detach()
+            ignore(stream.next())
+          },
+        )
+      })
     })
     expect_pool_lease_released(detached_err)
 
@@ -814,19 +844,21 @@ async test "integration pool with_copy_out detach cleanup survives callback erro
       application_name="moonbit-postgres-pool-low-level",
     )
 
-    let detached_err : Result[Unit, Error] = try? pool.with_client(client => {
-      client.with_copy_out(
-        "copy (select value from (values ('alpha'), ('beta')) as t(value) order by value) to stdout",
-        stream => {
-          guard stream.next() is Some(chunk) else {
-            fail("expected first copy chunk")
-          }
-          assert_true(chunk == b"alpha\n")
-          stream.detach()
-          stream.detach()
-          ignore(stream.next())
-        },
-      )
+    let detached_err = expect_error_async(() => {
+      pool.with_client(client => {
+        client.with_copy_out(
+          "copy (select value from (values ('alpha'), ('beta')) as t(value) order by value) to stdout",
+          stream => {
+            guard stream.next() is Some(chunk) else {
+              fail("expected first copy chunk")
+            }
+            assert_true(chunk == b"alpha\n")
+            stream.detach()
+            stream.detach()
+            ignore(stream.next())
+          },
+        )
+      })
     })
     expect_pool_lease_released(detached_err)
 
@@ -896,7 +928,9 @@ async test "integration pool direct lease operation and default transaction scop
     )
 
     lease.release()
-    expect_pool_lease_released(try? lease.query_one("select 1::int4 as value"))
+    expect_pool_lease_released(
+      expect_error_async(() => lease.query_one("select 1::int4 as value")),
+    )
 
     let probe : Int = pool.with_client(client => {
       client.query_one("select 67::int4 as value").get_name("value")

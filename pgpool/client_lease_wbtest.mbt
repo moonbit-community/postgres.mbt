@@ -12,29 +12,53 @@ async test "pgpool client lease state rejects released busy and empty connection
       released: @ref.new(false),
     }
 
-    expect_pool_lease_released(try? state.begin_operation())
-    expect_pool_lease_released(try? state.begin_cancellable_scope())
-    expect_pool_lease_released(try? state.begin_transaction_scope())
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_operation()),
+    )
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_cancellable_scope()),
+    )
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_transaction_scope()),
+    )
 
     state.releasing.val = false
     state.released.val = true
-    expect_pool_lease_released(try? state.begin_operation())
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_operation()),
+    )
 
     state.released.val = false
     state.scope_active.val = true
-    expect_pool_operation_in_progress(try? state.begin_operation())
-    expect_pool_operation_in_progress(try? state.begin_cancellable_scope())
-    expect_pool_operation_in_progress(try? state.begin_transaction_scope())
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => state.begin_operation()),
+    )
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => state.begin_cancellable_scope()),
+    )
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => state.begin_transaction_scope()),
+    )
 
     state.scope_active.val = false
     state.active_ops.val = 1
-    expect_pool_operation_in_progress(try? state.begin_cancellable_scope())
-    expect_pool_operation_in_progress(try? state.begin_transaction_scope())
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => state.begin_cancellable_scope()),
+    )
+    expect_pool_operation_in_progress(
+      @test.expect_error(() => state.begin_transaction_scope()),
+    )
 
     state.active_ops.val = 0
-    expect_pool_lease_released(try? state.begin_operation())
-    expect_pool_lease_released(try? state.begin_cancellable_scope())
-    expect_pool_lease_released(try? state.begin_transaction_scope())
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_operation()),
+    )
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_cancellable_scope()),
+    )
+    expect_pool_lease_released(
+      @test.expect_error(() => state.begin_transaction_scope()),
+    )
 
     pool.close()
   })

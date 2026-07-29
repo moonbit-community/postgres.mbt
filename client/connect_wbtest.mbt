@@ -54,7 +54,7 @@ fn make_shared(
   closed? : Bool = false,
   closing? : Bool = false,
 ) -> Shared {
-  let types : Map[@proto.Oid, Type] = {}
+  let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
   {
     config: Config::new(
@@ -157,19 +157,21 @@ async test "connect timeout surfaces protocol timeout" {
       @async.sleep(100)
     })
 
-    let result : Result[(Client, Connection), Error] = try? connect(
-      Config::new(
-        "127.0.0.1",
-        user="moon",
-        database="moondb",
-        password="moonpass",
-        port=server.addr.port(),
-        ssl_mode=Disable,
-        application_name="moonbit-postgres-connect-timeout",
-        connect_timeout_ms=10,
-      ),
-    )
-    guard result is Err(ClientError::Protocol(message)) else {
+    let result = expect_error_async(() => {
+      connect(
+        Config::new(
+          "127.0.0.1",
+          user="moon",
+          database="moondb",
+          password="moonpass",
+          port=server.addr.port(),
+          ssl_mode=Disable,
+          application_name="moonbit-postgres-connect-timeout",
+          connect_timeout_ms=10,
+        ),
+      )
+    })
+    guard result is ClientError::Protocol(message) else {
       fail("expected timeout error")
     }
     @debug.assert_eq(message, "connection timed out")
@@ -188,8 +190,8 @@ async test "client close handles closed request queue and check_connection rejec
 
   let closed_shared = make_shared(closed=true)
   let closed_client : Client = { shared: closed_shared }
-  let result : Result[Unit, Error] = try? closed_client.check_connection()
-  guard result is Err(ClientError::Closed(message)) else {
+  let result = expect_error_async(() => closed_client.check_connection())
+  guard result is ClientError::Closed(message) else {
     fail("expected closed connection error")
   }
   @debug.assert_eq(message, "connection is closed")

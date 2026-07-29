@@ -63,18 +63,20 @@ async test "connect rejects deprecated md5 authentication" {
       conn.write(authentication_md5_packet(b"md5!"[:]))
     })
 
-    let result = try? connect(
-      Config::new(
-        "127.0.0.1",
-        user="moon",
-        database="moondb",
-        password="moonpass",
-        port=server.addr.port(),
-        ssl_mode=Disable,
-        application_name="moonbit-postgres-md5-reject",
-      ),
-    )
-    guard result is Err(ClientError::Authentication(message)) else {
+    let result = expect_error_async(() => {
+      connect(
+        Config::new(
+          "127.0.0.1",
+          user="moon",
+          database="moondb",
+          password="moonpass",
+          port=server.addr.port(),
+          ssl_mode=Disable,
+          application_name="moonbit-postgres-md5-reject",
+        ),
+      )
+    })
+    guard result is ClientError::Authentication(message) else {
       fail("expected md5 authentication rejection")
     }
     @debug.assert_eq(message, deprecated_md5_authentication_message)
@@ -94,19 +96,21 @@ async test "connect rejects cleartext password when channel binding is required"
       conn.write(authentication_cleartext_password_packet())
     })
 
-    let result = try? connect(
-      Config::new(
-        "127.0.0.1",
-        user="moon",
-        database="moondb",
-        password="moonpass",
-        port=server.addr.port(),
-        ssl_mode=Disable,
-        channel_binding=Require,
-        application_name="moonbit-postgres-channel-binding-password-reject",
-      ),
-    )
-    guard result is Err(ClientError::Authentication(message)) else {
+    let result = expect_error_async(() => {
+      connect(
+        Config::new(
+          "127.0.0.1",
+          user="moon",
+          database="moondb",
+          password="moonpass",
+          port=server.addr.port(),
+          ssl_mode=Disable,
+          channel_binding=Require,
+          application_name="moonbit-postgres-channel-binding-password-reject",
+        ),
+      )
+    })
+    guard result is ClientError::Authentication(message) else {
       fail("expected channel binding authentication rejection")
     }
     @debug.assert_eq(message, channel_binding_required_unsupported_message)
@@ -126,19 +130,21 @@ async test "connect rejects authentication ok when channel binding is required" 
       conn.write(startup_auth_ok_packet())
     })
 
-    let result = try? connect(
-      Config::new(
-        "127.0.0.1",
-        user="moon",
-        database="moondb",
-        password="moonpass",
-        port=server.addr.port(),
-        ssl_mode=Disable,
-        channel_binding=Require,
-        application_name="moonbit-postgres-channel-binding-auth-ok-reject",
-      ),
-    )
-    guard result is Err(ClientError::Authentication(message)) else {
+    let result = expect_error_async(() => {
+      connect(
+        Config::new(
+          "127.0.0.1",
+          user="moon",
+          database="moondb",
+          password="moonpass",
+          port=server.addr.port(),
+          ssl_mode=Disable,
+          channel_binding=Require,
+          application_name="moonbit-postgres-channel-binding-auth-ok-reject",
+        ),
+      )
+    })
+    guard result is ClientError::Authentication(message) else {
       fail("expected missing channel binding authentication rejection")
     }
     @debug.assert_eq(message, channel_binding_required_not_used_message)

@@ -38,6 +38,9 @@ impl @io.Reader for Stream with fn _get_internal_buffer(self) {
 }
 
 ///|
+extend Stream with @io.Reader::{read_exactly}
+
+///|
 /// Forward writes to the active transport implementation.
 impl @io.Writer for Stream with fn write_once(self, buf, offset~, len~) {
   match self {
@@ -45,6 +48,9 @@ impl @io.Writer for Stream with fn write_once(self, buf, offset~, len~) {
     Secure(conn) => conn.write_once(buf, offset~, len~)
   }
 }
+
+///|
+extend Stream with @io.Writer::{write}
 
 ///|
 /// High-level request categories sent from `Client` to the connection loop.

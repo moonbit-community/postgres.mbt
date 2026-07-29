@@ -82,42 +82,48 @@ test "pool config broadcasts hostaddr to every host" {
 
 ///|
 test "pool config constructor still reports empty user name" {
-  let result = try? Config::new(
-    "db.example",
-    user="",
-    dbname="moondb",
-    application_name="pool-missing-user",
-    pool=PoolConfig::new(1),
-  ).get_connection_targets()
-  guard result is Err(ConfigError::UsernameEmpty) else {
+  let result = @test.expect_error(() => {
+    Config::new(
+      "db.example",
+      user="",
+      dbname="moondb",
+      application_name="pool-missing-user",
+      pool=PoolConfig::new(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::UsernameEmpty else {
     fail("expected username empty")
   }
 }
 
 ///|
 test "pool config constructor still reports empty dbname" {
-  let result = try? Config::new(
-    "db.example",
-    user="moon",
-    dbname="",
-    application_name="pool-empty-dbname",
-    pool=PoolConfig::new(1),
-  ).get_connection_targets()
-  guard result is Err(ConfigError::DbnameEmpty) else {
+  let result = @test.expect_error(() => {
+    Config::new(
+      "db.example",
+      user="moon",
+      dbname="",
+      application_name="pool-empty-dbname",
+      pool=PoolConfig::new(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::DbnameEmpty else {
     fail("expected empty dbname")
   }
 }
 
 ///|
 test "pool config requires explicit host for verify_full" {
-  let result = try? Config::new(
-    "",
-    user="moon",
-    dbname="moondb",
-    application_name="pool-verify-full-host",
-    pool=PoolConfig::new(1),
-  ).get_connection_targets()
-  guard result is Err(ConfigError::InvalidConfig(message)) else {
+  let result = @test.expect_error(() => {
+    Config::new(
+      "",
+      user="moon",
+      dbname="moondb",
+      application_name="pool-verify-full-host",
+      pool=PoolConfig::new(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::InvalidConfig(message) else {
     fail("expected verify-full host validation error")
   }
   @debug.assert_eq(
@@ -141,16 +147,18 @@ test "pool config accepts hostaddr identity when host is empty" {
 
 ///|
 test "pool config rejects sslrootcert system without verify_full" {
-  let result = try? Config::new(
-    "db.example",
-    user="moon",
-    dbname="moondb",
-    ssl_mode=VerifyCa,
-    ssl_root_cert="system",
-    application_name="pool-system-root",
-    pool=PoolConfig::new(1),
-  ).get_connection_targets()
-  guard result is Err(ConfigError::InvalidConfig(message)) else {
+  let result = @test.expect_error(() => {
+    Config::new(
+      "db.example",
+      user="moon",
+      dbname="moondb",
+      ssl_mode=VerifyCa,
+      ssl_root_cert="system",
+      application_name="pool-system-root",
+      pool=PoolConfig::new(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::InvalidConfig(message) else {
     fail("expected sslrootcert validation error")
   }
   @debug.assert_eq(message, "sslrootcert=system requires sslmode=verify-full")

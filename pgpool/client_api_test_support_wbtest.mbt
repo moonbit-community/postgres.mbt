@@ -1,15 +1,13 @@
 ///|
-fn[T] expect_pool_lease_released(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(PoolError::LeaseReleased) else {
+fn expect_pool_lease_released(error : Error) -> Unit raise {
+  guard error is PoolError::LeaseReleased else {
     fail("expected lease released error")
   }
 }
 
 ///|
-fn[T] expect_pool_operation_in_progress(
-  result : Result[T, Error],
-) -> Unit raise {
-  guard result is Err(PoolError::OperationInProgress) else {
+fn expect_pool_operation_in_progress(error : Error) -> Unit raise {
+  guard error is PoolError::OperationInProgress else {
     fail("expected operation in progress error")
   }
 }

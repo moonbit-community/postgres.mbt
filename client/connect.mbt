@@ -23,7 +23,7 @@ pub async fn connect(config : Config) -> (Client, Connection) {
 async fn connect_inner(config : Config) -> (Client, Connection) {
   let setup = connect_stream(config)
   let startup = startup(setup, config)
-  let types : Map[@proto.Oid, Type] = {}
+  let types : Map[@proto.Oid, Type] = Map([])
   let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(None)
   seed_builtin_types(types)
   let shared = {

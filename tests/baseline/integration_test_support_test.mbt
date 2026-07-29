@@ -138,10 +138,8 @@ fn make_pool(
 ///|
 /// These `expect_*` helpers make expected failures read directly.
 /// Tests can state the error kind they expect and then assert on the important fields.
-fn[T] expect_database_error(
-  result : Result[T, Error],
-) -> @client.DatabaseError raise {
-  guard result is Err(@client.ClientError::Database(err)) else {
+fn expect_database_error(error : Error) -> @client.DatabaseError raise {
+  guard error is @client.ClientError::Database(err) else {
     fail("expected database error")
   }
   err
@@ -149,8 +147,8 @@ fn[T] expect_database_error(
 
 ///|
 /// Extract the text message from an authentication error.
-fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(@client.ClientError::Authentication(message)) else {
+fn expect_authentication_error(error : Error) -> String raise {
+  guard error is @client.ClientError::Authentication(message) else {
     fail("expected authentication error")
   }
   message
@@ -158,8 +156,8 @@ fn[T] expect_authentication_error(result : Result[T, Error]) -> String raise {
 
 ///|
 /// Extract row-count errors for `query_one` and `query_opt` tests.
-fn[T] expect_row_count_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(@client.ClientError::RowCount(message)) else {
+fn expect_row_count_error(error : Error) -> String raise {
+  guard error is @client.ClientError::RowCount(message) else {
     fail("expected row count error")
   }
   message
@@ -167,10 +165,8 @@ fn[T] expect_row_count_error(result : Result[T, Error]) -> String raise {
 
 ///|
 /// Extract type-mismatch errors so tests can assert on both the MoonBit type name and PostgreSQL type metadata.
-fn[T] expect_wrong_type_error(
-  result : Result[T, Error],
-) -> @client.WrongTypeError raise {
-  guard result is Err(@client.ClientError::WrongType(err)) else {
+fn expect_wrong_type_error(error : Error) -> @client.WrongTypeError raise {
+  guard error is @client.ClientError::WrongType(err) else {
     fail("expected wrong type error")
   }
   err
@@ -178,8 +174,8 @@ fn[T] expect_wrong_type_error(
 
 ///|
 /// Extract the message from a TLS-related error.
-fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(@client.ClientError::Ssl(message)) else {
+fn expect_ssl_error(error : Error) -> String raise {
+  guard error is @client.ClientError::Ssl(message) else {
     fail("expected SSL error")
   }
   message
@@ -187,11 +183,32 @@ fn[T] expect_ssl_error(result : Result[T, Error]) -> String raise {
 
 ///|
 /// Extract the message for errors caused by using a closed stream or handle.
-fn[T] expect_closed_error(result : Result[T, Error]) -> String raise {
-  guard result is Err(@client.ClientError::Closed(message)) else {
+fn expect_closed_error(error : Error) -> String raise {
+  guard error is @client.ClientError::Closed(message) else {
     fail("expected closed error")
   }
   message
+}
+
+///|
+/// Async counterpart to `@test.expect_error` for integration tests.
+///
+/// The project currently uses async 0.19.0, whose public test support does not
+/// provide this helper.
+#callsite(autofill(loc))
+async fn[T, E : Error] expect_error_async(
+  f : async () -> T raise E,
+  loc~ : SourceLoc,
+) -> E {
+  try f() catch {
+    error => error
+  } noraise {
+    _ =>
+      @test.fail(
+        "expected error, but program succeeded without raising anything",
+        loc~,
+      )
+  }
 }
 
 ///|
