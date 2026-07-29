@@ -169,20 +169,19 @@ test "backend parsing decodes data rows, copy formats, and invalid utf8" {
   assert_true(text.columns == ["name", "middle", "tail"])
   assert_true(text.values == [Some("moon"), None, Some("世界")])
 
-  let invalid_utf8 : Result[SimpleQueryRow, Error] = try? parse_text_row(
-    make_data_row_body([Some(bytes_of([b'\xC2']))]),
-    ["bad"],
-  )
-  guard invalid_utf8 is Err(@proto.ProtocolError::InvalidInput(message)) else {
+  let invalid_utf8 = @test.expect_error(() => {
+    parse_text_row(make_data_row_body([Some(bytes_of([b'\xC2']))]), ["bad"])
+  })
+  guard invalid_utf8 is @proto.ProtocolError::InvalidInput(message) else {
     fail("expected invalid UTF-8 error")
   }
   @debug.assert_eq(message, "invalid UTF-8")
 
   assert_true(parse_copy_formats(make_copy_formats([0, 1])) == [Text, Binary])
-  let invalid_format : Result[Array[WireFormat], Error] = try? parse_copy_formats(
-    make_copy_formats([2]),
-  )
-  guard invalid_format is Err(ClientError::Protocol(message)) else {
+  let invalid_format = @test.expect_error(() => {
+    parse_copy_formats(make_copy_formats([2]))
+  })
+  guard invalid_format is ClientError::Protocol(message) else {
     fail("expected unsupported wire format error")
   }
   @debug.assert_eq(message, "unsupported wire format code: 2")
@@ -212,10 +211,10 @@ test "backend parsing collects database errors and defaults missing message" {
   @debug.assert_eq(default_message.message, "database error")
   @debug.assert_eq(default_message.severity, Some("ERROR"))
 
-  let invalid_utf8 : Result[DatabaseError, Error] = try? parse_database_error(
-    make_error_fields([(b'M', bytes_of([b'\xC2']))]),
-  )
-  guard invalid_utf8 is Err(@proto.ProtocolError::InvalidInput(message)) else {
+  let invalid_utf8 = @test.expect_error(() => {
+    parse_database_error(make_error_fields([(b'M', bytes_of([b'\xC2']))]))
+  })
+  guard invalid_utf8 is @proto.ProtocolError::InvalidInput(message) else {
     fail("expected invalid UTF-8 error")
   }
   @debug.assert_eq(message, "invalid UTF-8")
@@ -254,22 +253,23 @@ test "backend parsing merges stream columns and reports mismatches" {
   assert_true(merged[0].type_ == Type::unknown(23U, name="resolved_int4"))
   assert_true(merged[0].format == Text)
 
-  let mismatch_count : Result[Array[Column], Error] = try? merge_stream_columns(
-    [resolved[0], resolved[0]],
-    body,
-  )
-  guard mismatch_count is Err(ClientError::Protocol(message)) else {
+  let mismatch_count = @test.expect_error(() => {
+    merge_stream_columns([resolved[0], resolved[0]], body)
+  })
+  guard mismatch_count is ClientError::Protocol(message) else {
     fail("expected column count mismatch")
   }
   @debug.assert_eq(
     message, "row description column count mismatch: expected 2, got 1",
   )
 
-  let mismatch_oid : Result[Array[Column], Error] = try? merge_stream_columns(
-    [{ ..resolved[0], type_: Type::unknown(25U, name="text") }],
-    body,
-  )
-  guard mismatch_oid is Err(ClientError::Protocol(message)) else {
+  let mismatch_oid = @test.expect_error(() => {
+    merge_stream_columns(
+      [{ ..resolved[0], type_: Type::unknown(25U, name="text") }],
+      body,
+    )
+  })
+  guard mismatch_oid is ClientError::Protocol(message) else {
     fail("expected column oid mismatch")
   }
   @debug.assert_eq(
@@ -280,17 +280,19 @@ test "backend parsing merges stream columns and reports mismatches" {
 ///|
 async test "backend parsing fail_response_stream closes queue with error" {
   let responses : @async.Queue[Int] = Queue(kind=Unbounded)
-  let result : Result[Unit, Error] = try? fail_response_stream(
-    responses,
-    ClientError::UnexpectedMessage("boom"),
-  )
-  guard result is Err(ClientError::UnexpectedMessage(message)) else {
+  let result = expect_error_async(() => {
+    let _ : Unit = fail_response_stream(
+      responses,
+      ClientError::UnexpectedMessage("boom"),
+    )
+  })
+  guard result is ClientError::UnexpectedMessage(message) else {
     fail("expected fail_response_stream to re-raise the error")
   }
   @debug.assert_eq(message, "boom")
 
-  let drained : Result[Int, Error] = try? responses.get()
-  guard drained is Err(ClientError::UnexpectedMessage(message)) else {
+  let drained = expect_error_async(() => responses.get())
+  guard drained is ClientError::UnexpectedMessage(message) else {
     fail("expected closed queue to surface the same error")
   }
   @debug.assert_eq(message, "boom")

@@ -16,14 +16,13 @@ fn make_row(type_ : Type, raw : Bytes, format? : WireFormat = Text) -> Row {
 
 ///|
 fn assert_encode_ok(param : &ToSql, type_ : Type) -> Unit raise {
-  let result : Result[EncodedParam, Error] = try? encode_param(param, type_)
-  guard result is Ok(_) else { fail("expected encode to accept \{type_.name}") }
+  ignore(encode_param(param, type_))
 }
 
 ///|
 fn assert_encode_wrong_type(param : &ToSql, type_ : Type) -> Unit raise {
-  let result : Result[EncodedParam, Error] = try? encode_param(param, type_)
-  guard result is Err(ClientError::WrongType(_)) else {
+  let error = @test.expect_error(() => encode_param(param, type_))
+  guard error is ClientError::WrongType(_) else {
     fail("expected wrong type for \{type_.name}")
   }
 }
@@ -34,10 +33,7 @@ fn assert_encode_format(
   type_ : Type,
   expected : WireFormat,
 ) -> Unit raise {
-  let result : Result[EncodedParam, Error] = try? encode_param(param, type_)
-  guard result is Ok(encoded) else {
-    fail("expected encode to accept \{type_.name}")
-  }
+  let encoded = encode_param(param, type_)
   @debug.assert_eq(encoded.format, expected)
 }
 
@@ -209,48 +205,49 @@ test "built-in Array codecs reject unsupported and mismatched arrays" {
   let ints = [1, 2]
   assert_encode_wrong_type(ints, Type::text_array())
 
-  let text_array_result : Result[Array[String], Error] = try? make_row(
-    Type::text_array(),
-    b"{moon,bit}",
-  ).get(0)
-  guard text_array_result is Err(ClientError::Decode(_)) else {
+  let text_array_error = @test.expect_error(() => {
+    let _ : Array[String] = make_row(Type::text_array(), b"{moon,bit}").get(0)
+  })
+  guard text_array_error is ClientError::Decode(_) else {
     fail("expected text array decode failure")
   }
 }
 
 ///|
 test "built-in FromSql rejects unsupported types before decoding" {
-  let int_result : Result[Int, Error] = try? make_row(Type::int8(), b"1").get(0)
-  guard int_result is Err(ClientError::WrongType(_)) else {
+  let int_error = @test.expect_error(() => {
+    let _ : Int = make_row(Type::int8(), b"1").get(0)
+  })
+  guard int_error is ClientError::WrongType(_) else {
     fail("expected int wrong type")
   }
 
-  let string_result : Result[String, Error] = try? make_row(Type::int4(), b"1").get(
-    0,
-  )
-  guard string_result is Err(ClientError::WrongType(_)) else {
+  let string_error = @test.expect_error(() => {
+    let _ : String = make_row(Type::int4(), b"1").get(0)
+  })
+  guard string_error is ClientError::WrongType(_) else {
     fail("expected string wrong type")
   }
 
-  let bytes_result : Result[Bytes, Error] = try? make_row(Type::text(), b"abc").get(
-    0,
-  )
-  guard bytes_result is Err(ClientError::WrongType(_)) else {
+  let bytes_error = @test.expect_error(() => {
+    let _ : Bytes = make_row(Type::text(), b"abc").get(0)
+  })
+  guard bytes_error is ClientError::WrongType(_) else {
     fail("expected bytes wrong type")
   }
 
-  let json_result : Result[Json, Error] = try? make_row(Type::text(), b"{}").get(
-    0,
-  )
-  guard json_result is Err(ClientError::WrongType(_)) else {
+  let json_error = @test.expect_error(() => {
+    let _ : Json = make_row(Type::text(), b"{}").get(0)
+  })
+  guard json_error is ClientError::WrongType(_) else {
     fail("expected json wrong type")
   }
 }
 
 ///|
 test "wire format parser rejects unsupported codes" {
-  let result : Result[WireFormat, Error] = try? decode_wire_format(2)
-  guard result is Err(ClientError::Protocol(message)) else {
+  let error = @test.expect_error(() => decode_wire_format(2))
+  guard error is ClientError::Protocol(message) else {
     fail("expected protocol error")
   }
   @debug.assert_eq(message, "unsupported wire format code: 2")

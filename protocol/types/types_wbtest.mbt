@@ -4,24 +4,22 @@ fn bytes_of(bytes : ArrayView[Byte]) -> Bytes {
 }
 
 ///|
-fn[T] assert_invalid_input(
-  actual : Result[T, Error],
+fn assert_invalid_input(
+  actual : @proto.ProtocolError,
   expected : String,
 ) -> Unit raise {
-  guard actual is Err(@proto.ProtocolError::InvalidInput(message)) else {
+  guard actual is InvalidInput(message) else {
     fail("expected invalid input error")
   }
   assert_eq(message, expected)
 }
 
 ///|
-fn[T] assert_overflow(
-  actual : Result[T, Error],
+fn assert_overflow(
+  actual : @proto.ProtocolError,
   expected : String,
 ) -> Unit raise {
-  guard actual is Err(@proto.ProtocolError::Overflow(message)) else {
-    fail("expected overflow error")
-  }
+  guard actual is Overflow(message) else { fail("expected overflow error") }
   assert_eq(message, expected)
 }
 
@@ -180,21 +178,30 @@ test "protocol types scalar codecs handle boundaries and errors" {
   assert_eq(text_buf.to_bytes(), b"moon")
   assert_eq(text_from_sql(b"moon"[:]), b"moon")
   assert_invalid_input(
-    try? text_from_sql(bytes_of([b'\xC2'])[:]),
+    @test.expect_error(() => text_from_sql(bytes_of([b'\xC2'])[:])),
     "invalid UTF-8",
   )
 
   assert_eq(bool_from_sql(bytes_of([1])[:]), true)
   assert_eq(bool_from_sql(bytes_of([0])[:]), false)
-  assert_invalid_input(try? bool_from_sql(b""[:]), "invalid buffer size")
+  assert_invalid_input(
+    @test.expect_error(() => bool_from_sql(b""[:])),
+    "invalid buffer size",
+  )
 
   let char_buf = Buffer()
   char_to_sql(-1, char_buf)
   assert_eq(char_buf.to_bytes(), bytes_of([255]))
   assert_eq(char_from_sql(bytes_of([255])[:]), -1)
   assert_eq(char_from_sql(bytes_of([65])[:]), 65)
-  assert_overflow(try? char_to_sql(128, Buffer()), "value out of range for i8")
-  assert_invalid_input(try? char_from_sql(b""[:]), "invalid buffer size")
+  assert_overflow(
+    @test.expect_error(() => char_to_sql(128, Buffer())),
+    "value out of range for i8",
+  )
+  assert_invalid_input(
+    @test.expect_error(() => char_from_sql(b""[:])),
+    "invalid buffer size",
+  )
 
   let mac = bytes_of([1, 2, 3, 4, 5, 6])
   let mac_buf = Buffer()
@@ -202,11 +209,11 @@ test "protocol types scalar codecs handle boundaries and errors" {
   assert_eq(mac_buf.to_bytes(), mac)
   assert_eq(macaddr_from_sql(mac[:]), mac)
   assert_invalid_input(
-    try? macaddr_to_sql(bytes_of([1, 2, 3])[:], Buffer()),
+    @test.expect_error(() => macaddr_to_sql(bytes_of([1, 2, 3])[:], Buffer())),
     "invalid MAC address length",
   )
   assert_invalid_input(
-    try? macaddr_from_sql(bytes_of([1, 2, 3])[:]),
+    @test.expect_error(() => macaddr_from_sql(bytes_of([1, 2, 3])[:])),
     "invalid message length: macaddr length mismatch",
   )
 
@@ -216,11 +223,11 @@ test "protocol types scalar codecs handle boundaries and errors" {
   assert_eq(uuid_buf.to_bytes(), uuid)
   assert_eq(uuid_from_sql(uuid[:]), uuid)
   assert_invalid_input(
-    try? uuid_to_sql(bytes_of([1, 2, 3])[:], Buffer()),
+    @test.expect_error(() => uuid_to_sql(bytes_of([1, 2, 3])[:], Buffer())),
     "invalid UUID length",
   )
   assert_invalid_input(
-    try? uuid_from_sql(bytes_of([1, 2, 3])[:]),
+    @test.expect_error(() => uuid_from_sql(bytes_of([1, 2, 3])[:])),
     "invalid message length: uuid size mismatch",
   )
 }
@@ -232,7 +239,7 @@ test "protocol types hstore and varbit codecs preserve values and reject malform
   let entries = collect_hstore(hstore_from_sql(hstore_buf.to_bytes()[:]))
   assert_true(entries == [(b"a", Some(b"1")), (b"b", None)])
   assert_invalid_input(
-    try? hstore_from_sql(bytes_of([255, 255, 255, 255])[:]),
+    @test.expect_error(() => hstore_from_sql(bytes_of([255, 255, 255, 255])[:])),
     "invalid entry count",
   )
 
@@ -240,7 +247,10 @@ test "protocol types hstore and varbit codecs preserve values and reject malform
   broken_hstore.write_int_be(1)
   broken_hstore.write_int_be(-2)
   let broken_entries = hstore_from_sql(broken_hstore.to_bytes()[:])
-  assert_invalid_input(try? broken_entries.next(), "invalid key length")
+  assert_invalid_input(
+    @test.expect_error(() => broken_entries.next()),
+    "invalid key length",
+  )
 
   let varbit_buf = Buffer()
   varbit_to_sql(10, [b'\xAA', b'\x80'].iter(), varbit_buf)
@@ -251,11 +261,11 @@ test "protocol types hstore and varbit codecs preserve values and reject malform
   let empty_varbit = varbit_from_sql(bytes_of([0, 0, 0, 0])[:])
   assert_eq(empty_varbit.is_empty(), true)
   assert_invalid_input(
-    try? varbit_from_sql(bytes_of([255, 255, 255, 255])[:]),
+    @test.expect_error(() => varbit_from_sql(bytes_of([255, 255, 255, 255])[:])),
     "invalid varbit length: varbit < 0",
   )
   assert_invalid_input(
-    try? varbit_from_sql(bytes_of([0, 0, 0, 9, 1])[:]),
+    @test.expect_error(() => varbit_from_sql(bytes_of([0, 0, 0, 9, 1])[:])),
     "invalid message length: varbit mismatch",
   )
 }
@@ -281,22 +291,28 @@ test "protocol types array codecs cover round trip and iterator error paths" {
   assert_true(collect_array_values(empty.values()) == [])
 
   assert_invalid_input(
-    try? encode_array([ArrayDimension::new(-1, 1)], [Some(b"x")]),
+    @test.expect_error(() => {
+      encode_array([ArrayDimension::new(-1, 1)], [Some(b"x")])
+    }),
     "invalid dimension size",
   )
   assert_invalid_input(
-    try? encode_array(
-      [ArrayDimension::new(46341, 1), ArrayDimension::new(46341, 1)],
-      [],
-    ),
+    @test.expect_error(() => {
+      encode_array(
+        [ArrayDimension::new(46341, 1), ArrayDimension::new(46341, 1)],
+        [],
+      )
+    }),
     "too many array elements",
   )
   assert_invalid_input(
-    try? encode_array([ArrayDimension::new(2, 1)], [Some(b"x")]),
+    @test.expect_error(() => {
+      encode_array([ArrayDimension::new(2, 1)], [Some(b"x")])
+    }),
     "array element count does not match dimensions",
   )
   assert_invalid_input(
-    try? array_from_sql(bytes_of([255, 255, 255, 255])[:]),
+    @test.expect_error(() => array_from_sql(bytes_of([255, 255, 255, 255])[:])),
     "invalid dimension count",
   )
 
@@ -307,7 +323,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
   invalid_size.write_int_be(-1)
   invalid_size.write_int_be(1)
   assert_invalid_input(
-    try? array_from_sql(invalid_size.to_bytes()[:]),
+    @test.expect_error(() => array_from_sql(invalid_size.to_bytes()[:])),
     "invalid dimension size",
   )
 
@@ -320,7 +336,10 @@ test "protocol types array codecs cover round trip and iterator error paths" {
   invalid_value.write_int_be(-2)
   let invalid_array = array_from_sql(invalid_value.to_bytes()[:])
   let invalid_values = invalid_array.values()
-  assert_invalid_input(try? invalid_values.next(), "invalid value length")
+  assert_invalid_input(
+    @test.expect_error(() => invalid_values.next()),
+    "invalid value length",
+  )
 
   let undrained = Buffer()
   undrained.write_int_be(0)
@@ -329,7 +348,7 @@ test "protocol types array codecs cover round trip and iterator error paths" {
   undrained.write_byte(1)
   let undrained_array = array_from_sql(undrained.to_bytes()[:])
   assert_invalid_input(
-    try? undrained_array.values().next(),
+    @test.expect_error(() => undrained_array.values().next()),
     "invalid message length: arrayvalue not drained",
   )
 }
@@ -340,7 +359,7 @@ test "protocol types range codecs handle empty, bounded, null, and malformed pay
   empty_range_to_sql(empty_buf)
   assert_true(range_from_sql(empty_buf.to_bytes()[:]) is Empty)
   assert_invalid_input(
-    try? range_from_sql(bytes_of([1, 0])[:]),
+    @test.expect_error(() => range_from_sql(bytes_of([1, 0])[:])),
     "invalid message size",
   )
 
@@ -362,11 +381,11 @@ test "protocol types range codecs handle empty, bounded, null, and malformed pay
   trailing.write_bytes(bounded)
   trailing.write_byte(0)
   assert_invalid_input(
-    try? range_from_sql(trailing.to_bytes()[:]),
+    @test.expect_error(() => range_from_sql(trailing.to_bytes()[:])),
     "invalid message size",
   )
   assert_invalid_input(
-    try? range_from_sql(bytes_of([0, 0, 0, 0, 2, b'a'])[:]),
+    @test.expect_error(() => range_from_sql(bytes_of([0, 0, 0, 0, 2, b'a'])[:])),
     "invalid message size",
   )
 }
@@ -398,7 +417,7 @@ test "protocol types geometry codecs round trip" {
   broken_path.write_byte(0)
   broken_path.write_int_be(-1)
   assert_invalid_input(
-    try? path_from_sql(broken_path.to_bytes()[:]),
+    @test.expect_error(() => path_from_sql(broken_path.to_bytes()[:])),
     "invalid point count",
   )
 
@@ -407,7 +426,7 @@ test "protocol types geometry codecs round trip" {
   wrong_path_len.write_int_be(2)
   wrong_path_len.write_bytes(bytes_of([0, 1, 2]))
   assert_invalid_input(
-    try? path_from_sql(wrong_path_len.to_bytes()[:]),
+    @test.expect_error(() => path_from_sql(wrong_path_len.to_bytes()[:])),
     "invalid message length",
   )
 }
@@ -441,25 +460,31 @@ test "protocol types inet codecs cover ipv4, ipv6, and validation" {
   )
 
   assert_invalid_input(
-    try? Ipv4Addr::from_octets(bytes_of([1, 2, 3])[:]),
+    @test.expect_error(() => Ipv4Addr::from_octets(bytes_of([1, 2, 3])[:])),
     "invalid IPv4 length",
   )
   assert_invalid_input(
-    try? Ipv6Addr::from_octets(bytes_of([1, 2, 3])[:]),
+    @test.expect_error(() => Ipv6Addr::from_octets(bytes_of([1, 2, 3])[:])),
     "invalid IPv6 length",
   )
   assert_invalid_input(
-    try? inet_from_sql(bytes_of([2, 33, 0, 4, 1, 2, 3, 4])[:]),
+    @test.expect_error(() => {
+      inet_from_sql(bytes_of([2, 33, 0, 4, 1, 2, 3, 4])[:])
+    }),
     "invalid IPv4 netmask",
   )
   assert_invalid_input(
-    try? inet_from_sql(
-      bytes_of([3, 129, 0, 16, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8])[:],
-    ),
+    @test.expect_error(() => {
+      inet_from_sql(
+        bytes_of([3, 129, 0, 16, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8])[:],
+      )
+    }),
     "invalid IPv6 netmask",
   )
   assert_invalid_input(
-    try? inet_from_sql(bytes_of([9, 0, 0, 4, 1, 2, 3, 4])[:]),
+    @test.expect_error(() => {
+      inet_from_sql(bytes_of([9, 0, 0, 4, 1, 2, 3, 4])[:])
+    }),
     "invalid IP family",
   )
 }
@@ -470,7 +495,7 @@ test "protocol types tree-query codecs require version byte 1" {
   ltree_to_sql(b"a.b"[:], ltree_buf)
   assert_eq(ltree_from_sql(ltree_buf.to_bytes()[:]), b"a.b")
   assert_invalid_input(
-    try? ltree_from_sql(bytes_of([2, b'a'])[:]),
+    @test.expect_error(() => ltree_from_sql(bytes_of([2, b'a'])[:])),
     "ltree version 1 only supported",
   )
 
@@ -478,7 +503,7 @@ test "protocol types tree-query codecs require version byte 1" {
   lquery_to_sql(b"*.x"[:], lquery_buf)
   assert_eq(lquery_from_sql(lquery_buf.to_bytes()[:]), b"*.x")
   assert_invalid_input(
-    try? lquery_from_sql(bytes_of([2, b'a'])[:]),
+    @test.expect_error(() => lquery_from_sql(bytes_of([2, b'a'])[:])),
     "lquery version 1 only supported",
   )
 
@@ -486,7 +511,7 @@ test "protocol types tree-query codecs require version byte 1" {
   ltxtquery_to_sql(b"foo & bar"[:], ltxtquery_buf)
   assert_eq(ltxtquery_from_sql(ltxtquery_buf.to_bytes()[:]), b"foo & bar")
   assert_invalid_input(
-    try? ltxtquery_from_sql(bytes_of([2, b'a'])[:]),
+    @test.expect_error(() => ltxtquery_from_sql(bytes_of([2, b'a'])[:])),
     "ltxtquery version 1 only supported",
   )
 }

@@ -10,7 +10,9 @@ async test "integration copy in startup error keeps connection reusable" {
     group.spawn_bg(() => connection.run())
 
     let err = expect_database_error(
-      try? client.copy_in("copy moon_missing_copy_input from stdin"),
+      expect_error_async(() => {
+        client.copy_in("copy moon_missing_copy_input from stdin")
+      }),
     )
     @debug.assert_eq(err.code, Some("42P01"))
 
@@ -40,9 +42,13 @@ async test "integration copy in finish closes sink and commits rows" {
     sink.send(b"1\n2\n"[:])
     @debug.assert_eq(sink.finish(), 2)
 
-    let send_closed = expect_closed_error(try? sink.send(b"3\n"[:]))
+    let send_closed = expect_closed_error(
+      expect_error_async(() => sink.send(b"3\n"[:])),
+    )
     @debug.assert_eq(send_closed, "copy sink already finished")
-    let finish_closed = expect_closed_error(try? sink.finish())
+    let finish_closed = expect_closed_error(
+      expect_error_async(() => sink.finish()),
+    )
     @debug.assert_eq(finish_closed, "copy sink already finished")
 
     let count : Int = client

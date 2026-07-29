@@ -64,35 +64,32 @@ test "integration pool config constructors and normalization" {
 ///|
 /// This verifies that config validation rejects invalid pool settings and TLS combinations before any connection opens.
 test "integration pool config validation rejects invalid settings" {
-  let invalid_max_size : Result[@pgpool.PoolConfig, Error] = try? @pgpool.PoolConfig::new(
-    0,
-  )
-  guard invalid_max_size
-    is Err(@pgpool.PoolError::InvalidConfig(max_size_message)) else {
+  let invalid_max_size = @test.expect_error(() => @pgpool.PoolConfig::new(0))
+  guard invalid_max_size is @pgpool.PoolError::InvalidConfig(max_size_message) else {
     fail("expected invalid max size")
   }
   @debug.assert_eq(max_size_message, "pool max_size must be at least 1")
 
-  let invalid_timeout : Result[@pgpool.PoolConfig, Error] = try? @pgpool.PoolConfig::new(
-    1,
-    timeouts=@pgpool.Timeouts::new(wait_ms=Some(-1)),
-  )
-  guard invalid_timeout
-    is Err(@pgpool.PoolError::InvalidConfig(timeout_message)) else {
+  let invalid_timeout = @test.expect_error(() => {
+    @pgpool.PoolConfig::new(1, timeouts=@pgpool.Timeouts::new(wait_ms=Some(-1)))
+  })
+  guard invalid_timeout is @pgpool.PoolError::InvalidConfig(timeout_message) else {
     fail("expected invalid timeout")
   }
   @debug.assert_eq(timeout_message, "pool wait_ms must be non-negative")
 
-  let invalid_tls : Result[Array[@client.Config], Error] = try? @pgpool.Config::new(
-    "db.example",
-    user="moon",
-    dbname="moondb",
-    ssl_mode=VerifyCa,
-    ssl_root_cert="system",
-    application_name="pool-system-root-extra",
-    pool=@pgpool.PoolConfig::new(1),
-  ).get_connection_targets()
-  guard invalid_tls is Err(@pgpool.ConfigError::InvalidConfig(tls_message)) else {
+  let invalid_tls = @test.expect_error(() => {
+    @pgpool.Config::new(
+      "db.example",
+      user="moon",
+      dbname="moondb",
+      ssl_mode=VerifyCa,
+      ssl_root_cert="system",
+      application_name="pool-system-root-extra",
+      pool=@pgpool.PoolConfig::new(1),
+    ).get_connection_targets()
+  })
+  guard invalid_tls is @pgpool.ConfigError::InvalidConfig(tls_message) else {
     fail("expected tls validation error")
   }
   @debug.assert_eq(
@@ -195,8 +192,8 @@ async test "integration pool options hooks resize and custom connector" {
     pool.resize(3)
     @debug.assert_eq(pool.status().max_size, 3)
 
-    guard (try? pool.resize(0))
-      is Err(@pgpool.PoolError::InvalidConfig(message)) else {
+    guard expect_error_async(() => pool.resize(0))
+      is @pgpool.PoolError::InvalidConfig(message) else {
       fail("expected invalid resize")
     }
     @debug.assert_eq(message, "pool max_size must be at least 1")

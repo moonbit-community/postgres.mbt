@@ -38,14 +38,16 @@ async fn assert_missing_password(
   user : String,
 ) -> Unit {
   let message = expect_authentication_error(
-    try? @client.connect(
-      auth_client_config(
-        config,
-        user,
-        password=None,
-        application_name="moonbit-postgres",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        auth_client_config(
+          config,
+          user,
+          password=None,
+          application_name="moonbit-postgres",
+        ),
+      )
+    }),
   )
   assert_eq(message, "server requires a password")
 }
@@ -57,14 +59,16 @@ async fn assert_wrong_password(
   user : String,
 ) -> Unit {
   let err = expect_database_error(
-    try? @client.connect(
-      auth_client_config(
-        config,
-        user,
-        password=Some("wrongpass"),
-        application_name="moonbit-postgres",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        auth_client_config(
+          config,
+          user,
+          password=Some("wrongpass"),
+          application_name="moonbit-postgres",
+        ),
+      )
+    }),
   )
   @debug.assert_eq(err.code, Some("28P01"))
 }
@@ -404,13 +408,15 @@ async test "integration tls rejects untrusted server certificate" {
   guard integration_tls_failure_expected() else { return }
 
   let message = expect_ssl_error(
-    try? @client.connect(
-      as_client_config(
-        config,
-        ssl_mode=VerifyFull,
-        application_name="moonbit-postgres-tls-untrusted",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        as_client_config(
+          config,
+          ssl_mode=VerifyFull,
+          application_name="moonbit-postgres-tls-untrusted",
+        ),
+      )
+    }),
   )
   assert_true(
     message.contains("certificate") ||
@@ -444,15 +450,17 @@ async test "integration tls verify_full rejects hostname mismatch" {
   guard integration_config() is Some(config) else { return }
   guard !integration_tls_failure_expected() else { return }
   let message = expect_ssl_error(
-    try? @client.connect(
-      as_client_config(
-        config,
-        host="db.invalid",
-        hostaddr=config.host,
-        ssl_mode=VerifyFull,
-        application_name="moonbit-postgres-tls-verify-full-host-mismatch",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        as_client_config(
+          config,
+          host="db.invalid",
+          hostaddr=config.host,
+          ssl_mode=VerifyFull,
+          application_name="moonbit-postgres-tls-verify-full-host-mismatch",
+        ),
+      )
+    }),
   )
   assert_true(
     message.contains("hostname") ||
@@ -484,17 +492,19 @@ async test "integration tls verify_full accepts explicit hostaddr identity" {
 async test "integration tls verify_full requires explicit host or hostaddr" {
   guard integration_config() is Some(config) else { return }
   let message = expect_ssl_error(
-    try? @client.connect(
-      @client.Config::new(
-        "",
-        user=config.user,
-        database=config.database,
-        password=config.password,
-        port=config.port,
-        ssl_mode=VerifyFull,
-        application_name="moonbit-postgres-tls-verify-full-missing-host",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        @client.Config::new(
+          "",
+          user=config.user,
+          database=config.database,
+          password=config.password,
+          port=config.port,
+          ssl_mode=VerifyFull,
+          application_name="moonbit-postgres-tls-verify-full-missing-host",
+        ),
+      )
+    }),
   )
   assert_eq(message, "sslmode=verify-full requires explicit host or hostaddr")
 }
@@ -504,14 +514,16 @@ async test "integration tls verify_full requires explicit host or hostaddr" {
 async test "integration tls sslrootcert system requires verify_full" {
   guard integration_config() is Some(config) else { return }
   let message = expect_ssl_error(
-    try? @client.connect(
-      as_client_config(
-        config,
-        ssl_mode=VerifyCa,
-        ssl_root_cert="system",
-        application_name="moonbit-postgres-tls-system-root-invalid",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        as_client_config(
+          config,
+          ssl_mode=VerifyCa,
+          ssl_root_cert="system",
+          application_name="moonbit-postgres-tls-system-root-invalid",
+        ),
+      )
+    }),
   )
   assert_eq(message, "sslrootcert=system requires sslmode=verify-full")
 }
@@ -593,15 +605,17 @@ async test "integration scram channel binding prefer falls back without tls" {
 async test "integration scram channel binding require rejects plaintext" {
   guard integration_config() is Some(config) else { return }
   let message = expect_authentication_error(
-    try? @client.connect(
-      auth_client_config(
-        config,
-        "moon_scram",
-        password=Some(config.password),
-        channel_binding=Require,
-        application_name="moonbit-postgres-scram-channel-binding-require-plain",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        auth_client_config(
+          config,
+          "moon_scram",
+          password=Some(config.password),
+          channel_binding=Require,
+          application_name="moonbit-postgres-scram-channel-binding-require-plain",
+        ),
+      )
+    }),
   )
   assert_eq(
     message, "channel binding requires TLS with tls-server-end-point support",
@@ -630,15 +644,17 @@ async test "integration scram channel binding require works over tls" {
 async test "integration channel binding require rejects plain password auth" {
   guard integration_config() is Some(config) else { return }
   let message = expect_authentication_error(
-    try? @client.connect(
-      auth_client_config(
-        config,
-        "moon_password",
-        password=Some(config.password),
-        channel_binding=Require,
-        application_name="moonbit-postgres-channel-binding-require-password",
-      ),
-    ),
+    expect_error_async(() => {
+      @client.connect(
+        auth_client_config(
+          config,
+          "moon_password",
+          password=Some(config.password),
+          channel_binding=Require,
+          application_name="moonbit-postgres-channel-binding-require-password",
+        ),
+      )
+    }),
   )
   assert_eq(
     message, "channel binding required but not supported by server's authentication request",
@@ -919,7 +935,9 @@ async test "integration simple query detach unblocks later requests" {
     stream.detach()
     stream.detach()
 
-    let closed_message = expect_closed_error(try? stream.next())
+    let closed_message = expect_closed_error(
+      expect_error_async(() => stream.next()),
+    )
     assert_eq(closed_message, "simple query stream already detached")
 
     assert_eq(
@@ -1125,7 +1143,9 @@ async test "integration row stream detach unblocks later requests" {
     stream.detach()
     stream.detach()
 
-    let closed_message = expect_closed_error(try? stream.finish())
+    let closed_message = expect_closed_error(
+      expect_error_async(() => stream.finish()),
+    )
     assert_eq(closed_message, "row stream already detached")
 
     assert_eq(
@@ -1292,7 +1312,9 @@ async test "integration cancel token cancels running query" {
     let backend_pid : Int = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
-    let task = group.spawn(() => try? client.query_one("select pg_sleep(5)"))
+    let task = group.spawn(() => {
+      expect_error_async(() => client.query_one("select pg_sleep(5)"))
+    })
 
     wait_for_backend_query(observer, backend_pid, "select pg_sleep(5)")
     token.cancel()
@@ -1471,7 +1493,9 @@ async test "integration copy out detach unblocks later requests" {
     stream.detach()
     stream.detach()
 
-    let closed_message = expect_closed_error(try? stream.next())
+    let closed_message = expect_closed_error(
+      expect_error_async(() => stream.next()),
+    )
     assert_eq(closed_message, "copy out stream already detached")
 
     assert_eq(
@@ -1612,9 +1636,11 @@ async test "integration query one" {
     )
 
     let none_message = expect_row_count_error(
-      try? client.query_one(
-        "select * from moon_driver_query_one where name = 'dave'",
-      ),
+      expect_error_async(() => {
+        client.query_one(
+          "select * from moon_driver_query_one where name = 'dave'",
+        )
+      }),
     )
     assert_eq(none_message, "expected exactly one row, got 0")
 
@@ -1625,7 +1651,9 @@ async test "integration query one" {
     assert_eq(name, "alice")
 
     let many_message = expect_row_count_error(
-      try? client.query_one("select * from moon_driver_query_one"),
+      expect_error_async(() => {
+        client.query_one("select * from moon_driver_query_one")
+      }),
     )
     assert_eq(many_message, "expected exactly one row, got 3")
 
@@ -1664,7 +1692,9 @@ async test "integration query opt" {
     @debug.assert_eq(name, "alice")
 
     let many_message = expect_row_count_error(
-      try? client.query_opt("select * from moon_driver_query_opt"),
+      expect_error_async(() => {
+        client.query_opt("select * from moon_driver_query_opt")
+      }),
     )
     assert_eq(many_message, "expected zero or one row, got 3")
 
@@ -1695,7 +1725,7 @@ async test "integration deferred constraint" {
       tx.execute("insert into moon_driver_deferred_constraint (i) values (1)"),
       1,
     )
-    let err = expect_database_error(try? tx.commit())
+    let err = expect_database_error(expect_error_async(() => tx.commit()))
     @debug.assert_eq(err.code, Some("23505"))
     let count : Int = client
       .query_one(
@@ -2065,7 +2095,9 @@ async test "integration database errors surface" {
     )
     group.spawn_bg(() => connection.run())
 
-    let err = expect_database_error(try? client.query_one("select 1 / 0"))
+    let err = expect_database_error(
+      expect_error_async(() => client.query_one("select 1 / 0")),
+    )
     @debug.assert_eq(err.code, Some("22012"))
 
     client.close()

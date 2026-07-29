@@ -216,7 +216,7 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let buf = Buffer()
   @frontend.startup_message(parameters.iter(), buf)
   stream.write(buf.to_bytes())
-  let status : Map[String, String] = {}
+  let status : Map[String, String] = Map([])
   let mut process_id = 0
   let mut secret_key = 0
   let mut transaction_status = b'I'

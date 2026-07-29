@@ -236,7 +236,7 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 fn rows_affected(command_tag : String) -> Int {
   match command_tag.split(" ").last() {
     None => 0
-    Some(last) => (try? @string.parse_int(last)).unwrap_or(0)
+    Some(last) => @string.parse_int(last) catch { _ => 0 }
   }
 }
 

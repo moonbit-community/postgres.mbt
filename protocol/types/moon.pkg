@@ -2,3 +2,7 @@ import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbitlang/core/buffer",
 }
+
+import {
+  "moonbitlang/core/test",
+} for "wbtest"

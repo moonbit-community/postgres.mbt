@@ -39,9 +39,11 @@ async test "integration wrong type errors on read and write" {
     group.spawn_bg(() => connection.run())
 
     // The query itself succeeds. The failure happens when decoding into an incompatible target type.
-    let read_result : Result[Int64, Error] = try? client
-      .query_one("select 1::int4 as value")
-      .get_name("value")
+    let read_result = expect_error_async(() => {
+      let _ : Int64 = client
+        .query_one("select 1::int4 as value")
+        .get_name("value")
+    })
     let read_err = expect_wrong_type_error(read_result)
     @debug.assert_eq(read_err.moonbit_type, "Int64")
     @debug.assert_eq(read_err.postgres_type, @client.Type::int4())
@@ -49,9 +51,11 @@ async test "integration wrong type errors on read and write" {
     // The write path should fail before encoding, so `to_sql` must never be reached.
     let text_param : TextOnlyParam = { value: "moonbit" }
     let params : Array[&@client.ToSql] = [text_param as &@client.ToSql]
-    let write_result : Result[Array[@client.Row], Error] = try? client
+    let write_result = expect_error_async(() => {
+      client
       .query_typed("select $1::int4 as value", [@client.Type::int4()], params~)
       .collect()
+    })
     let write_err = expect_wrong_type_error(write_result)
     @debug.assert_eq(write_err.moonbit_type, "TextOnlyParam")
     @debug.assert_eq(write_err.postgres_type, @client.Type::int4())

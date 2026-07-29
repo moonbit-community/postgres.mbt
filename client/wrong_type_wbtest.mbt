@@ -38,8 +38,10 @@ fn make_text_row(type_ : Type, value : String) -> Row {
 ///|
 test "row get reports wrong type before custom decoder" {
   let row = make_text_row(Type::int4(), "1")
-  let result : Result[OnlyInt8Value, Error] = try? row.get(0)
-  guard result is Err(ClientError::WrongType(err)) else {
+  let result = @test.expect_error(() => {
+    let _ : OnlyInt8Value = row.get(0)
+  })
+  guard result is ClientError::WrongType(err) else {
     fail("expected wrong type error")
   }
   @debug.assert_eq(err.moonbit_type, "OnlyInt8Value")

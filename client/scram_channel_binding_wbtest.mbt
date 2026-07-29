@@ -40,12 +40,10 @@ test "choose_scram_binding uses SCRAM-SHA-256-PLUS with tls-server-end-point" {
 ///|
 test "choose_scram_binding rejects required binding without tls signature" {
   let body = auth_sasl_body([@auth.SCRAM_SHA_256_PLUS, @auth.SCRAM_SHA_256])
-  let result : Result[(Bytes, @auth.ChannelBinding), Error] = try? choose_scram_binding(
-    body,
-    Require,
-    NoBinding,
-  )
-  guard result is Err(ClientError::Authentication(message)) else {
+  let result = @test.expect_error(() => {
+    choose_scram_binding(body, Require, NoBinding)
+  })
+  guard result is ClientError::Authentication(message) else {
     fail("expected channel binding configuration error")
   }
   @debug.assert_eq(

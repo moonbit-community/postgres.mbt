@@ -58,16 +58,22 @@ tied to that one callback:
 ///|
 async fn _pool_cancellable_example(pool : Pool) -> Unit {
   @async.with_task_group(group => {
-    let result : Result[Int, Error] = try? pool.with_client(client => {
-      client.run_cancellable((op, token) => {
-        group.spawn_bg(no_wait=true, () => {
-          @async.sleep(50)
-          token.cancel()
+    ignore(
+      pool.with_client(client => {
+        client.run_cancellable((op, token) => {
+          group.spawn_bg(no_wait=true, () => {
+            @async.sleep(50)
+            token.cancel()
+          })
+          let value : Int = op
+            .query_one("select pg_sleep(5), 1::int4 as value")
+            .get_name("value")
+          value
         })
-        op.query_one("select pg_sleep(5), 1::int4 as value").get_name("value")
-      })
-    })
-    ignore(result)
+      }),
+    ) catch {
+      _ => ()
+    }
   })
 }
 ```

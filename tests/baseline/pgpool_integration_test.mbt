@@ -20,44 +20,40 @@ fn make_pool_config(
 ///|
 /// These assertion helpers give the pool error branches a fixed shape.
 /// The tests can focus on concurrency timing and state transitions instead of unpacking error enums over and over.
-fn[T] expect_pool_wait_timeout(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(@pgpool.PoolError::Timeout(Wait)) else {
+fn expect_pool_wait_timeout(error : Error) -> Unit raise {
+  guard error is @pgpool.PoolError::Timeout(Wait) else {
     fail("expected pool wait timeout")
   }
 }
 
 ///|
 /// Verify that the pool has been closed.
-fn[T] expect_pool_closed(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(@pgpool.PoolError::Closed) else {
+fn expect_pool_closed(error : Error) -> Unit raise {
+  guard error is @pgpool.PoolError::Closed else {
     fail("expected closed pool error")
   }
 }
 
 ///|
 /// Verify that a lease has been released and can no longer be used for new work.
-fn[T] expect_pool_lease_released(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(@pgpool.PoolError::LeaseReleased) else {
+fn expect_pool_lease_released(error : Error) -> Unit raise {
+  guard error is @pgpool.PoolError::LeaseReleased else {
     fail("expected released lease error")
   }
 }
 
 ///|
 /// Verify that mutually exclusive operations do not overlap on the same connection.
-fn[T] expect_pool_operation_in_progress(
-  result : Result[T, Error],
-) -> Unit raise {
-  guard result is Err(@pgpool.PoolError::OperationInProgress) else {
+fn expect_pool_operation_in_progress(error : Error) -> Unit raise {
+  guard error is @pgpool.PoolError::OperationInProgress else {
     fail("expected operation-in-progress error")
   }
 }
 
 ///|
 /// Verify that the async timeout wrapper really ends in a timeout error.
-fn[T] expect_async_timeout(result : Result[T, Error]) -> Unit raise {
-  guard result is Err(@async.TimeoutError) else {
-    fail("expected async timeout")
-  }
+fn expect_async_timeout(error : Error) -> Unit raise {
+  guard error is @async.TimeoutError else { fail("expected async timeout") }
 }
 
 ///|
@@ -66,13 +62,15 @@ fn[T] expect_async_timeout(result : Result[T, Error]) -> Unit raise {
 async fn run_timeout_wrapped_pool_query(
   pool : @pgpool.Pool,
   long_sql : String,
-) -> Result[Int, Error] {
-  try? @async.with_timeout(200, () => {
-    let value : Int = pool.with_client(client => {
-      let value : Int = client.query_one(long_sql).get_name("value")
+) -> Error {
+  expect_error_async(() => {
+    @async.with_timeout(200, () => {
+      let value : Int = pool.with_client(client => {
+        let value : Int = client.query_one(long_sql).get_name("value")
+        value
+      })
       value
     })
-    value
   })
 }
 
@@ -147,7 +145,9 @@ async test "integration pool timeout_get reports wait timeout" {
     let lease = pool.get()
 
     expect_pool_wait_timeout(
-      try? pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0))),
+      expect_error_async(() => {
+        pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0)))
+      }),
     )
 
     lease.release()
@@ -268,7 +268,9 @@ async test "integration pool close wakes blocked checkout and borrowed client ca
     let lease = pool.get()
 
     // Hold the connection first, then let the second checkout block behind it.
-    let waiter = group.spawn(no_wait=true, () => try? pool.get())
+    let waiter = group.spawn(no_wait=true, () => {
+      expect_error_async(() => pool.get())
+    })
     wait_for_pool_waiters_or_fail(
       pool, 1, "expected blocked checkout to register as waiting",
     )
@@ -322,9 +324,7 @@ async test "integration pool restores capacity after leased client connection di
       )
       .get_name("terminated")
     assert_eq(terminated, true)
-    guard (try? lease.query_one("select 1::int4 as value")) is Err(_) else {
-      fail("expected terminated backend to break leased client")
-    }
+    ignore(expect_error_async(() => lease.query_one("select 1::int4 as value")))
 
     // Once the broken lease is released, pool size should drop to 0 first, and the next checkout should trigger replacement.
     lease.release()
@@ -368,15 +368,15 @@ async test "integration pool timeout waits for protocol-safe release" {
     })
 
     // This task times out after 200ms on the outside, while the database-side query keeps running for a while.
-    let timed : @async.Task[Result[Int, Error]] = group.spawn(no_wait=true, () => {
+    let timed = group.spawn(no_wait=true, () => {
       run_timeout_wrapped_pool_query(pool, long_sql)
     })
     wait_for_backend_query(observer, backend_pid, long_sql)
 
     // Until cleanup finishes, the pool must not make this connection borrowable again.
-    let wait_timeout = try? pool.timeout_get(
-      @pgpool.Timeouts::new(wait_ms=Some(0)),
-    )
+    let wait_timeout = expect_error_async(() => {
+      pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0)))
+    })
     let timed_result = wait_for_task_or_fail(
       timed, "expected timed operation to finish",
     )
@@ -425,9 +425,9 @@ async test "integration pool lease release waits for active operation to finish"
 
     // Releasing while the query is still running is the core delayed-return case.
     lease.release()
-    let wait_timeout = try? pool.timeout_get(
-      @pgpool.Timeouts::new(wait_ms=Some(0)),
-    )
+    let wait_timeout = expect_error_async(() => {
+      pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0)))
+    })
     expect_pool_wait_timeout(wait_timeout)
     assert_eq(
       wait_for_task_or_fail(query_task, "expected active query to finish"),
@@ -468,31 +468,26 @@ async test "integration pool run_cancellable rejects overlapping work" {
       client.run_cancellable((op, _) => {
         // Once the scope starts, the original client handle must not start new protocol work.
         expect_pool_operation_in_progress(
-          try? client.query_one("select 1::int4 as value"),
+          expect_error_async(() => client.query_one("select 1::int4 as value")),
         )
         // The cancellable scope itself must not be re-entered either.
         expect_pool_operation_in_progress(
-          try? client.run_cancellable((_, _) => 1),
+          expect_error_async(() => client.run_cancellable((_, _) => 1)),
         )
 
         // While the long query is running, another query on the same `op` must also be blocked.
         let backend_pid : Int = op
           .query_one("select pg_backend_pid()::int4 as pid")
           .get_name("pid")
-        let query_task = group.spawn(no_wait=true, () => {
-          try? op.query_one(long_sql)
-        })
+        let query_task = group.spawn(no_wait=true, () => op.query_one(long_sql))
         wait_for_backend_query(observer, backend_pid, long_sql)
         expect_pool_operation_in_progress(
-          try? op.query_one("select 2::int4 as value"),
+          expect_error_async(() => op.query_one("select 2::int4 as value")),
         )
 
-        let row_result = wait_for_task_or_fail(
+        let row = wait_for_task_or_fail(
           query_task, "expected cancellable scoped query to finish",
         )
-        guard row_result is Ok(row) else {
-          fail("expected cancellable scoped query success")
-        }
         let value : Int = row.get_name("value")
         assert_eq(value, 1)
       })
@@ -529,15 +524,17 @@ async test "integration pool run_cancellable cancels running query" {
 
     // Borrow the connection in a child task and publish the context needed for cancellation.
     let task = group.spawn(no_wait=true, () => {
-      try? pool.with_client(client => {
-        client.run_cancellable((op, token) => {
-          let backend_pid : Int = op
-            .query_one("select pg_backend_pid()::int4 as pid")
-            .get_name("pid")
-          pid_queue.put(backend_pid)
-          token_queue.put(token)
-          let value : Int = op.query_one(long_sql).get_name("value")
-          value
+      expect_error_async(() => {
+        pool.with_client(client => {
+          client.run_cancellable((op, token) => {
+            let backend_pid : Int = op
+              .query_one("select pg_backend_pid()::int4 as pid")
+              .get_name("pid")
+            pid_queue.put(backend_pid)
+            token_queue.put(token)
+            let value : Int = op.query_one(long_sql).get_name("value")
+            value
+          })
         })
       })
     })
@@ -546,9 +543,9 @@ async test "integration pool run_cancellable cancels running query" {
     let token = token_queue.get()
     // Confirm that the long query is really holding the connection before canceling it.
     wait_for_backend_query(observer, backend_pid, long_sql)
-    let wait_timeout = try? pool.timeout_get(
-      @pgpool.Timeouts::new(wait_ms=Some(0)),
-    )
+    let wait_timeout = expect_error_async(() => {
+      pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0)))
+    })
     token.cancel()
     let task_result = wait_for_task_or_fail(
       task, "expected cancellable task to finish",
@@ -595,10 +592,12 @@ async test "integration pool release waits for cancellable cleanup" {
     defer observer.close()
 
     let task = group.spawn(no_wait=true, () => {
-      try? lease.run_cancellable((op, token) => {
-        token_queue.put(token)
-        let value : Int = op.query_one(long_sql).get_name("value")
-        value
+      expect_error_async(() => {
+        lease.run_cancellable((op, token) => {
+          token_queue.put(token)
+          let value : Int = op.query_one(long_sql).get_name("value")
+          value
+        })
       })
     })
 
@@ -606,9 +605,9 @@ async test "integration pool release waits for cancellable cleanup" {
     wait_for_backend_query(observer, backend_pid, long_sql)
     // Release first and cancel later to cover cleanup when those two actions interleave.
     lease.release()
-    let wait_timeout = try? pool.timeout_get(
-      @pgpool.Timeouts::new(wait_ms=Some(0)),
-    )
+    let wait_timeout = expect_error_async(() => {
+      pool.timeout_get(@pgpool.Timeouts::new(wait_ms=Some(0)))
+    })
     token.cancel()
     let task_result = wait_for_task_or_fail(
       task, "expected released cancellable lease task to finish",
@@ -712,15 +711,17 @@ async test "integration pool close wakes blocked checkout while cancellable task
     group.spawn_bg(() => observer_connection.run())
 
     let task = group.spawn(no_wait=true, () => {
-      try? pool.with_client(client => {
-        client.run_cancellable((op, token) => {
-          let backend_pid : Int = op
-            .query_one("select pg_backend_pid()::int4 as pid")
-            .get_name("pid")
-          pid_queue.put(backend_pid)
-          token_queue.put(token)
-          let value : Int = op.query_one(long_sql).get_name("value")
-          value
+      expect_error_async(() => {
+        pool.with_client(client => {
+          client.run_cancellable((op, token) => {
+            let backend_pid : Int = op
+              .query_one("select pg_backend_pid()::int4 as pid")
+              .get_name("pid")
+            pid_queue.put(backend_pid)
+            token_queue.put(token)
+            let value : Int = op.query_one(long_sql).get_name("value")
+            value
+          })
         })
       })
     })
@@ -730,7 +731,9 @@ async test "integration pool close wakes blocked checkout while cancellable task
     wait_for_backend_query(observer, backend_pid, long_sql)
 
     // The waiter must enter the queue first, otherwise there is nothing to wake up on pool close.
-    let waiter = group.spawn(no_wait=true, () => try? pool.get())
+    let waiter = group.spawn(no_wait=true, () => {
+      expect_error_async(() => pool.get())
+    })
     wait_for_pool_waiters_or_fail(
       pool, 1, "expected blocked checkout to register as waiting before close",
     )
@@ -936,22 +939,20 @@ async test "integration pool savepoint rollback keeps outer transaction work" {
         )
         ignore(tx.execute("insert into moon_pool_savepoint (value) values (1)"))
         // Trigger an error on purpose so the savepoint rolls back without rolling back the whole transaction.
-        let nested : Result[Unit, Error] = try? tx.with_savepoint(
-          "inner_step",
-          inner => {
-            ignore(
-              inner.execute(
-                "insert into moon_pool_savepoint (value) values (2)",
-              ),
-            )
-            inner.batch_execute(
-              "insert into definitely_missing_table (value) values (3)",
-            )
-          },
+        ignore(
+          expect_error_async(() => {
+            tx.with_savepoint("inner_step", inner => {
+              ignore(
+                inner.execute(
+                  "insert into moon_pool_savepoint (value) values (2)",
+                ),
+              )
+              inner.batch_execute(
+                "insert into definitely_missing_table (value) values (3)",
+              )
+            })
+          }),
         )
-        guard nested is Err(_) else {
-          fail("expected savepoint callback rollback")
-        }
         tx
         .query_one("select count(*)::int4 as count from moon_pool_savepoint")
         .get_name("count")
@@ -984,7 +985,7 @@ async test "integration pool prepared statement expires after callback scope" {
     })
     assert_eq(value, 13)
     let stale = queue.get()
-    expect_pool_lease_released(try? stale.query_one())
+    expect_pool_lease_released(expect_error_async(() => stale.query_one()))
 
     pool.close()
   })
@@ -1017,21 +1018,20 @@ async test "integration pool direct transaction keeps lease checked out until co
 
     // Releasing the outer lease is not the same as ending the transaction, so the connection should still be occupied by the transaction.
     lease.release()
-    expect_pool_lease_released(try? lease.query_one("select 1::int4 as value"))
+    expect_pool_lease_released(
+      expect_error_async(() => lease.query_one("select 1::int4 as value")),
+    )
 
-    let waiter = group.spawn(no_wait=true, () => try? pool.get())
+    let waiter = group.spawn(no_wait=true, () => pool.get())
     assert_task_stays_pending(
       waiter, "expected open transaction to keep lease checked out",
     )
 
     tx.commit()
 
-    let next_result = wait_for_task_or_fail(
+    let next = wait_for_task_or_fail(
       waiter, "expected checkout to resume after commit",
     )
-    guard next_result is Ok(next) else {
-      fail("expected checkout after direct transaction commit")
-    }
     let value : Int = next
       .query_one("select 1::int4 as value")
       .get_name("value")
@@ -1139,7 +1139,9 @@ async test "integration pool released lease rejects new work" {
     let lease = pool.get()
 
     lease.release()
-    expect_pool_lease_released(try? lease.query_one("select 1::int4 as value"))
+    expect_pool_lease_released(
+      expect_error_async(() => lease.query_one("select 1::int4 as value")),
+    )
 
     pool.close()
   })

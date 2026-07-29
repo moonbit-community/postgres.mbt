@@ -147,7 +147,7 @@ fn copy_test_data_row_message(value : Bytes?) -> @backend.Message raise {
 fn copy_test_shared(
   background_group : @ref.Ref[@async.TaskGroup[Unit]?],
 ) -> Shared {
-  let types : Map[@proto.Oid, Type] = {}
+  let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
   {
     config: Config::new(
@@ -205,8 +205,8 @@ async test "client copy in streams input and returns affected rows" {
     sink.send(b"alpha"[:])
     assert_eq(sink.finish(), 1)
 
-    let send_after_finish : Result[Unit, Error] = try? sink.send(b"beta"[:])
-    guard send_after_finish is Err(ClientError::Closed(message)) else {
+    let send_after_finish = expect_error_async(() => sink.send(b"beta"[:]))
+    guard send_after_finish is ClientError::Closed(message) else {
       fail("expected closed sink error")
     }
     assert_eq(message, "copy sink already finished")
@@ -225,10 +225,10 @@ async test "client copy in surfaces startup errors and missing startup response"
       request.responses.put(copy_test_ready_for_query_message())
     })
 
-    let startup_error : Result[CopyInSink, Error] = try? error_client.copy_in(
-      "COPY denied FROM STDIN",
-    )
-    guard startup_error is Err(ClientError::Database(err)) else {
+    let startup_error = expect_error_async(() => {
+      error_client.copy_in("COPY denied FROM STDIN")
+    })
+    guard startup_error is ClientError::Database(err) else {
       fail("expected startup database error")
     }
     assert_eq(err.message, "copy denied")
@@ -243,10 +243,10 @@ async test "client copy in surfaces startup errors and missing startup response"
       request.responses.put(copy_test_ready_for_query_message())
     })
 
-    let missing_response : Result[CopyInSink, Error] = try? missing_client.copy_in(
-      "COPY missing FROM STDIN",
-    )
-    guard missing_response is Err(ClientError::UnexpectedMessage(message)) else {
+    let missing_response = expect_error_async(() => {
+      missing_client.copy_in("COPY missing FROM STDIN")
+    })
+    guard missing_response is ClientError::UnexpectedMessage(message) else {
       fail("expected missing CopyInResponse error")
     }
     assert_eq(message, "expected CopyInResponse")
@@ -279,8 +279,8 @@ async test "copy in abort is best effort and idempotent" {
     sink.abort(message="stop now")
     sink.abort(message="ignored")
 
-    let finish_after_abort : Result[Int, Error] = try? sink.finish()
-    guard finish_after_abort is Err(ClientError::Closed(message)) else {
+    let finish_after_abort = expect_error_async(() => sink.finish())
+    guard finish_after_abort is ClientError::Closed(message) else {
       fail("expected closed sink after abort")
     }
     assert_eq(message, "copy sink already finished")
@@ -329,8 +329,8 @@ async test "client copy out detach drains in background and terminal errors surf
     let detached = client.copy_out("COPY detached TO STDOUT")
     detached.detach()
 
-    let detached_result : Result[Bytes?, Error] = try? detached.next()
-    guard detached_result is Err(ClientError::Closed(message)) else {
+    let detached_result = expect_error_async(() => detached.next())
+    guard detached_result is ClientError::Closed(message) else {
       fail("expected detached stream error")
     }
     assert_eq(message, "copy out stream already detached")
@@ -348,8 +348,8 @@ async test "client copy out detach drains in background and terminal errors surf
     })
 
     let stream = client.copy_out("COPY broken TO STDOUT")
-    let failed : Result[Bytes?, Error] = try? stream.next()
-    guard failed is Err(ClientError::Database(err)) else {
+    let failed = expect_error_async(() => stream.next())
+    guard failed is ClientError::Database(err) else {
       fail("expected terminal copy out database error")
     }
     assert_eq(err.message, "copy failed")
@@ -368,10 +368,10 @@ async test "client copy helpers reject unexpected messages and finish empty stre
       request.responses.put(copy_test_row_description_message())
     })
 
-    let startup_result : Result[CopyInSink, Error] = try? client.copy_in(
-      "COPY invalid FROM STDIN",
-    )
-    guard startup_result is Err(ClientError::UnexpectedMessage(message)) else {
+    let startup_result = expect_error_async(() => {
+      client.copy_in("COPY invalid FROM STDIN")
+    })
+    guard startup_result is ClientError::UnexpectedMessage(message) else {
       fail("expected unexpected COPY IN startup response")
     }
     assert_eq(message, "unexpected copy-in response")
@@ -414,8 +414,10 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached: false,
     finished: true,
   }
-  let finished_error : Result[Unit, Error] = try? finished_error_stream.drain_discard()
-  guard finished_error is Err(ClientError::Database(err)) else {
+  let finished_error = expect_error_async(() => {
+    finished_error_stream.drain_discard()
+  })
+  guard finished_error is ClientError::Database(err) else {
     fail("expected finished drain to surface stored database error")
   }
   assert_eq(err.message, "copy already failed")
@@ -433,8 +435,8 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached: false,
     finished: false,
   }
-  let draining_error : Result[Unit, Error] = try? draining_stream.drain_discard()
-  guard draining_error is Err(ClientError::Database(err)) else {
+  let draining_error = expect_error_async(() => draining_stream.drain_discard())
+  guard draining_error is ClientError::Database(err) else {
     fail("expected detached drain database error")
   }
   assert_eq(err.message, "copy drain failed")
@@ -450,8 +452,8 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached: false,
     finished: false,
   }
-  let next_error : Result[Bytes?, Error] = try? next_stream.next()
-  guard next_error is Err(ClientError::UnexpectedMessage(message)) else {
+  let next_error = expect_error_async(() => next_stream.next())
+  guard next_error is ClientError::UnexpectedMessage(message) else {
     fail("expected unexpected copy-out response")
   }
   assert_eq(message, "unexpected copy out response")
@@ -466,8 +468,8 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached: false,
     finished: false,
   }
-  let discard_error : Result[Unit, Error] = try? discard_stream.drain_discard()
-  guard discard_error is Err(ClientError::UnexpectedMessage(message)) else {
+  let discard_error = expect_error_async(() => discard_stream.drain_discard())
+  guard discard_error is ClientError::UnexpectedMessage(message) else {
     fail("expected unexpected detached copy-out response")
   }
   assert_eq(message, "unexpected copy out response")
