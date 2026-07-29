@@ -12,18 +12,14 @@ struct IntegrationConfig {
 ///|
 /// Read one environment variable.
 /// Missing variables become `None`, so callers can decide whether to use a default.
-async fn env_var(name : String) -> String? {
-  let (code, output) = @process.collect_stdout("/usr/bin/printenv", [name])
-  if code != 0 {
-    return None
-  }
-  Some(output.text().trim().to_owned())
+fn env_var(name : String) -> String? {
+  @env.get_env_var(name)
 }
 
 ///|
 /// Decide whether integration tests should run and fill in default connection parameters.
 /// Each test uses the same entry point to decide whether to run and where to connect.
-async fn integration_config() -> IntegrationConfig? {
+fn integration_config() -> IntegrationConfig? raise {
   guard env_var("RUN_POSTGRES_INTEGRATION") == Some("1") else { return None }
   let host = env_var("POSTGRES_HOST").unwrap_or("127.0.0.1")
   let port = match env_var("POSTGRES_PORT") {
@@ -39,7 +35,7 @@ async fn integration_config() -> IntegrationConfig? {
 ///|
 /// Some environments intentionally make TLS verification fail.
 /// This flag lets the TLS tests choose the matching branch.
-async fn integration_tls_failure_expected() -> Bool {
+fn integration_tls_failure_expected() -> Bool {
   env_var("POSTGRES_TLS_EXPECT_FAILURE") == Some("1")
 }
 
