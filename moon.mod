@@ -18,4 +18,4 @@ keywords = [ ]
 
 description = "A secure, easy-to-use PostgreSQL client library for MoonBit with an included connection pool."
 
-preferred_target = "native"
+preferred_target = "wasm"

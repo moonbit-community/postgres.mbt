@@ -85,6 +85,7 @@ const authSuites = [
   ['scram-sha-256', 'moon_scram'],
   ['password', 'moon_password'],
 ]
+const integrationTargets = ['native', 'wasm']
 const integrationPackages = ['tests/baseline']
 
 main().catch((error) => {
@@ -159,35 +160,50 @@ function runInsideVirtualenv() {
     runCommand('moon', ['coverage', 'clean'], { cwd: currentRepoRoot, env })
   }
 
-  for (const [authLabel, authUser] of authSuites) {
-    console.log(`==> Running integration tests with ${authLabel} authentication`)
-    for (const pkg of integrationPackages) {
-      const moonArgs = ['test', pkg, '--filter', env.TEST_FILTER]
-      if (enableCoverage) {
-        moonArgs.push('--enable-coverage')
+  for (const target of integrationTargets) {
+    for (const [authLabel, authUser] of authSuites) {
+      console.log(
+        `==> Running ${target} integration tests with ${authLabel} authentication`,
+      )
+      for (const pkg of integrationPackages) {
+        const moonArgs = [
+          'test',
+          pkg,
+          '--target',
+          target,
+          '--filter',
+          env.TEST_FILTER,
+        ]
+        if (enableCoverage) {
+          moonArgs.push('--enable-coverage')
+        }
+        runCommand('moon', moonArgs, {
+          cwd: currentRepoRoot,
+          env: { ...env, POSTGRES_USER: authUser },
+        })
       }
-      runCommand('moon', moonArgs, {
-        cwd: currentRepoRoot,
-        env: { ...env, POSTGRES_USER: authUser },
-      })
     }
-  }
 
-  console.log('==> Running integration tests for TLS verification failures')
-  const tlsFailureArgs = [
-    'test',
-    '--filter',
-    'integration tls rejects untrusted server certificate',
-  ]
-  runCommand('moon', tlsFailureArgs, {
-    cwd: currentRepoRoot,
-    env: {
-      ...env,
-      POSTGRES_USER: 'moon_scram',
-      POSTGRES_TLS_EXPECT_FAILURE: '1',
-      SSL_CERT_FILE: requireEnv('TLS_BAD_CA_CERT_FILE'),
-    },
-  })
+    console.log(
+      `==> Running ${target} integration tests for TLS verification failures`,
+    )
+    const tlsFailureArgs = [
+      'test',
+      '--target',
+      target,
+      '--filter',
+      'integration tls rejects untrusted server certificate',
+    ]
+    runCommand('moon', tlsFailureArgs, {
+      cwd: currentRepoRoot,
+      env: {
+        ...env,
+        POSTGRES_USER: 'moon_scram',
+        POSTGRES_TLS_EXPECT_FAILURE: '1',
+        SSL_CERT_FILE: requireEnv('TLS_BAD_CA_CERT_FILE'),
+      },
+    })
+  }
 
   if (enableCoverage) {
     runCommand('moon', ['coverage', 'report', '--', '-f', 'caret'], {
