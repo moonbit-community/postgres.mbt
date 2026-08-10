@@ -3,12 +3,13 @@ package "moonbit-community/postgres/client"
 
 import {
   "moonbit-community/postgres/protocol",
+  "moonbitlang/async",
   "moonbitlang/core/buffer",
   "moonbitlang/core/debug",
 }
 
 // Values
-pub async fn connect(Config) -> (Client, Connection)
+pub async fn connect(Config, @async.TaskGroup[Unit]) -> Client
 
 // Errors
 pub suberror ClientError {
@@ -44,28 +45,29 @@ pub(all) enum ChannelBinding {
 } derive(Eq, @debug.Debug)
 
 type Client
+pub fn Client::abort(Self) -> Unit
 pub async fn Client::batch_execute(Self, String) -> Unit
 pub async fn Client::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
 pub fn Client::cancel_token(Self) -> CancelToken
 pub async fn Client::check_connection(Self) -> Unit
 pub fn Client::clear_type_cache(Self) -> Unit
-pub fn Client::close(Self) -> Unit
+pub async fn Client::close(Self) -> Unit
 pub async fn Client::copy_in(Self, String) -> CopyInSink
 pub async fn Client::copy_out(Self, String) -> CopyOutStream
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
 pub fn Client::is_closed(Self) -> Bool
+pub async fn Client::next_message(Self) -> AsyncMessage?
 pub fn Client::parameter(Self, String) -> String?
 pub async fn Client::prepare(Self, String) -> Statement
 pub async fn Client::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Client::query(Self, String, params? : Array[&ToSql]) -> RowStream
 pub async fn Client::query_one(Self, String, params? : Array[&ToSql]) -> Row
 pub async fn Client::query_opt(Self, String, params? : Array[&ToSql]) -> Row?
-pub fn Client::query_portal(Self, Portal, Int) -> RowStream raise
-pub fn Client::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream raise
+pub async fn Client::query_portal(Self, Portal, Int) -> RowStream
+pub async fn Client::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
 pub async fn Client::query_typed(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
-pub async fn Client::query_typed_raw(Self, String, Array[Type], params? : Array[&ToSql]) -> RowStream
-pub fn Client::simple_query(Self, String) -> SimpleQueryStream raise
+pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
 pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
 pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 
@@ -97,11 +99,6 @@ pub struct Config {
 } derive(Eq, @debug.Debug)
 pub fn Config::from_parts(String, String?, Int, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int?, Bool?, Int?) -> Self
 pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
-
-type Connection
-pub async fn Connection::next_message(Self) -> AsyncMessage?
-pub fn Connection::parameter(Self, String) -> String?
-pub async fn Connection::run(Self, on_async? : (AsyncMessage) -> Unit) -> Unit
 
 type CopyInSink
 pub async fn CopyInSink::abort(Self, message? : String) -> Unit
@@ -182,6 +179,8 @@ pub async fn RowStream::collect(Self) -> Array[Row]
 pub fn RowStream::detach(Self) -> Unit
 pub async fn RowStream::finish(Self) -> QuerySummary
 pub async fn RowStream::next(Self) -> Row?
+pub async fn RowStream::one(Self) -> Row
+pub async fn RowStream::opt(Self) -> Row?
 
 pub enum SimpleQueryMessage {
   RowDescription(Array[String])
@@ -220,14 +219,16 @@ pub async fn Statement::close(Self) -> Unit
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
 pub async fn Transaction::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
+pub async fn Transaction::close_portal(Self, Portal) -> Unit
+pub async fn Transaction::close_statement(Self, Statement) -> Unit
 pub async fn Transaction::commit(Self) -> Unit
 pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
 pub async fn Transaction::prepare(Self, String) -> Statement
 pub async fn Transaction::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
-pub fn Transaction::query_portal(Self, Portal, Int) -> RowStream raise
-pub fn Transaction::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream raise
+pub async fn Transaction::query_portal(Self, Portal, Int) -> RowStream
+pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
@@ -327,4 +328,3 @@ pub impl[T : ToSql] ToSql for T?
 pub impl ToSql for Bytes
 pub impl[T : ToSql] ToSql for Array[T]
 pub impl ToSql for Json
-

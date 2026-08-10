@@ -1,14 +1,18 @@
 ///|
 fn expect_pool_lease_released(error : Error) -> Unit raise {
-  guard error is PoolError::LeaseReleased else {
+  guard error is PoolError::ScopeExpired else {
     fail("expected lease released error")
   }
 }
 
 ///|
-fn expect_pool_operation_in_progress(error : Error) -> Unit raise {
-  guard error is PoolError::OperationInProgress else {
-    fail("expected operation in progress error")
+async fn[T, E : Error] expect_pgpool_error_async(
+  f : async () -> T raise E,
+) -> E {
+  try f() catch {
+    error => error
+  } noraise {
+    _ => fail("expected async operation to raise")
   }
 }
 
@@ -26,8 +30,13 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
 
 ///|
 fn client_api_test_connection(
-  group : @async.TaskGroup[Unit],
+  _group : @async.TaskGroup[Unit],
   id? : Int = 1,
 ) -> ConnectionState {
-  { id, group, client: @ref.new(None), statement_cache: [] }
+  {
+    id,
+    client: @ref.new(None),
+    statement_cache_capacity: 100,
+    statement_cache: [],
+  }
 }

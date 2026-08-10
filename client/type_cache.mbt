@@ -14,14 +14,14 @@ let typeinfo_composite_query = "select attname::text, atttypid::oid from pg_cata
 
 ///|
 /// Return a cached `Type`, querying PostgreSQL catalogs only on cache misses.
-async fn cached_type(shared : Shared, oid : @proto.Oid) -> Type {
-  match shared.types.get(oid) {
+async fn cached_type(context : OpContext, oid : @proto.Oid) -> Type {
+  match context.client.shared.types.get(oid) {
     Some(type_) => type_
     None => {
       // Cache misses are resolved once and written back so later row/parameter
       // decoding for the same OID stays local.
-      let type_ = lookup_type(shared, oid)
-      shared.types[oid] = type_
+      let type_ = lookup_type(context, oid)
+      context.client.shared.types[oid] = type_
       type_
     }
   }
@@ -33,11 +33,11 @@ async fn cached_type(shared : Shared, oid : @proto.Oid) -> Type {
 /// The driver first checks built-ins, then falls back to catalog queries. If
 /// those fail or return no rows, it preserves the OID inside an `Unknown`
 /// descriptor so later error messages remain informative.
-async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
+async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
   match builtin_type(oid) {
     Some(type_) => type_
     None => {
-      let rows = query_oid_catalog(shared, typeinfo_query, oid) catch {
+      let rows = query_oid_catalog(context, typeinfo_query, oid) catch {
         _ => []
       }
       // Catalog lookup is best-effort; falling back to `Unknown` preserves the
@@ -55,7 +55,7 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
       // Match PostgreSQL's richer type families first before falling back to a
       // plain scalar descriptor.
       let kind = if typtype == "e" {
-        Kind::Enum(query_enum_labels(shared, oid))
+        Kind::Enum(query_enum_labels(context, oid))
       } else if typtype == "p" {
         Pseudo
       } else if base_oid != 0U {
@@ -63,7 +63,7 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
       } else if elem_oid != 0U {
         Array(elem_oid)
       } else if relid != 0U {
-        Composite(query_composite_fields(shared, relid))
+        Composite(query_composite_fields(context, relid))
       } else {
         match range_subtype {
           Some(subtype) => Range(subtype)
@@ -78,25 +78,25 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
 ///|
 /// Run a catalog query that accepts a single OID parameter.
 ///
-/// This helper builds a temporary `Client` facade around `Shared` so the type
-/// cache can reuse the ordinary query path without special wiring.
+/// The query uses its parent's operation context so it does not reacquire the
+/// same single-flight gate.
 async fn query_oid_catalog(
-  shared : Shared,
+  context : OpContext,
   sql : String,
   oid : @proto.Oid,
 ) -> Array[Row] {
-  let client : Client = { shared, }
-  // Reuse the ordinary query pipeline so the type cache does not maintain its
-  // own special-purpose protocol machinery.
   let params : Array[&ToSql] = [oid]
-  let stream = client.query_typed(sql, [Type::oid_type()], params~)
+  let stream = context.query_typed(sql, [Type::oid_type()], params)
   stream.collect()
 }
 
 ///|
 /// Fetch enum labels for one enum type OID.
-async fn query_enum_labels(shared : Shared, oid : @proto.Oid) -> Array[String] {
-  let rows = query_oid_catalog(shared, typeinfo_enum_query, oid) catch {
+async fn query_enum_labels(
+  context : OpContext,
+  oid : @proto.Oid,
+) -> Array[String] {
+  let rows = query_oid_catalog(context, typeinfo_enum_query, oid) catch {
     _ => []
   }
   rows.map(row => row.get(0))
@@ -105,10 +105,10 @@ async fn query_enum_labels(shared : Shared, oid : @proto.Oid) -> Array[String] {
 ///|
 /// Fetch field metadata for one composite type.
 async fn query_composite_fields(
-  shared : Shared,
+  context : OpContext,
   oid : @proto.Oid,
 ) -> Array[Field] {
-  let rows = query_oid_catalog(shared, typeinfo_composite_query, oid) catch {
+  let rows = query_oid_catalog(context, typeinfo_composite_query, oid) catch {
     _ => []
   }
   rows.map(row => { name: row.get(0), type_oid: row.get(1) })
@@ -135,12 +135,12 @@ fn parse_parameter_oids(
 ///|
 /// Resolve a parameter OID list into cached `Type` descriptors.
 async fn resolve_parameter_types(
-  shared : Shared,
+  context : OpContext,
   oids : Array[@proto.Oid],
 ) -> Array[Type] {
   let out : Array[Type] = []
   for oid in oids {
-    out.push(cached_type(shared, oid))
+    out.push(cached_type(context, oid))
   }
   out
 }
@@ -148,14 +148,14 @@ async fn resolve_parameter_types(
 ///|
 /// Replace placeholder column types with cached rich descriptors.
 async fn resolve_columns(
-  shared : Shared,
+  context : OpContext,
   columns : Array[Column],
 ) -> Array[Column] {
   let out : Array[Column] = []
   for column in columns {
     // Preserve every other row-description field and swap only the placeholder
     // type descriptor for its cached rich form.
-    out.push({ ..column, type_: cached_type(shared, column.type_.oid) })
+    out.push({ ..column, type_: cached_type(context, column.type_.oid) })
   }
   out
 }

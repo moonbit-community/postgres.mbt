@@ -206,23 +206,3 @@ async fn[T, E : Error] expect_error_async(
       )
   }
 }
-
-///|
-/// Wait until the pool reaches the expected physical connection count.
-/// This lets multi-connection tests warm up the pool before asserting on session isolation.
-async fn wait_for_pool_size_or_fail(
-  pool : @pgpool.Pool,
-  expected : Int,
-  message : String,
-  polls? : Int = 500,
-) -> Unit {
-  let mut remaining = polls
-  while remaining > 0 {
-    if pool.status().size == expected {
-      return
-    }
-    remaining -= 1
-    @async.sleep(10)
-  }
-  fail(message)
-}

@@ -1,6 +1,63 @@
 // Shared helpers used by the higher-level client APIs.
 
 ///|
+fn OperationGate::new() -> OperationGate {
+  { mutex: Mutex() }
+}
+
+///|
+async fn OperationGate::acquire(self : OperationGate) -> OperationPermit {
+  self.mutex.acquire()
+  { gate: self, released: @ref.new(false) }
+}
+
+///|
+fn OperationPermit::release(self : OperationPermit) -> Unit {
+  if self.released.val {
+    return
+  }
+  self.released.val = true
+  self.gate.mutex.release()
+}
+
+///|
+fn Client::operation_context(self : Client) -> OpContext {
+  { client: self }
+}
+
+///|
+/// Run a fully consumed logical operation under the client's FIFO gate.
+async fn[T] Client::run_operation(
+  self : Client,
+  f : async (OpContext) -> T,
+) -> T {
+  let permit = self.shared.operation_gate.acquire()
+  defer permit.release()
+  ensure_open(self.shared)
+  @async.protect_from_cancel(
+    () => f(self.operation_context()),
+    resume_on_cancel=true,
+  )
+}
+
+///|
+/// Acquire the client for an operation whose returned handle owns the permit.
+async fn Client::begin_stream_operation(
+  self : Client,
+) -> (OpContext, OperationPermit) {
+  let permit = self.shared.operation_gate.acquire()
+  try {
+    ensure_open(self.shared)
+    (self.operation_context(), permit)
+  } catch {
+    err => {
+      permit.release()
+      raise err
+    }
+  }
+}
+
+///|
 /// Queue a request for the connection loop and return its response stream.
 ///
 /// The caller chooses the response queue kind. Most requests use the bounded
@@ -16,7 +73,13 @@ fn Client::send_request(
   // `false` for "queue full". The only failure mode here is a closed queue,
   // which still raises and propagates out of this helper.
   ignore(
-    self.shared.requests.try_put({ kind, bytes, responses, copy_input: None }),
+    self.shared.requests.try_put({
+      kind,
+      bytes,
+      responses,
+      copy_input: None,
+      copy_error: None,
+    }),
   )
   responses
 }
@@ -37,6 +100,7 @@ fn Client::send_request_with_copy(
       bytes,
       responses,
       copy_input: Some(input),
+      copy_error: Some(@ref.new(None)),
     }),
   )
   responses
@@ -45,6 +109,9 @@ fn Client::send_request_with_copy(
 ///|
 /// Fail if the shared runtime is already closed or shutting down.
 fn ensure_open(shared : Shared) -> Unit raise {
+  if shared.aborted.val {
+    raise ClientError::Closed("connection aborted")
+  }
   if shared.closed.val || shared.closing.val {
     // `closing` flips before the socket is fully torn down so new work stops
     // racing against a connection that is already converging toward shutdown.
@@ -53,7 +120,7 @@ fn ensure_open(shared : Shared) -> Unit raise {
 }
 
 ///|
-/// Spawn one detached stream drain on the connection task group.
+/// Spawn one detached stream drain on the client's task group.
 ///
 /// Terminal database errors are intentionally swallowed for detached streams,
 /// but any other failure still tears down the task group so protocol bugs or
@@ -61,19 +128,21 @@ fn ensure_open(shared : Shared) -> Unit raise {
 fn spawn_detached_drain(
   background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   drain : async () -> Unit,
-) -> Unit {
+) -> @async.Task[Unit]? {
   match background_group.val {
     Some(group) =>
-      group.spawn_bg(no_wait=true, () => {
-        try drain() catch {
-          // Detached callers gave up synchronous handling of database failures,
-          // but protocol bugs and runtime errors should still surface.
-          err => if err is ClientError::Database(_) { () } else { raise err }
-        } noraise {
-          _ => ()
-        }
-      })
-    None => ()
+      Some(
+        group.spawn(no_wait=true, () => {
+          try drain() catch {
+            // Detached callers gave up synchronous handling of database failures,
+            // but protocol bugs and runtime errors should still surface.
+            err => if err is ClientError::Database(_) { () } else { raise err }
+          } noraise {
+            _ => ()
+          }
+        }),
+      )
+    None => None
   }
 }
 
@@ -82,6 +151,14 @@ fn spawn_detached_drain(
 fn Transaction::assert_open(self : Transaction) -> Unit raise {
   if self.finished.val {
     raise ClientError::Closed("transaction is already finished")
+  }
+  if self.client.shared.closed.val {
+    self.finished.val = true
+    self.release_owner_permit()
+    if self.client.shared.aborted.val {
+      raise ClientError::Closed("connection aborted")
+    }
+    raise ClientError::Closed("connection is closed")
   }
 }
 

@@ -25,11 +25,13 @@ pub struct RowStream {
   priv background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   priv responses : @async.Queue[@backend.Message]
   priv cleanup : StreamCleanup?
+  priv permit : OperationPermit?
   priv mut command_tag : String
   priv mut row_count : Int
   priv mut suspended : Bool
   priv mut database_error : DatabaseError?
   priv mut detached : Bool
+  priv mut detached_task : @async.Task[Unit]?
   priv mut summary : QuerySummary?
 }
 
@@ -40,6 +42,16 @@ pub struct RowStream {
 /// deferred cleanup, and then either raises the captured database error or
 /// returns `None`.
 pub async fn RowStream::next(self : RowStream) -> Row? {
+  self.next_inner() catch {
+    err => {
+      self.abandon_after_error()
+      raise err
+    }
+  }
+}
+
+///|
+async fn RowStream::next_inner(self : RowStream) -> Row? {
   self.assert_attached()
   match self.summary {
     Some(_) => return self.raise_terminal_error_or_none()
@@ -86,7 +98,11 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
         })
         // Temporary statements are only safe to close once this request has
         // fully relinquished ownership of the connection timeline.
-        self.run_cleanup()
+        defer self.release_permit()
+        @async.protect_from_cancel(
+          () => self.run_cleanup(),
+          resume_on_cancel=true,
+        )
         return self.raise_terminal_error_or_none()
       }
       _ =>
@@ -118,12 +134,54 @@ pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
 }
 
 ///|
+/// Require exactly one row and fully drain the stream.
+pub async fn RowStream::one(self : RowStream) -> Row {
+  let first = self.next()
+  let summary = self.finish()
+  match first {
+    Some(row) =>
+      if summary.row_count == 1 {
+        row
+      } else {
+        raise ClientError::RowCount(
+          "expected exactly one row, got \{summary.row_count.to_string()}",
+        )
+      }
+    None =>
+      raise ClientError::RowCount(
+        "expected exactly one row, got \{summary.row_count.to_string()}",
+      )
+  }
+}
+
+///|
+/// Require zero or one row and fully drain the stream.
+pub async fn RowStream::opt(self : RowStream) -> Row? {
+  let first = self.next()
+  let summary = self.finish()
+  guard summary.row_count <= 1 else {
+    raise ClientError::RowCount(
+      "expected zero or one row, got \{summary.row_count.to_string()}",
+    )
+  }
+  first
+}
+
+///|
 /// Drain the stream and return the final query summary.
 ///
 /// Use this when you only need a prefix of the rows but still want the driver
 /// to observe the terminal `ReadyForQuery`, release backpressure, and execute
 /// deferred cleanup such as closing temporary statements.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
+  if self.detached {
+    match self.detached_task {
+      Some(task) => task.wait()
+      None => ()
+    }
+    ignore(self.raise_terminal_error_or_none())
+    return self.summary.unwrap()
+  }
   for row = self.next() {
     match row {
       Some(_) => continue self.next()
@@ -142,8 +200,28 @@ pub fn RowStream::detach(self : RowStream) -> Unit {
   if self.summary is Some(_) || self.detached {
     return
   }
+  self.start_detached_drain()
+}
+
+///|
+fn RowStream::start_detached_drain(self : RowStream) -> Unit {
   self.detached = true
-  spawn_detached_drain(self.background_group, () => self.drain_discard())
+  self.detached_task = spawn_detached_drain(self.background_group, () => {
+    defer self.release_permit()
+    self.drain_discard()
+  })
+  if self.detached_task is None {
+    self.release_permit()
+  }
+}
+
+///|
+fn RowStream::abandon_after_error(self : RowStream) -> Unit {
+  if self.summary is Some(_) {
+    self.release_permit()
+  } else if !self.detached {
+    self.start_detached_drain()
+  }
 }
 
 ///|
@@ -156,9 +234,12 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
     Some(cleanup) =>
       if !cleanup.done {
         cleanup.done = true
-        // Deferred cleanup is modeled as an ordinary request so it obeys the
-        // same queueing and pipelining rules as user-visible work.
-        let responses = cleanup.client.send_request(Messages, cleanup.bytes)
+        // Deferred cleanup is modeled as another request inside the same
+        // logical-operation permit.
+        let responses = cleanup.context.client.send_request(
+          Messages,
+          cleanup.bytes,
+        )
         drain_close_response(responses)
       }
     None => ()
@@ -183,10 +264,13 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
           | ParameterDescription(_)
           | NoData
           | RowDescription(_) => continue self.responses.get()
-          DataRow(_) =>
+          DataRow(_) => {
             // Detached drains intentionally skip row decoding because the
-            // caller can no longer observe individual payloads.
+            // caller can no longer observe individual payloads. They still
+            // contribute to the final summary's observed row count.
+            self.row_count += 1
             continue self.responses.get()
+          }
           CommandComplete(body) => {
             self.command_tag = body.tag_str()
             continue self.responses.get()
@@ -207,7 +291,11 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
             })
             // Detached drains still run cleanup so temporary statements do not
             // leak on the server after the caller stops waiting.
-            self.run_cleanup()
+            defer self.release_permit()
+            @async.protect_from_cancel(
+              () => self.run_cleanup(),
+              resume_on_cancel=true,
+            )
             match self.database_error {
               Some(err) => raise ClientError::Database(err)
               None => return
@@ -220,6 +308,14 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
             )
         }
       }
+  }
+}
+
+///|
+fn RowStream::release_permit(self : RowStream) -> Unit {
+  match self.permit {
+    Some(permit) => permit.release()
+    None => ()
   }
 }
 

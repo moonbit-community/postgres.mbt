@@ -20,38 +20,11 @@ pub suberror ConfigError {
 pub suberror PoolError {
   Closed
   Timeout(TimeoutKind)
-  LeaseReleased
-  OperationInProgress
-  RowCount(String)
+  ScopeExpired
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
 
 // Types and methods
-type Client
-pub async fn Client::batch_execute(Self, String) -> Unit
-pub async fn Client::check_connection(Self) -> Unit
-pub fn Client::detach_raw(Self) -> @client.Client raise
-pub async fn Client::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
-pub async fn Client::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Client::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn Client::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn Client::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub fn Client::release(Self) -> Unit
-pub async fn[T] Client::run_cancellable(Self, async (Operation, OperationCancelToken) -> T) -> T
-pub fn Client::statement_cache(Self) -> StatementCache raise
-pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
-pub async fn[T] Client::with_copy_in(Self, String, async (CopyInSink) -> T) -> T
-pub async fn[T] Client::with_copy_out(Self, String, async (CopyOutStream) -> T) -> T
-pub async fn[T] Client::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Client::with_prepared_cached(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Client::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Client::with_prepared_typed_cached(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Client::with_simple_query(Self, String, async (SimpleQueryStream) -> T) -> T
-pub async fn[T] Client::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
-pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
-pub async fn[T] Client::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
-pub impl GenericClient for Client
-
 pub struct Config {
   user : String
   password : String?
@@ -79,21 +52,7 @@ pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self
 
 type Connector
-pub fn Connector::new(async (@client.Config) -> (@client.Client, @client.Connection)) -> Self
-
-type CopyInSink
-pub async fn CopyInSink::abort(Self, message? : String) -> Unit
-pub async fn CopyInSink::finish(Self) -> Int
-pub async fn CopyInSink::send(Self, BytesView) -> Unit
-
-pub struct CopyOutStream {
-  formats : Array[@client.WireFormat]
-  // private fields
-}
-pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
-pub fn CopyOutStream::detach(Self) -> Unit
-pub async fn CopyOutStream::finish(Self) -> Unit
-pub async fn CopyOutStream::next(Self) -> Bytes?
+pub fn Connector::new(async (@client.Config, @async.TaskGroup[Unit]) -> @client.Client) -> Self
 
 pub enum IsolationLevel {
   ReadUncommitted
@@ -111,9 +70,6 @@ pub(all) enum LoadBalanceHosts {
   Random
 } derive(Eq, @debug.Debug)
 
-type Manager
-pub fn Manager::statement_caches(Self) -> StatementCaches
-
 type Operation
 pub async fn Operation::batch_execute(Self, String) -> Unit
 pub async fn Operation::check_connection(Self) -> Unit
@@ -122,34 +78,37 @@ pub async fn Operation::query_all(Self, String, params? : Array[&@client.ToSql])
 pub async fn Operation::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Operation::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
 pub async fn Operation::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn[T] Operation::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Operation::with_prepared_cached(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Operation::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Operation::with_prepared_typed_cached(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
 
 type OperationCancelToken
 pub async fn OperationCancelToken::cancel(Self) -> Unit
 
 type Pool
+pub async fn Pool::batch_execute(Self, String) -> Unit
+pub async fn Pool::check_connection(Self) -> Unit
 pub fn Pool::close(Self) -> Unit
 pub fn Pool::config(Self) -> PoolConfig
-pub async fn Pool::get(Self) -> Client
+pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
 pub fn Pool::is_closed(Self) -> Bool
-pub fn Pool::manager(Self) -> Manager
 pub fn Pool::new(Config, @async.TaskGroup[Unit], options? : PoolOptions) -> Self raise
+pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
+pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
+pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
+pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub fn Pool::resize(Self, Int) -> Unit raise
 pub fn Pool::status(Self) -> Status
-pub async fn Pool::timeout_get(Self, Timeouts) -> Client
 pub fn Pool::timeouts(Self) -> Timeouts
-pub async fn[T] Pool::with_client(Self, async (Client) -> T) -> T
+pub async fn[T] Pool::with_session(Self, async (Session) -> T) -> T
+pub async fn[T] Pool::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
+pub impl GenericClient for Pool
 
 pub struct PoolConfig {
   max_size : Int
   timeouts : Timeouts
   queue_mode : QueueMode
   recycling_method : RecyclingMethod
+  statement_cache_capacity : Int
 } derive(Eq, @debug.Debug)
-pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod) -> Self raise
+pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int) -> Self raise
 
 pub struct PoolOptions {
   connector : Connector?
@@ -159,25 +118,16 @@ pub struct PoolOptions {
 }
 pub fn PoolOptions::new(connector? : Connector, post_create? : async (@client.Client) -> Unit, pre_recycle? : async (@client.Client) -> Unit, post_recycle? : async (@client.Client) -> Unit) -> Self
 
-pub struct Portal {
-  columns : Array[@client.Column]
-  // private fields
-}
-pub async fn Portal::close(Self) -> Unit
-pub async fn[T] Portal::with_stream(Self, Int, async (RowStream) -> T) -> T
-
 pub struct PreparedStatement {
   params : Array[@client.Type]
   columns : Array[@client.Column]
   // private fields
 }
-pub async fn PreparedStatement::bind(Self, params? : Array[&@client.ToSql]) -> Portal
-pub async fn PreparedStatement::close(Self) -> Unit
 pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql]) -> Int
 pub async fn PreparedStatement::query_all(Self, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn PreparedStatement::query_opt(Self, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn[T] PreparedStatement::with_portal(Self, params? : Array[&@client.ToSql], async (Portal) -> T) -> T
+pub async fn[T] PreparedStatement::with_stream(Self, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
 
 pub enum QueueMode {
   Fifo
@@ -197,29 +147,24 @@ pub fn RecyclingMethod::custom(String) -> Self
 pub fn RecyclingMethod::fast() -> Self
 pub fn RecyclingMethod::verified() -> Self
 
-pub struct RowStream {
-  mut columns : Array[@client.Column]
-  // private fields
-}
-pub async fn RowStream::collect(Self) -> Array[@client.Row]
-pub fn RowStream::detach(Self) -> Unit
-pub async fn RowStream::finish(Self) -> @client.QuerySummary
-pub async fn RowStream::next(Self) -> @client.Row?
-
-type SimpleQueryStream
-pub async fn SimpleQueryStream::collect(Self) -> Array[@client.SimpleQueryMessage]
-pub fn SimpleQueryStream::detach(Self) -> Unit
-pub async fn SimpleQueryStream::finish(Self) -> Unit
-pub async fn SimpleQueryStream::next(Self) -> @client.SimpleQueryMessage?
-
-type StatementCache
-pub async fn StatementCache::clear(Self) -> Unit
-pub async fn StatementCache::remove(Self, String, param_types? : Array[@client.Type]) -> Unit
-pub fn StatementCache::size(Self) -> Int raise
-
-type StatementCaches
-pub async fn StatementCaches::clear(Self) -> Unit
-pub async fn StatementCaches::remove(Self, String, param_types? : Array[@client.Type]) -> Unit
+type Session
+pub async fn Session::batch_execute(Self, String) -> Unit
+pub async fn Session::check_connection(Self) -> Unit
+pub async fn Session::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+pub async fn Session::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
+pub async fn Session::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
+pub async fn Session::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
+pub async fn Session::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
+pub async fn[T] Session::run_cancellable(Self, async (Operation, OperationCancelToken) -> T) -> T
+pub async fn[T] Session::with_copy_in(Self, String, async (@client.CopyInSink) -> T) -> T
+pub async fn[T] Session::with_copy_out(Self, String, async (@client.CopyOutStream) -> T) -> T
+pub async fn[T] Session::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
+pub async fn[T] Session::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
+pub async fn[T] Session::with_simple_query(Self, String, async (@client.SimpleQueryStream) -> T) -> T
+pub async fn[T] Session::with_stream(Self, String, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
+pub async fn[T] Session::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
+pub async fn[T] Session::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
+pub impl GenericClient for Session
 
 pub struct Status {
   size : Int
@@ -259,17 +204,12 @@ pub async fn Transaction::query_one(Self, String, params? : Array[&@client.ToSql
 pub async fn Transaction::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
 pub async fn Transaction::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Transaction::rollback(Self) -> Unit
-pub async fn Transaction::savepoint(Self, String) -> Self
-pub fn Transaction::statement_cache(Self) -> StatementCache raise
-pub async fn Transaction::transaction(Self) -> Self
 pub async fn[T] Transaction::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Transaction::with_prepared_cached(Self, String, async (PreparedStatement) -> T) -> T
 pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Transaction::with_prepared_typed_cached(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
 pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T
-pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
 pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
-pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
 pub impl GenericClient for Transaction
 
 pub struct TransactionOptions {
@@ -291,4 +231,3 @@ pub(open) trait GenericClient {
   async fn batch_execute(Self, String) -> Unit
   async fn check_connection(Self) -> Unit
 }
-

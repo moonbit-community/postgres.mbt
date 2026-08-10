@@ -54,4 +54,3 @@ pub fn CopyData::write(Self, @buffer.Buffer) -> Unit
 // Type aliases
 
 // Traits
-
