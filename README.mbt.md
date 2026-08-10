@@ -4,12 +4,32 @@ A secure, easy-to-use PostgreSQL client library for MoonBit with an included con
 
 ### Packages
 
-- `moonbit-community/postgres/client`: low-level PostgreSQL client
-- `moonbit-community/postgres/pgpool`: single-event-loop connection pool built on top of `client`
+- `moonbit-community/postgres/client`: one auto-driven, FIFO single-flight
+  PostgreSQL session
+- `moonbit-community/postgres/pgpool`: a connection pool that provides
+  concurrency across independent sessions
 
-The `pgpool` package is meant for connection reuse and PostgreSQL session
-isolation. It is useful when multiple async tasks share one MoonBit event loop
-but should not all queue behind the same database connection.
+The `client`, `pgpool`, and PostgreSQL integration-test packages support the
+`native` and classic `wasm` targets. They intentionally exclude WasmGC because
+the socket/TLS runtime used by live PostgreSQL connections is not available
+there. The packages under `protocol` remain backend-independent.
+
+Calls sharing one `client.Client` execute one complete logical operation at a
+time. Streams and transactions retain the session until they finish. Use
+`pgpool.Pool` when multiple async tasks should run database work concurrently;
+ordinary pool methods checkout and return sessions automatically, while
+`Pool::with_session` provides callback-scoped session affinity.
+
+Starting with `0.0.8`, `client.connect(config, group)` returns a `Client` and
+starts its driver automatically. The old public `Connection` handle,
+single-connection pipelining, manual pool leases, and public statement-cache
+manager APIs have been removed.
+
+`Client::close()` remains graceful. `Client::abort()` is the synchronous,
+idempotent hard-stop for deadlines and emergency teardown: it immediately marks
+the runtime closed, asks the driver to discard the physical connection, and
+fails active or queued work with `ClientError::Closed("connection aborted")`.
+The driver completes physical transport cleanup while cancellation unwinds.
 
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)
