@@ -10,13 +10,14 @@
 /// it, call `detach()` before dropping the handle. Otherwise later requests on
 /// the same connection can remain blocked until the unfinished response is
 /// drained.
-pub fn Client::simple_query(
+pub async fn Client::simple_query(
   self : Client,
   sql : String,
-) -> SimpleQueryStream raise {
-  ensure_open(self.shared)
+) -> SimpleQueryStream {
+  let (_context, permit) = self.begin_stream_operation()
+  errdefer permit.release()
   let responses = self.send_request(Messages, simple_query_bytes(sql))
-  new_simple_query_stream(self.shared.background_group, responses)
+  new_simple_query_stream(self.shared.background_group, responses, Some(permit))
 }
 
 ///|
@@ -25,8 +26,12 @@ pub fn Client::simple_query(
 /// This is the simplest helper for commands such as schema setup or session
 /// configuration where only protocol completion matters.
 pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
-  ensure_open(self.shared)
-  let responses = self.send_request(Messages, simple_query_bytes(sql))
+  self.run_operation(context => context.batch_execute(sql))
+}
+
+///|
+async fn OpContext::batch_execute(self : OpContext, sql : String) -> Unit {
+  let responses = self.client.send_request(Messages, simple_query_bytes(sql))
   drain_simple_query(responses)
 }
 
@@ -46,12 +51,20 @@ pub async fn Client::prepare_typed(
   sql : String,
   types : Array[Type],
 ) -> Statement {
-  ensure_open(self.shared)
-  let name = next_name(self.shared, "s")
+  self.run_operation(context => context.prepare_typed(sql, types))
+}
+
+///|
+async fn OpContext::prepare_typed(
+  self : OpContext,
+  sql : String,
+  types : Array[Type],
+) -> Statement {
+  let name = next_name(self.client.shared, "s")
   let bytes = prepare_bytes(name[:], sql, types)
-  let responses = self.send_request(Messages, bytes)
-  let (params, columns) = read_prepare_response(self.shared, responses)
-  { client: self, name, params, columns, closed: @ref.new(false), }
+  let responses = self.client.send_request(Messages, bytes)
+  let (params, columns) = read_prepare_response(self, responses)
+  { client: self.client, name, params, columns, closed: @ref.new(false), }
 }
 
 ///|
@@ -63,18 +76,29 @@ pub async fn Statement::close(self : Statement) -> Unit {
   if self.closed.val {
     return
   }
+  self.client.run_operation(context => context.close_statement(self))
+}
+
+///|
+async fn OpContext::close_statement(
+  self : OpContext,
+  statement : Statement,
+) -> Unit {
+  if statement.closed.val {
+    return
+  }
   let responses = self.client.send_request(
     Messages,
-    close_bytes(b'S', self.name[:]),
+    close_bytes(b'S', statement.name[:]),
   )
   drain_close_response(responses)
-  self.closed.val = true
+  statement.closed.val = true
 }
 
 ///|
 /// Prepare and execute a query, returning rows through an incremental stream.
 ///
-/// This helper uses a temporary unnamed prepared statement under the hood so it
+/// This helper uses a temporary named prepared statement under the hood so it
 /// can fetch resolved parameter and column metadata before execution. The
 /// temporary statement is closed automatically once the returned stream is fully
 /// drained or `finish` is called.
@@ -88,18 +112,36 @@ pub async fn Client::query(
   sql : String,
   params? : Array[&ToSql] = [],
 ) -> RowStream {
-  ensure_open(self.shared)
-  let name = next_name(self.shared, "q")
+  let (context, permit) = self.begin_stream_operation()
+  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  errdefer (match completed.val {
+    Some(stream) => stream.detach()
+    None => permit.release()
+  })
+  let stream = @async.protect_from_cancel(() => {
+    let stream = context.query(sql, params, permit~)
+    completed.val = Some(stream)
+    stream
+  })
+  check_pending_cancellation()
+  stream
+}
+
+///|
+async fn OpContext::query(
+  self : OpContext,
+  sql : String,
+  params : Array[&ToSql],
+  permit? : OperationPermit,
+) -> RowStream {
+  let name = next_name(self.client.shared, "q")
   // Use a temporary named statement so the driver can learn PostgreSQL's
   // resolved parameter and result metadata before execution starts.
-  let prepare_responses = self.send_request(
+  let prepare_responses = self.client.send_request(
     Messages,
     prepare_bytes(name[:], sql, []),
   )
-  let (param_types, columns) = read_prepare_response(
-    self.shared,
-    prepare_responses,
-  )
+  let (param_types, columns) = read_prepare_response(self, prepare_responses)
   guard param_types.length() == params.length() else {
     // Preparation already created server-side state, so close it even though
     // execution never begins.
@@ -108,15 +150,16 @@ pub async fn Client::query(
       "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
     )
   }
-  let responses = self.send_request(
+  let responses = self.client.send_request(
     Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
   // Cleanup is deferred onto the returned stream because closing the temporary
   // statement early would interleave a second request before this one finishes.
   new_row_stream(
-    self.shared.background_group,
+    self.client.shared.background_group,
     responses,
+    permit,
     initial_columns=columns,
     cleanup=Some(make_statement_cleanup(self, name)),
   )
@@ -132,25 +175,7 @@ pub async fn Client::query_one(
   sql : String,
   params? : Array[&ToSql] = [],
 ) -> Row {
-  let stream = self.query(sql, params~)
-  let first = stream.next()
-  // Always drain to the terminal ready state so temporary statement cleanup and
-  // row-count validation see the full server outcome.
-  let summary = stream.finish()
-  match first {
-    Some(row) =>
-      if summary.row_count == 1 {
-        row
-      } else {
-        raise ClientError::RowCount(
-          "expected exactly one row, got \{summary.row_count.to_string()}",
-        )
-      }
-    None =>
-      raise ClientError::RowCount(
-        "expected exactly one row, got \{summary.row_count.to_string()}",
-      )
-  }
+  self.query(sql, params~).one()
 }
 
 ///|
@@ -160,17 +185,7 @@ pub async fn Client::query_opt(
   sql : String,
   params? : Array[&ToSql] = [],
 ) -> Row? {
-  let stream = self.query(sql, params~)
-  let first = stream.next()
-  // `query_opt` shares the same full-drain requirement as `query_one`; without
-  // it, the temporary statement and final row count would remain unresolved.
-  let summary = stream.finish()
-  guard summary.row_count <= 1 else {
-    raise ClientError::RowCount(
-      "expected zero or one row, got \{summary.row_count.to_string()}",
-    )
-  }
-  first
+  self.query(sql, params~).opt()
 }
 
 ///|
@@ -184,39 +199,51 @@ pub async fn Client::query_typed(
   param_types : Array[Type],
   params? : Array[&ToSql] = [],
 ) -> RowStream {
-  ensure_open(self.shared)
+  let (context, permit) = self.begin_stream_operation()
+  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  errdefer (match completed.val {
+    Some(stream) => stream.detach()
+    None => permit.release()
+  })
+  let stream = @async.protect_from_cancel(() => {
+    let stream = context.query_typed(sql, param_types, params, permit~)
+    completed.val = Some(stream)
+    stream
+  })
+  check_pending_cancellation()
+  stream
+}
+
+///|
+async fn OpContext::query_typed(
+  self : OpContext,
+  sql : String,
+  param_types : Array[Type],
+  params : Array[&ToSql],
+  permit? : OperationPermit,
+) -> RowStream {
   guard param_types.length() == params.length() else {
     raise ClientError::Encode(
       "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
     )
   }
-  let name = next_name(self.shared, "q")
-  let prepare_responses = self.send_request(
+  let name = next_name(self.client.shared, "q")
+  let prepare_responses = self.client.send_request(
     Messages,
     prepare_bytes(name[:], sql, param_types),
   )
-  let (_, columns) = read_prepare_response(self.shared, prepare_responses)
-  let responses = self.send_request(
+  let (_, columns) = read_prepare_response(self, prepare_responses)
+  let responses = self.client.send_request(
     Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
   new_row_stream(
-    self.shared.background_group,
+    self.client.shared.background_group,
     responses,
+    permit,
     initial_columns=columns,
     cleanup=Some(make_statement_cleanup(self, name)),
   )
-}
-
-///|
-/// Backward-compatible alias for `query_typed`.
-pub async fn Client::query_typed_raw(
-  self : Client,
-  sql : String,
-  param_types : Array[Type],
-  params? : Array[&ToSql] = [],
-) -> RowStream {
-  self.query_typed(sql, param_types, params~)
 }
 
 ///|
@@ -224,12 +251,23 @@ pub async fn Client::query_typed_raw(
 ///
 /// Unlike `query`, this reuses a named prepared statement and therefore does
 /// not attach deferred cleanup to the returned stream.
-pub fn Client::query_statement(
+pub async fn Client::query_statement(
   self : Client,
   statement : Statement,
   params? : Array[&ToSql] = [],
+) -> RowStream {
+  let (context, permit) = self.begin_stream_operation()
+  errdefer permit.release()
+  context.query_statement(statement, params, permit~)
+}
+
+///|
+fn OpContext::query_statement(
+  self : OpContext,
+  statement : Statement,
+  params : Array[&ToSql],
+  permit? : OperationPermit,
 ) -> RowStream raise {
-  ensure_open(self.shared)
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -238,13 +276,14 @@ pub fn Client::query_statement(
       "parameter count mismatch: expected \{statement.params.length().to_string()}, got \{params.length().to_string()}",
     )
   }
-  let responses = self.send_request(
+  let responses = self.client.send_request(
     Messages,
     execute_statement_bytes(statement.name[:], statement.params, params),
   )
   new_row_stream(
-    self.shared.background_group,
+    self.client.shared.background_group,
     responses,
+    permit,
     initial_columns=statement.columns,
   )
 }
@@ -262,16 +301,23 @@ pub async fn Client::execute(
   sql : String,
   params? : Array[&ToSql] = [],
 ) -> Int {
-  let statement = self.prepare(sql)
-  // Route through the named-statement path so success and failure share one
-  // close policy and one row-count extraction path.
+  self.run_operation(context => context.execute(sql, params))
+}
+
+///|
+async fn OpContext::execute(
+  self : OpContext,
+  sql : String,
+  params : Array[&ToSql],
+) -> Int {
+  let statement = self.prepare_typed(sql, [])
   let rows = {
     errdefer @async.protect_from_cancel(() => {
-      let _ = statement.close() catch { _ => () }
+      let _ = self.close_statement(statement) catch { _ => () }
     })
-    self.execute_raw(statement, params~)
+    self.execute_raw(statement, params)
   }
-  statement.close()
+  self.close_statement(statement)
   rows
 }
 
@@ -287,11 +333,26 @@ pub async fn Client::execute_raw(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Int {
-  let stream = self.query_statement(statement, params~)
-  // Release response-queue backpressure before the caller tries to close a
-  // temporary statement. Cleanup must preserve the original error or cancellation.
+  self.run_operation(context => context.execute_raw(statement, params))
+}
+
+///|
+async fn OpContext::execute_raw(
+  self : OpContext,
+  statement : Statement,
+  params : Array[&ToSql],
+) -> Int {
+  let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
-    let _ = stream.drain_discard() catch { _ => () }
+    // A decoding failure may already have started a detached drain.
+    match stream.detached_task {
+      Some(task) => {
+        let _ = ignore(task.wait()) catch { _ => () }
+      }
+      None => {
+        let _ = stream.drain_discard() catch { _ => () }
+      }
+    }
   })
   let summary = stream.finish()
   rows_affected(summary.command_tag)
@@ -307,7 +368,15 @@ pub async fn Client::bind(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Portal {
-  ensure_open(self.shared)
+  self.run_operation(context => context.bind(statement, params))
+}
+
+///|
+async fn OpContext::bind(
+  self : OpContext,
+  statement : Statement,
+  params : Array[&ToSql],
+) -> Portal {
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -316,8 +385,8 @@ pub async fn Client::bind(
       "parameter count mismatch: expected \{statement.params.length().to_string()}, got \{params.length().to_string()}",
     )
   }
-  let name = next_name(self.shared, "p")
-  let responses = self.send_request(
+  let name = next_name(self.client.shared, "p")
+  let responses = self.client.send_request(
     Messages,
     bind_portal_bytes(name[:], statement.name[:], statement.params, params),
   )
@@ -342,17 +411,21 @@ pub async fn Client::bind(
           Some(err) => raise ClientError::Database(err)
           None => {
             let portal = Portal::{
-              client: self,
+              client: self.client,
               name,
               // Resolve column OIDs lazily here so callers still get enriched
               // type descriptors even when portals are bound later.
-              columns: resolve_columns(self.shared, columns),
+              columns: resolve_columns(self, columns),
               closed: @ref.new(false),
             }
             break portal
           }
         }
-      _ => raise ClientError::UnexpectedMessage("unexpected bind response")
+      _ =>
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected bind response"),
+        )
     }
   }
 }
@@ -363,12 +436,20 @@ pub async fn Portal::close(self : Portal) -> Unit {
   if self.closed.val {
     return
   }
+  self.client.run_operation(context => context.close_portal(self))
+}
+
+///|
+async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
+  if portal.closed.val {
+    return
+  }
   let responses = self.client.send_request(
     Messages,
-    close_bytes(b'P', self.name[:]),
+    close_bytes(b'P', portal.name[:]),
   )
   drain_close_response(responses)
-  self.closed.val = true
+  portal.closed.val = true
 }
 
 ///|
@@ -376,22 +457,34 @@ pub async fn Portal::close(self : Portal) -> Unit {
 ///
 /// When PostgreSQL suspends the portal because the limit was reached, the
 /// returned `RowStream` reports that via `QuerySummary.suspended`.
-pub fn Client::query_portal(
+pub async fn Client::query_portal(
   self : Client,
   portal : Portal,
   max_rows : Int,
+) -> RowStream {
+  let (context, permit) = self.begin_stream_operation()
+  errdefer permit.release()
+  context.query_portal(portal, max_rows, permit~)
+}
+
+///|
+fn OpContext::query_portal(
+  self : OpContext,
+  portal : Portal,
+  max_rows : Int,
+  permit? : OperationPermit,
 ) -> RowStream raise {
-  ensure_open(self.shared)
   guard !portal.closed.val else {
     raise ClientError::Closed("portal already closed")
   }
-  let responses = self.send_request(
+  let responses = self.client.send_request(
     Messages,
     execute_portal_bytes(portal.name[:], max_rows),
   )
   new_row_stream(
-    self.shared.background_group,
+    self.client.shared.background_group,
     responses,
+    permit,
     initial_columns=portal.columns,
   )
 }

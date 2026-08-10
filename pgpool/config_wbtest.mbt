@@ -181,6 +181,7 @@ async test "pool new updates status and config without connecting" {
         ),
         queue_mode=QueueMode::lifo(),
         recycling_method=RecyclingMethod::verified(),
+        statement_cache_capacity=7,
       ),
     )
     let pool = Pool::new(config, group)
@@ -190,9 +191,108 @@ async test "pool new updates status and config without connecting" {
     @debug.assert_eq(timeouts.create_ms, Some(22))
     @debug.assert_eq(timeouts.recycle_ms, Some(33))
     assert_true(pool.config().recycling_method == RecyclingMethod::verified())
+    assert_eq(pool.config().statement_cache_capacity, 7)
     assert_false(pool.is_closed())
-    pool.manager().statement_caches().clear()
     pool.close()
     assert_true(pool.is_closed())
   })
+}
+
+///|
+async test "pool resize shrinks unopened checkout capacity" {
+  @async.with_task_group(group => {
+    let pool = Pool::new(
+      Config::new(
+        "db.example",
+        user="moon",
+        dbname="moondb",
+        application_name="pool-resize",
+        pool=PoolConfig::new(3),
+      ),
+      group,
+    )
+    pool.resize(1)
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
+    pool.close()
+  })
+}
+
+///|
+async test "pool resize debt prevents capacity from reappearing during expansion" {
+  @async.with_task_group(group => {
+    let pool = Pool::new(
+      Config::new(
+        "db.example",
+        user="moon",
+        dbname="moondb",
+        application_name="pool-resize-debt",
+        pool=PoolConfig::new(3),
+      ),
+      group,
+    )
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is Some(_))
+
+    pool.resize(1)
+    assert_eq(pool.shared.resize_debt.val, 2)
+    pool.resize(2)
+    assert_eq(pool.shared.resize_debt.val, 1)
+    assert_true(pool.shared.slots.try_get() is None)
+
+    release_capacity(pool.shared)
+    assert_eq(pool.shared.resize_debt.val, 0)
+    assert_true(pool.shared.slots.try_get() is None)
+    release_capacity(pool.shared)
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
+    release_capacity(pool.shared)
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
+    pool.close()
+  })
+}
+
+///|
+async test "pool expansion adds only capacity beyond resize debt" {
+  @async.with_task_group(group => {
+    let pool = Pool::new(
+      Config::new(
+        "db.example",
+        user="moon",
+        dbname="moondb",
+        application_name="pool-resize-expand-beyond-debt",
+        pool=PoolConfig::new(3),
+      ),
+      group,
+    )
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is Some(_))
+
+    pool.resize(1)
+    assert_eq(pool.shared.resize_debt.val, 2)
+    pool.resize(4)
+    assert_eq(pool.shared.resize_debt.val, 0)
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
+    pool.close()
+  })
+}
+
+///|
+test "pool config validates statement cache capacity" {
+  assert_eq(PoolConfig::new(1).statement_cache_capacity, 100)
+  assert_eq(
+    PoolConfig::new(1, statement_cache_capacity=0).statement_cache_capacity,
+    0,
+  )
+  let error = @test.expect_error(() => {
+    ignore(PoolConfig::new(1, statement_cache_capacity=-1))
+  })
+  guard error is PoolError::InvalidConfig(message) else {
+    fail("expected invalid statement cache capacity")
+  }
+  assert_eq(message, "statement_cache_capacity must be non-negative")
 }

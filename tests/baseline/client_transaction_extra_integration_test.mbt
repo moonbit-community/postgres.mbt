@@ -13,13 +13,13 @@ fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int] raise {
 async test "integration transaction options savepoints and raw statement helpers" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-tx-extra",
       ),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     let tx = client.transaction(
       options=@client.TransactionOptions::new(
@@ -82,7 +82,7 @@ async test "integration transaction options savepoints and raw statement helpers
       transaction_row_values(nested.query_portal(portal, 8).collect()),
       [3],
     )
-    portal.close()
+    nested.close_portal(portal)
     nested.commit()
 
     let isolation : String = tx.query("show transaction_isolation").collect()[0].get_name(
@@ -106,9 +106,9 @@ async test "integration transaction options savepoints and raw statement helpers
       [1, 3],
     )
 
-    insert_statement.close()
-    typed_statement.close()
-    select_statement.close()
+    tx.close_statement(insert_statement)
+    tx.close_statement(typed_statement)
+    tx.close_statement(select_statement)
     tx.commit()
 
     client.check_connection()
@@ -136,13 +136,13 @@ async test "integration transaction options savepoints and raw statement helpers
 async test "integration transaction default path and named savepoint commit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-tx-default",
       ),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     let tx = client.transaction()
     tx.batch_execute("create temp table moon_client_tx_default(value int4)")
@@ -194,6 +194,38 @@ async test "integration transaction default path and named savepoint commit" {
       [1, 2],
     )
 
+    client.close()
+  })
+}
+
+///|
+/// A transaction owns the client's single-flight permit until commit or
+/// rollback, so calls through another Client clone cannot interleave with it.
+async test "integration transaction blocks outer client FIFO" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let client = @client.connect(
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-client-tx-single-flight",
+      ),
+      group,
+    )
+    let tx = client.transaction()
+    let waiter = group.spawn(no_wait=true, () => {
+      client.query_one("select 17::int4 as value").get_name("value")
+    })
+
+    assert_task_stays_pending(
+      waiter, "expected outer Client operation to wait for transaction completion",
+    )
+    tx.commit()
+    assert_eq(
+      wait_for_task_or_fail(
+        waiter, "expected outer Client operation to resume after transaction commit",
+      ),
+      17,
+    )
     client.close()
   })
 }

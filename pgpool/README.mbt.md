@@ -35,7 +35,7 @@ async fn _pool_quick_start(
     )
     let pool = Pool::new(config, group)
 
-    let value : Int = pool.with_client(client => {
+    let value : Int = pool.with_session(client => {
       client.query_one("select 1::int4 as value").get_name("value")
     })
     ignore(value)
@@ -59,7 +59,7 @@ tied to that one callback:
 async fn _pool_cancellable_example(pool : Pool) -> Unit {
   @async.with_task_group(group => {
     ignore(
-      pool.with_client(client => {
+      pool.with_session(client => {
         client.run_cancellable((op, token) => {
           group.spawn_bg(no_wait=true, () => {
             @async.sleep(50)
@@ -267,8 +267,8 @@ cached statement for the current callback:
 ```mbt check
 ///|
 async fn _statement_cache_example(pool : Pool) -> Unit {
-  pool.with_client(client => {
-    client.with_prepared_cached("select $1::int4 as value", prepared => {
+  pool.with_session(client => {
+    client.with_prepared("select $1::int4 as value", prepared => {
       let value = 7
       let params : Array[&@client.ToSql] = [value as &@client.ToSql]
       let row = prepared.query_one(params~)
@@ -277,11 +277,6 @@ async fn _statement_cache_example(pool : Pool) -> Unit {
     })
   })
   |> ignore
-
-  let cache_size = pool.with_client(client => client.statement_cache().size())
-  ignore(cache_size)
-
-  pool.manager().statement_caches().clear()
 }
 ```
 
@@ -307,12 +302,13 @@ After detaching:
 
 ```mbt check
 ///|
-async fn _detach_raw_example(pool : Pool) -> Unit {
-  let lease = pool.get()
-  let raw = lease.detach_raw()
-  let value : Int = raw.query_one("select 1::int4 as value").get_name("value")
-  ignore(value)
-  raw.close()
+async fn _session_scope_example(pool : Pool) -> Unit {
+  pool.with_session(session => {
+    let value : Int = session
+      .query_one("select 1::int4 as value")
+      .get_name("value")
+    ignore(value)
+  })
 }
 ```
 
