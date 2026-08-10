@@ -1,17 +1,20 @@
 ///|
-async fn connection_test_pair() -> (Client, Connection, @socket.Tcp) {
+async fn connection_test_pair(
+  group : @async.TaskGroup[Unit],
+) -> (Client, Driver, @socket.Tcp) {
   let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
   defer server.close()
   let socket = @socket.Tcp::connect(server.addr)
   let (backend, _) = server.accept()
   let shared = make_shared()
+  shared.background_group.val = Some(group)
   ({ shared, }, { shared, stream: Plain(socket), }, backend)
 }
 
 ///|
 async test "connection cancellation closes idle runtime before joining protected listeners" {
   @async.with_task_group(group => {
-    let (client, connection, backend) = connection_test_pair()
+    let (client, connection, backend) = connection_test_pair(group)
     defer backend.close()
     defer connection.stream.close()
     defer close_runtime(client.shared)
@@ -28,7 +31,7 @@ async test "connection cancellation closes idle runtime before joining protected
         .spawn(no_wait=true, allow_failure=true, () => {
           @async.protect_from_cancel(() => {
             started.put(())
-            assert_true(connection.next_message() is None)
+            assert_true(client.next_message() is None)
           })
         })
       started.get()
@@ -53,7 +56,7 @@ async test "connection cancellation closes idle runtime before joining protected
 ///|
 async test "connection cancellation closes pending and queued COPY requests" {
   @async.with_task_group(group => {
-    let (client, connection, backend) = connection_test_pair()
+    let (client, connection, backend) = connection_test_pair(group)
     defer backend.close()
     defer connection.stream.close()
     defer close_runtime(client.shared)
@@ -68,7 +71,7 @@ async test "connection cancellation closes pending and queued COPY requests" {
       let queued = client.send_request_with_copy(sync_bytes(), queued_input)
       defer queued.close(clear=true)
       defer queued_input.close(clear=true)
-      // The pending COPY request is a barrier, so this request stays queued.
+      // The driver drains its active request before taking this queued request.
       assert_true(queued_input.try_put(Finish))
       let started : @async.Queue[Unit] = Queue(kind=Unbounded)
       let pending_waiter = client.shared.background_group.val
@@ -110,7 +113,7 @@ async test "connection cancellation closes pending and queued COPY requests" {
         is ClientError::Closed(_),
       )
       assert_true(client.is_closed())
-      assert_true(connection.next_message() is None)
+      assert_true(client.next_message() is None)
       assert_true(backend.read_some() is None)
     })
   })
@@ -120,7 +123,7 @@ async test "connection cancellation closes pending and queued COPY requests" {
 async test "connection write failures retain requests and preserve their error" {
   for kind in [Messages, CopyIn, Terminate] {
     @async.with_task_group(group => {
-      let (client, connection, backend) = connection_test_pair()
+      let (client, connection, backend) = connection_test_pair(group)
       defer backend.close()
       connection.stream.close()
       let responses : @async.Queue[@backend.Message] = Queue(kind=Blocking(8))
@@ -130,6 +133,7 @@ async test "connection write failures retain requests and preserve their error" 
         bytes: sync_bytes(),
         responses,
         copy_input: Some(input),
+        copy_error: Some(@ref.new(None)),
       }
       assert_true(client.shared.requests.try_put(request))
       let queued = client.send_request(Messages, sync_bytes())
@@ -152,7 +156,7 @@ async test "connection write failures retain requests and preserve their error" 
           error.to_string(),
         )
         assert_true(client.is_closed())
-        assert_true(connection.next_message() is None)
+        assert_true(client.next_message() is None)
       })
     })
   }
@@ -161,7 +165,7 @@ async test "connection write failures retain requests and preserve their error" 
 ///|
 async test "connection Terminate closes its response queue and socket" {
   @async.with_task_group(group => {
-    let (client, connection, backend) = connection_test_pair()
+    let (client, connection, backend) = connection_test_pair(group)
     defer backend.close()
     defer connection.stream.close()
     let responses = client.send_request(Terminate, terminate_bytes())

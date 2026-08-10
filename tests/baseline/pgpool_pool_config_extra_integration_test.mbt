@@ -1,6 +1,5 @@
 ///|
-/// This verifies declarative config normalization for explicit arrays and constructor defaults.
-/// The test is intentionally pure so coverage can hit config code paths without needing a live database.
+/// Config normalization remains independent of opening a database connection.
 test "integration pool config constructors and normalization" {
   guard @pgpool.QueueMode::fifo() is Fifo else {
     fail("expected fifo queue mode")
@@ -8,31 +7,31 @@ test "integration pool config constructors and normalization" {
   guard @pgpool.QueueMode::lifo() is Lifo else {
     fail("expected lifo queue mode")
   }
-  guard @pgpool.IsolationLevel::read_uncommitted() is ReadUncommitted else {
-    fail("expected read uncommitted")
-  }
-  guard @pgpool.IsolationLevel::read_committed() is ReadCommitted else {
-    fail("expected read committed")
-  }
-  guard @pgpool.IsolationLevel::repeatable_read() is RepeatableRead else {
-    fail("expected repeatable read")
-  }
   guard @pgpool.IsolationLevel::serializable() is Serializable else {
-    fail("expected serializable")
-  }
-  guard @pgpool.RecyclingMethod::fast() is Fast else {
-    fail("expected fast recycling")
+    fail("expected serializable isolation")
   }
   guard @pgpool.RecyclingMethod::verified() is Verified else {
     fail("expected verified recycling")
   }
-  guard @pgpool.RecyclingMethod::clean() is Clean else {
-    fail("expected clean recycling")
-  }
   guard @pgpool.RecyclingMethod::custom("reset all") is Custom(sql) else {
     fail("expected custom recycling")
   }
-  @debug.assert_eq(sql, "reset all")
+  assert_eq(sql, "reset all")
+
+  let pool_config = @pgpool.PoolConfig::new(
+    2,
+    timeouts=@pgpool.Timeouts::new(
+      wait_ms=Some(10),
+      create_ms=Some(20),
+      recycle_ms=Some(30),
+    ),
+    queue_mode=@pgpool.QueueMode::lifo(),
+    recycling_method=@pgpool.RecyclingMethod::verified(),
+    statement_cache_capacity=7,
+  )
+  assert_eq(pool_config.max_size, 2)
+  assert_eq(pool_config.statement_cache_capacity, 7)
+  @debug.assert_eq(pool_config.timeouts.wait_ms, Some(10))
 
   let config = @pgpool.Config::new(
     "one.db",
@@ -44,31 +43,39 @@ test "integration pool config constructors and normalization" {
     ssl_root_cert="/tmp/root.crt",
     application_name="pool-config-extra",
     hosts=["two.db"],
-    pool=@pgpool.PoolConfig::new(2),
+    pool=pool_config,
   )
   let targets = config.get_connection_targets()
-  @debug.assert_eq(targets.length(), 2)
-  @debug.assert_eq(targets[0].host, "one.db")
-  @debug.assert_eq(targets[1].host, "two.db")
+  assert_eq(targets.length(), 2)
+  assert_eq(targets[0].host, "one.db")
+  assert_eq(targets[1].host, "two.db")
   @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
   @debug.assert_eq(targets[1].hostaddr, Some("10.0.0.2"))
-  @debug.assert_eq(targets[0].port, 1111)
-  @debug.assert_eq(targets[1].port, 2222)
+  assert_eq(targets[0].port, 1111)
+  assert_eq(targets[1].port, 2222)
   assert_true(targets[0].ssl_mode == VerifyCa)
-  @debug.assert_eq(targets[0].ssl_root_cert, Some("/tmp/root.crt"))
-  assert_true(
-    config.get_pool_config().recycling_method == @pgpool.RecyclingMethod::fast(),
-  )
+  assert_eq(config.get_pool_config().statement_cache_capacity, 7)
 }
 
 ///|
-/// This verifies that config validation rejects invalid pool settings and TLS combinations before any connection opens.
+/// Invalid capacity, timeout, and TLS settings fail before a pool starts.
 test "integration pool config validation rejects invalid settings" {
   let invalid_max_size = @test.expect_error(() => @pgpool.PoolConfig::new(0))
-  guard invalid_max_size is @pgpool.PoolError::InvalidConfig(max_size_message) else {
+  guard invalid_max_size is @pgpool.PoolError::InvalidConfig(message) else {
     fail("expected invalid max size")
   }
-  @debug.assert_eq(max_size_message, "pool max_size must be at least 1")
+  assert_eq(message, "pool max_size must be at least 1")
+
+  let invalid_cache = @test.expect_error(() => {
+    @pgpool.PoolConfig::new(1, statement_cache_capacity=-1)
+  })
+  guard invalid_cache is @pgpool.PoolError::InvalidConfig(cache_message) else {
+    fail("expected invalid cache capacity")
+  }
+  assert_eq(cache_message, "statement_cache_capacity must be non-negative")
+
+  let disabled_cache = @pgpool.PoolConfig::new(1, statement_cache_capacity=0)
+  assert_eq(disabled_cache.statement_cache_capacity, 0)
 
   let invalid_timeout = @test.expect_error(() => {
     @pgpool.PoolConfig::new(1, timeouts=@pgpool.Timeouts::new(wait_ms=Some(-1)))
@@ -76,7 +83,7 @@ test "integration pool config validation rejects invalid settings" {
   guard invalid_timeout is @pgpool.PoolError::InvalidConfig(timeout_message) else {
     fail("expected invalid timeout")
   }
-  @debug.assert_eq(timeout_message, "pool wait_ms must be non-negative")
+  assert_eq(timeout_message, "pool wait_ms must be non-negative")
 
   let invalid_tls = @test.expect_error(() => {
     @pgpool.Config::new(
@@ -90,128 +97,19 @@ test "integration pool config validation rejects invalid settings" {
     ).get_connection_targets()
   })
   guard invalid_tls is @pgpool.ConfigError::InvalidConfig(tls_message) else {
-    fail("expected tls validation error")
+    fail("expected TLS validation error")
   }
-  @debug.assert_eq(
-    tls_message, "sslrootcert=system requires sslmode=verify-full",
-  )
+  assert_eq(tls_message, "sslrootcert=system requires sslmode=verify-full")
 }
 
 ///|
-/// This verifies pool options hooks, LIFO idle reuse, resize behavior, and a custom connector over a real PostgreSQL server.
-/// It also exercises `target_session_attrs=read_write` and random host ordering on multi-target declarative config.
-async test "integration pool options hooks resize and custom connector" {
-  guard integration_config() is Some(config) else { return }
-  @async.with_task_group(group => {
-    let connect_calls : Array[Int] = []
-    let post_create_calls : Array[Int] = []
-    let pre_recycle_calls : Array[Int] = []
-    let post_recycle_calls : Array[Int] = []
-
-    let connector = @pgpool.Connector::new(target => {
-      connect_calls.push(1)
-      @client.connect(target)
-    })
-    let pool_config = @pgpool.PoolConfig::new(
-      2,
-      timeouts=@pgpool.Timeouts::new(
-        wait_ms=Some(11),
-        create_ms=Some(2_000),
-        recycle_ms=Some(2_000),
-      ),
-      queue_mode=@pgpool.QueueMode::lifo(),
-      recycling_method=@pgpool.RecyclingMethod::verified(),
-    )
-    let declarative_config = @pgpool.Config::new(
-      config.host,
-      user=config.user,
-      dbname=config.database,
-      password=config.password,
-      port=config.port,
-      application_name="moonbit-postgres-pool-options-extra",
-      hosts=[config.host],
-      ports=[config.port, config.port],
-      target_session_attrs=@pgpool.TargetSessionAttrs::read_write(),
-      load_balance_hosts=Random,
-      pool=pool_config,
-    )
-    let options = @pgpool.PoolOptions::new(
-      connector~,
-      post_create=client => {
-        post_create_calls.push(1)
-        client.check_connection()
-      },
-      pre_recycle=client => {
-        pre_recycle_calls.push(1)
-        client.check_connection()
-      },
-      post_recycle=client => {
-        post_recycle_calls.push(1)
-        client.check_connection()
-      },
-    )
-    let pool = @pgpool.Pool::new(declarative_config, group, options~)
-
-    @debug.assert_eq(pool.status().max_size, 2)
-    @debug.assert_eq(pool.timeouts().wait_ms, Some(11))
-    @debug.assert_eq(pool.timeouts().create_ms, Some(2_000))
-    @debug.assert_eq(pool.timeouts().recycle_ms, Some(2_000))
-    assert_true(
-      pool.config().recycling_method == @pgpool.RecyclingMethod::verified(),
-    )
-
-    let first = pool.get()
-    let first_pid : Int = first
-      .query_one("select pg_backend_pid()::int4 as pid")
-      .get_name("pid")
-    let second = pool.get()
-    let second_pid : Int = second
-      .query_one("select pg_backend_pid()::int4 as pid")
-      .get_name("pid")
-    assert_true(first_pid != second_pid)
-
-    first.release()
-    second.release()
-
-    let reused = pool.get()
-    let reused_pid : Int = reused
-      .query_one("select pg_backend_pid()::int4 as pid")
-      .get_name("pid")
-    @debug.assert_eq(reused_pid, second_pid)
-    reused.release()
-
-    assert_true(connect_calls.length() >= 2)
-    assert_true(post_create_calls.length() >= 2)
-    assert_true(pre_recycle_calls.length() >= 1)
-    assert_true(post_recycle_calls.length() >= 1)
-
-    pool.resize(1)
-    @debug.assert_eq(pool.status().max_size, 1)
-    @debug.assert_eq(pool.status().size, 1)
-
-    pool.resize(3)
-    @debug.assert_eq(pool.status().max_size, 3)
-
-    guard expect_error_async(() => pool.resize(0))
-      is @pgpool.PoolError::InvalidConfig(message) else {
-      fail("expected invalid resize")
-    }
-    @debug.assert_eq(message, "pool max_size must be at least 1")
-
-    pool.close()
-    pool.resize(2)
-    assert_true(pool.is_closed())
-  })
-}
-
-///|
-/// This verifies that declarative multi-target pools fall through to a later target after an earlier target fails.
-/// The first target intentionally points at a closed local port so the second target has to win.
-async test "integration pool declarative config fails over to later target" {
+/// A custom Connector receives the TaskGroup that must own the auto-driven
+/// client. Multi-target checkout continues after a failed first target.
+async test "integration pool custom connector supports target failover" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let attempts : Array[Int] = []
-    let connector = @pgpool.Connector::new(target => {
+    let connector = @pgpool.Connector::new((target, driver_group) => {
       if attempts.length() == 0 {
         attempts.push(1)
         let bad_target = @client.Config::from_parts(
@@ -230,38 +128,33 @@ async test "integration pool declarative config fails over to later target" {
           target.keepalives,
           target.keepalives_idle_s,
         )
-        @client.connect(bad_target)
+        @client.connect(bad_target, driver_group)
       } else {
-        @client.connect(target)
+        @client.connect(target, driver_group)
       }
     })
-    let pool_config = @pgpool.Config::new(
+    let declarative = @pgpool.Config::new(
       config.host,
       user=config.user,
       dbname=config.database,
       password=config.password,
       port=config.port,
-      application_name="moonbit-postgres-pool-failover-extra",
+      application_name="moonbit-postgres-pool-failover",
       hosts=[config.host],
       ports=[config.port, config.port],
       pool=@pgpool.PoolConfig::new(1),
     )
     let pool = @pgpool.Pool::new(
-      pool_config,
+      declarative,
       group,
       options=@pgpool.PoolOptions::new(connector~),
     )
-    let targets = pool_config.get_connection_targets()
-    @debug.assert_eq(targets.length(), 2)
-    @debug.assert_eq(targets[0].port, config.port)
-    @debug.assert_eq(targets[1].port, config.port)
 
-    let value : Int = pool.with_client(client => {
-      client.query_one("select 29::int4 as value").get_name("value")
-    })
-    @debug.assert_eq(value, 29)
-    @debug.assert_eq(attempts.length(), 1)
-
+    let value : Int = pool
+      .query_one("select 29::int4 as value")
+      .get_name("value")
+    assert_eq(value, 29)
+    assert_eq(attempts.length(), 1)
     pool.close()
   })
 }

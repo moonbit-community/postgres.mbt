@@ -6,6 +6,8 @@ import {
   "moonbitlang/core/ref",
 }
 
+supported_targets = "native+wasm"
+
 import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbitlang/async/socket",

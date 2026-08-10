@@ -3,11 +3,10 @@
 ///|
 /// Wrap a custom connection-opening callback for pool construction.
 ///
-/// The callback is responsible for returning both the high-level client handle
-/// and its background connection driver. It is invoked every time the pool must
-/// open a new physical connection.
+/// The callback returns an auto-driven client and is invoked whenever the pool
+/// must open a new physical connection.
 pub fn Connector::new(
-  f : async (@client.Config) -> (@client.Client, @client.Connection),
+  f : async (@client.Config, @async.TaskGroup[Unit]) -> @client.Client,
 ) -> Connector {
   { run: f, }
 }
@@ -52,6 +51,7 @@ pub fn Pool::new(
       load_balance_hosts: normalized.load_balance_hosts,
       pool_config: @ref.new(pool_config),
       slots,
+      resize_debt: @ref.new(0),
       idle: [],
       connections: [],
       next_connection_id: @ref.new(0),
@@ -63,28 +63,31 @@ pub fn Pool::new(
 }
 
 ///|
-/// Borrow one pooled client using the pool's current default timeouts.
+/// Checkout one internal session using the pool's current default timeouts.
 ///
-/// Preconditions: the pool must not be closed. On success the caller receives a
-/// checked-out client lease that must eventually be released or consumed by a
-/// higher-level helper such as `with_client`.
-pub async fn Pool::get(self : Pool) -> Client {
-  self.timeout_get(self.shared.pool_config.val.timeouts)
+/// Preconditions: the pool must not be closed. On success the internal caller
+/// receives a scoped session that must be released after its callback.
+async fn Pool::checkout_session(self : Pool) -> Session {
+  self.checkout_session_with_timeouts(self.shared.pool_config.val.timeouts)
 }
 
 ///|
-/// Borrow one pooled client using per-call timeout overrides.
+/// Checkout one internal session using per-call timeout overrides.
 ///
 /// The provided `timeouts` are validated for this call only and do not mutate
 /// the pool's stored defaults. If checkout fails after capacity was reserved,
 /// the slot is restored before the error is re-raised. Cancelling checkout
 /// during recycling discards that connection and restores the capacity slot.
-pub async fn Pool::timeout_get(self : Pool, timeouts : Timeouts) -> Client {
+async fn Pool::checkout_session_with_timeouts(
+  self : Pool,
+  timeouts : Timeouts,
+) -> Session {
   validate_pool_config({
     max_size: self.shared.pool_config.val.max_size,
     timeouts,
     queue_mode: self.shared.pool_config.val.queue_mode,
     recycling_method: self.shared.pool_config.val.recycling_method,
+    statement_cache_capacity: self.shared.pool_config.val.statement_cache_capacity,
   })
   self.assert_open()
   self.acquire_slot(timeouts.wait_ms)
@@ -92,19 +95,18 @@ pub async fn Pool::timeout_get(self : Pool, timeouts : Timeouts) -> Client {
   defer (if !handoff_complete { self.restore_slot() })
   let connection = self.checkout_client(timeouts)
   handoff_complete = true
-  make_pooled_client(self.shared, connection)
+  make_session(self.shared, connection)
 }
 
 ///|
-/// Borrow one pooled client for the duration of a callback.
+/// Borrow one pooled session for the duration of a callback.
 ///
 /// The lease is released in a `defer`, so it is returned to the pool on normal
-/// completion and also when the callback raises. If the callback detached the
-/// raw client, the deferred release becomes a no-op.
-pub async fn[T] Pool::with_client(self : Pool, f : async (Client) -> T) -> T {
-  let client = self.get()
-  defer client.release()
-  f(client)
+/// completion and also when the callback raises.
+pub async fn[T] Pool::with_session(self : Pool, f : async (Session) -> T) -> T {
+  let session = self.checkout_session()
+  defer session.release()
+  f(session)
 }
 
 ///|
@@ -131,7 +133,7 @@ pub fn Pool::is_closed(self : Pool) -> Bool {
 }
 
 ///|
-/// Return the timeout config currently used by `Pool::get()`.
+/// Return the timeout config currently used by automatic checkout.
 ///
 /// This reflects the pool's current stored config.
 pub fn Pool::timeouts(self : Pool) -> Timeouts {
@@ -142,43 +144,6 @@ pub fn Pool::timeouts(self : Pool) -> Timeouts {
 /// Return the full pool config currently used by this pool.
 pub fn Pool::config(self : Pool) -> PoolConfig {
   self.shared.pool_config.val
-}
-
-///|
-/// Return the administrative manager handle for this pool.
-pub fn Pool::manager(self : Pool) -> Manager {
-  { shared: self.shared, }
-}
-
-///|
-/// Return a handle that can manage statement caches on all live connections.
-pub fn Manager::statement_caches(self : Manager) -> StatementCaches {
-  { shared: self.shared, }
-}
-
-///|
-/// Clear every statement cache on connections that are live right now.
-///
-/// In-use cached statements are marked for eviction and close once their active
-/// leases finish. Connections opened after this call are unaffected.
-pub async fn StatementCaches::clear(self : StatementCaches) -> Unit {
-  for connection in self.shared.connections {
-    clear_connection_statement_cache(connection)
-  }
-}
-
-///|
-/// Remove one cached statement key from every statement cache that is live now.
-///
-/// Matching uses both `sql` and `param_types`. Missing entries are ignored.
-pub async fn StatementCaches::remove(
-  self : StatementCaches,
-  sql : String,
-  param_types? : Array[@client.Type] = [],
-) -> Unit {
-  for connection in self.shared.connections {
-    remove_connection_cached_statement(connection, sql, param_types)
-  }
 }
 
 ///|
@@ -202,13 +167,29 @@ pub fn Pool::resize(self : Pool, max_size : Int) -> Unit raise {
   }
   self.shared.pool_config.val = { ..current, max_size, }
   if max_size > current.max_size {
-    for _ in current.max_size..<max_size {
+    let mut permits_to_add = max_size - current.max_size
+    while permits_to_add > 0 && self.shared.resize_debt.val > 0 {
+      self.shared.resize_debt.val -= 1
+      permits_to_add -= 1
+    }
+    for _ in 0..<permits_to_add {
       restore_available_slot(self.shared)
     }
     return
   }
+  // Capacity tokens include both idle physical connections and room for
+  // connections that have not been opened yet. Remove the whole configured
+  // delta first; tying token removal only to idle retirement would allow new
+  // checkouts past the smaller limit while existing sessions are checked out.
+  let mut permits_to_remove = current.max_size - max_size
+  while permits_to_remove > 0 {
+    match self.shared.slots.try_get() {
+      Some(_) => permits_to_remove -= 1
+      None => break
+    }
+  }
+  self.shared.resize_debt.val += permits_to_remove
   while self.shared.size.val > max_size && self.shared.idle.length() > 0 {
-    ignore(self.shared.slots.try_get())
     let connection = self.shared.idle.remove(self.shared.idle.length() - 1)
     retire_connection(self.shared, connection, close_client=true)
   }
@@ -279,7 +260,24 @@ async fn Pool::acquire_slot(self : Pool, wait_ms : Int?) -> Unit {
 ///|
 /// Restore one slot if checkout fails before a lease is created.
 fn Pool::restore_slot(self : Pool) -> Unit {
-  restore_available_slot(self.shared)
+  release_capacity(self.shared)
+}
+
+///|
+/// Release one reserved checkout slot after a failed checkout or lease return.
+///
+/// A shrink performed while slots are checked out records the unavailable
+/// tokens as debt. Future releases pay that debt before making capacity
+/// available again, so shrink/expand sequences cannot mint extra tokens.
+fn release_capacity(shared : Shared) -> Unit {
+  if shared.closed.val {
+    return
+  }
+  if shared.resize_debt.val > 0 {
+    shared.resize_debt.val -= 1
+    return
+  }
+  restore_available_slot(shared)
 }
 
 ///|
@@ -353,7 +351,10 @@ async fn Pool::try_recycle_client(
     match self.shared.pool_config.val.recycling_method {
       Fast => ()
       Verified => client.check_connection()
-      Clean => client.batch_execute(clean_recycle_sql)
+      Clean => {
+        client.batch_execute(clean_recycle_sql)
+        discard_connection_statement_cache_metadata(connection)
+      }
       Custom(sql) => client.batch_execute(sql)
     }
     run_client_hook(self.shared.post_recycle, client)
@@ -375,10 +376,11 @@ async fn Pool::run_recycle(
       return None
     }
   }
-  // Cancellation bypasses catch. Retire the connection while it is owned by
-  // recycling; timeout_get alone restores the reserved checkout slot.
+  // Cancellation bypasses catch. Checkout separately restores its reserved slot.
   errdefer self.discard_client(connection, close_client=true)
-  try run_with_timeout(recycle_ms, Recycle, op) catch {
+  try
+    run_with_timeout(recycle_ms, Recycle, on_timeout=() => client.abort(), op)
+  catch {
     _ => {
       self.discard_client(connection, close_client=true)
       return None
@@ -398,19 +400,36 @@ async fn Pool::run_recycle(
 /// Establish a new connection and start its background driver task.
 async fn Pool::create_client(self : Pool, create_ms : Int?) -> ConnectionState {
   self.assert_open()
-  run_with_timeout(create_ms, Create, () => self.create_client_inner())
+  let candidate : @ref.Ref[@client.Client?] = @ref.new(None)
+  let connection = run_with_timeout(
+    create_ms,
+    Create,
+    on_timeout=() => {
+      match candidate.val {
+        Some(client) => client.abort()
+        None => ()
+      }
+    },
+    () => self.create_client_inner(candidate),
+  )
+  candidate.val = None
+  connection
 }
 
 ///|
 /// Establish a new connection by trying every configured target.
-async fn Pool::create_client_inner(self : Pool) -> ConnectionState {
+async fn Pool::create_client_inner(
+  self : Pool,
+  candidate : @ref.Ref[@client.Client?],
+) -> ConnectionState {
   let targets = ordered_targets(self.shared)
   let mut last_error : Error? = None
   for target in targets {
     try {
-      return self.connect_target(target)
+      return self.connect_target(target, candidate)
     } catch {
       err => {
+        candidate.val = None
         last_error = Some(err)
         continue
       }
@@ -427,10 +446,11 @@ async fn Pool::create_client_inner(self : Pool) -> ConnectionState {
 async fn Pool::connect_target(
   self : Pool,
   target : @client.Config,
+  candidate : @ref.Ref[@client.Client?],
 ) -> ConnectionState {
-  let (client, connection) = self.shared.connector.connect(target)
-  self.shared.group.spawn_bg(no_wait=true, () => connection.run())
-  errdefer client.close()
+  let client = self.shared.connector.connect(target, self.shared.group)
+  candidate.val = Some(client)
+  errdefer client.abort()
   if self.shared.closed.val {
     raise PoolError::Closed
   }
@@ -457,23 +477,25 @@ fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
     Some(client) => {
       if shared.closed.val {
         retire_connection(shared, connection, close_client=true)
+        release_capacity(shared)
         return
       }
       if client.is_closed() {
         retire_connection(shared, connection, close_client=false)
-        restore_available_slot(shared)
+        release_capacity(shared)
         return
       }
       if shared.size.val > shared.pool_config.val.max_size {
         retire_connection(shared, connection, close_client=true)
+        release_capacity(shared)
         return
       }
       shared.idle.push(connection)
-      restore_available_slot(shared)
+      release_capacity(shared)
     }
     None => {
       retire_connection(shared, connection, close_client=false)
-      restore_available_slot(shared)
+      release_capacity(shared)
     }
   }
 }
@@ -487,8 +509,8 @@ fn make_connection_state(
   shared.next_connection_id.val += 1
   let connection = {
     id: shared.next_connection_id.val,
-    group: shared.group,
     client: @ref.new(Some(client)),
+    statement_cache_capacity: shared.pool_config.val.statement_cache_capacity,
     statement_cache: [],
   }
   shared.connections.push(connection)
@@ -515,7 +537,7 @@ fn retire_connection(
         shared.size.val -= 1
       }
       if close_client {
-        client.close()
+        shared.group.spawn_bg(no_wait=true, () => client.close())
       }
     }
     None => ()
@@ -596,15 +618,36 @@ fn make_shuffle_seed(shared : Shared) -> Bytes {
 }
 
 ///|
-/// Apply an optional timeout to one async operation.
+/// Apply an optional timeout and run synchronous invalidation before failing.
 async fn[T] run_with_timeout(
   timeout_ms : Int?,
   kind : TimeoutKind,
+  on_timeout? : () -> Unit,
   op : async () -> T,
 ) -> T {
   match timeout_ms {
-    Some(timeout_ms) =>
-      @async.with_timeout(timeout_ms, op, error=PoolError::Timeout(kind))
+    Some(timeout_ms) => {
+      let timed_out = @ref.new(false)
+      @async.with_task_group(group => {
+        group.spawn_bg(no_wait=true, () => {
+          @async.sleep(timeout_ms)
+          timed_out.val = true
+          match on_timeout {
+            Some(on_timeout) => on_timeout()
+            None => ()
+          }
+          raise PoolError::Timeout(kind)
+        })
+        op()
+      }) catch {
+        _ if timed_out.val =>
+          // The aborted operation may wake with `ClientError::Closed` and race
+          // the timer's own failure. Once the timer fired, the public result is
+          // deterministically the configured pool timeout.
+          raise PoolError::Timeout(kind)
+        err => raise err
+      }
+    }
     None => op()
   }
 }

@@ -33,10 +33,10 @@ impl @client.ToSql for TextOnlyParam with fn to_sql(_, _, _) {
 async test "integration wrong type errors on read and write" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(config, application_name="moonbit-postgres"),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     // The query itself succeeds. The failure happens when decoding into an incompatible target type.
     let read_result = expect_error_async(() => {

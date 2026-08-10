@@ -27,8 +27,7 @@ async fn _quick_start() -> Unit {
       ssl_mode=VerifyFull,
       application_name="my-service",
     )
-    let (client, connection) = @client.connect(config)
-    group.spawn_bg(() => connection.run())
+    let client = @client.connect(config, group)
 
     let current_user : String = client
       .query_one("select current_user::text as current_user")
@@ -290,11 +289,10 @@ or PostgreSQL notices, you can consume them from the callback or from
 ///|
 async fn _connection_run_example(config : @client.Config) -> Unit {
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(config)
-    group.spawn_bg(() => connection.run(on_async=msg => ignore(msg)))
+    let client = @client.connect(config, group)
 
     let version = client.parameter("server_version")
-    let pending_message = connection.next_message()
+    let pending_message = client.next_message()
     ignore(version)
     ignore(pending_message)
 
@@ -331,15 +329,13 @@ Here is the pull-style pattern:
 ///|
 async fn _listen_notify_example(config : @client.Config) -> Unit {
   @async.with_task_group(group => {
-    let (listener, listener_connection) = @client.connect(config)
-    let (publisher, publisher_connection) = @client.connect(config)
-    group.spawn_bg(() => listener_connection.run())
-    group.spawn_bg(() => publisher_connection.run())
+    let listener = @client.connect(config, group)
+    let publisher = @client.connect(config, group)
 
     listener.batch_execute("LISTEN jobs")
     publisher.batch_execute("NOTIFY jobs, 'ready'")
 
-    let message = listener_connection.next_message()
+    let message = listener.next_message()
     ignore(message)
 
     publisher.close()
