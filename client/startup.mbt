@@ -134,13 +134,18 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
     config.connect_host(),
     port=config.port,
   )
+  let transferred = @ref.new(false)
+  defer (if !transferred.val { conn.close() })
   if config.keepalives == Some(true) {
     conn.enable_keepalive(
       idle_before_keep_alive=config.keepalives_idle_s.unwrap_or(7200),
     )
   }
   match config.ssl_mode {
-    Disable => { stream: Plain(conn), channel_binding: NoBinding }
+    Disable => {
+      transferred.val = true
+      { stream: Plain(conn), channel_binding: NoBinding }
+    }
     VerifyCa | VerifyFull => {
       let request = Buffer()
       // PostgreSQL SSL negotiation is a one-byte capability probe that happens
@@ -157,10 +162,7 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
             host?=config.tls_verify_host(),
             trust=config.tls_trusted_root(),
           ) catch {
-            err => {
-              conn.close()
-              raise ClientError::Ssl(tls_error_message(err))
-            }
+            err => raise ClientError::Ssl(tls_error_message(err))
           }
           let channel_binding = TlsChannelBinding::from_tls(tls) catch {
             err => {
@@ -168,16 +170,11 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
               raise ClientError::Ssl(tls_error_message(err))
             }
           }
-          { stream: Secure(tls), channel_binding }
+          transferred.val = true
+          { stream: Secure(tls, conn), channel_binding }
         }
-        b'N' => {
-          conn.close()
-          raise ClientError::Ssl("server does not support TLS")
-        }
-        _ => {
-          conn.close()
-          raise ClientError::Ssl("invalid SSL negotiation response")
-        }
+        b'N' => raise ClientError::Ssl("server does not support TLS")
+        _ => raise ClientError::Ssl("invalid SSL negotiation response")
       }
     }
   }

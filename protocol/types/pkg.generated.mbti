@@ -219,4 +219,3 @@ pub fn Varbit::is_empty(Self) -> Bool
 // Type aliases
 
 // Traits
-

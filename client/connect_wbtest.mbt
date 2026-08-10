@@ -76,12 +76,16 @@ fn make_shared(
     transaction_status: @ref.new(b'I'),
     closed: @ref.new(closed),
     closing: @ref.new(closing),
+    aborted: @ref.new(false),
+    operation_gate: OperationGate::new(),
+    driver_task: @ref.new(None),
+    driver_done: Queue(kind=Unbounded),
     next_id: @ref.new(0),
   }
 }
 
 ///|
-async test "connect captures startup state and close enqueues terminate request" {
+async test "connect captures startup state and close waits for the driver" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
@@ -99,9 +103,11 @@ async test "connect captures startup state and close enqueues terminate request"
       )
       conn.write(backend_key_data_packet(321, 654))
       conn.write(ready_for_query_packet(b'I'))
+      // The auto-started driver sends a five-byte Terminate frame on close.
+      ignore(conn.read_exactly(5))
     })
 
-    let (client, connection) = connect(
+    let client = connect(
       Config::new(
         "127.0.0.1",
         user="moon",
@@ -112,14 +118,14 @@ async test "connect captures startup state and close enqueues terminate request"
         application_name="moonbit-postgres-connect-wbtest",
         connect_timeout_ms=200,
       ),
+      group,
     )
-    defer connection.stream.close()
 
     @debug.assert_eq(client.is_closed(), false)
     @debug.assert_eq(client.parameter("client_encoding"), Some("UTF8"))
     @debug.assert_eq(client.parameter("missing"), None)
     @debug.assert_eq(
-      connection.parameter("application_name"),
+      client.parameter("application_name"),
       Some("moonbit-postgres-connect-wbtest"),
     )
 
@@ -133,14 +139,49 @@ async test "connect captures startup state and close enqueues terminate request"
     assert_true(client.shared.types.get(99999U) is None)
 
     client.close()
-    let request = client.shared.requests.try_get() catch { _ => None }
-    guard request is Some(request) else { fail("expected terminate request") }
-    assert_true(request.kind is Terminate)
-    @debug.assert_eq(request.bytes, terminate_bytes())
-
+    assert_true(client.is_closed())
     client.close()
-    let extra = client.shared.requests.try_get() catch { _ => None }
-    assert_true(extra is None)
+  })
+}
+
+///|
+async test "abort closes plaintext transport without terminate" {
+  @async.with_task_group(group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    defer server.close()
+
+    let server_task = group.spawn(() => {
+      let (conn, _) = server.accept()
+      defer conn.close()
+      read_startup_packet(conn)
+      conn.write(auth_ok_packet())
+      conn.write(backend_key_data_packet(321, 654))
+      conn.write(ready_for_query_packet(b'I'))
+      // Abort must close TCP without writing PostgreSQL's Terminate frame.
+      conn.read_some(max_len=5)
+    })
+
+    let client = connect(
+      Config::new(
+        "127.0.0.1",
+        user="moon",
+        database="moondb",
+        password="moonpass",
+        port=server.addr.port(),
+        ssl_mode=Disable,
+        application_name="moonbit-postgres-abort-wbtest",
+        connect_timeout_ms=200,
+      ),
+      group,
+    )
+
+    assert_true(!client.is_closed())
+    client.abort()
+    assert_true(client.is_closed())
+    client.abort()
+    assert_true(client.is_closed())
+    let trailing = @async.with_timeout(1000, () => server_task.wait())
+    assert_true(trailing is None)
   })
 }
 
@@ -150,11 +191,11 @@ async test "connect timeout surfaces protocol timeout" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
-    group.spawn_bg(() => {
+    let server_task = group.spawn(() => {
       let (conn, _) = server.accept()
       defer conn.close()
       read_startup_packet(conn)
-      @async.sleep(100)
+      conn.read_some(max_len=5)
     })
 
     let result = expect_error_async(() => {
@@ -169,12 +210,15 @@ async test "connect timeout surfaces protocol timeout" {
           application_name="moonbit-postgres-connect-timeout",
           connect_timeout_ms=10,
         ),
+        group,
       )
     })
     guard result is ClientError::Protocol(message) else {
       fail("expected timeout error")
     }
     @debug.assert_eq(message, "connection timed out")
+    let trailing = @async.with_timeout(1000, () => server_task.wait())
+    assert_true(trailing is None)
   })
 }
 
@@ -205,4 +249,33 @@ async test "cancel token returns early when connection is already closed" {
   token.cancel()
   @debug.assert_eq(token.process_id(), 321)
   @debug.assert_eq(token.secret_key(), 654)
+}
+
+///|
+async test "a cancelled close can be resumed without queuing another terminate" {
+  @async.with_task_group(group => {
+    let shared = make_shared()
+    let client : Client = { shared, }
+    let first_close = group.spawn(allow_failure=true, () => client.close())
+    let request = shared.requests.get()
+    assert_true(request.kind is Terminate)
+
+    first_close.cancel()
+    let _ = first_close.wait() catch { _ => () }
+
+    let resumed_started : @async.Queue[Unit] = Queue(kind=Unbounded)
+    let resumed_close = group.spawn(() => {
+      resumed_started.put(())
+      client.close()
+    })
+    resumed_started.get()
+    @async.sleep(1)
+    let extra = shared.requests.try_get() catch { _ => None }
+    assert_true(extra is None)
+
+    close_runtime(shared)
+    shared.driver_done.put(())
+    ignore(resumed_close.wait())
+    assert_true(client.is_closed())
+  })
 }

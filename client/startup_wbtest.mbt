@@ -56,11 +56,12 @@ async test "connect rejects deprecated md5 authentication" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
 
-    group.spawn_bg(() => {
+    let server_task = group.spawn(() => {
       let (conn, _) = server.accept()
       defer conn.close()
       read_startup_packet(conn)
       conn.write(authentication_md5_packet(b"md5!"[:]))
+      conn.read_some(max_len=5)
     })
 
     let result = expect_error_async(() => {
@@ -74,12 +75,15 @@ async test "connect rejects deprecated md5 authentication" {
           ssl_mode=Disable,
           application_name="moonbit-postgres-md5-reject",
         ),
+        group,
       )
     })
     guard result is ClientError::Authentication(message) else {
       fail("expected md5 authentication rejection")
     }
     @debug.assert_eq(message, deprecated_md5_authentication_message)
+    let trailing = @async.with_timeout(1000, () => server_task.wait())
+    assert_true(trailing is None)
   })
 }
 
@@ -108,6 +112,7 @@ async test "connect rejects cleartext password when channel binding is required"
           channel_binding=Require,
           application_name="moonbit-postgres-channel-binding-password-reject",
         ),
+        group,
       )
     })
     guard result is ClientError::Authentication(message) else {
@@ -142,6 +147,7 @@ async test "connect rejects authentication ok when channel binding is required" 
           channel_binding=Require,
           application_name="moonbit-postgres-channel-binding-auth-ok-reject",
         ),
+        group,
       )
     })
     guard result is ClientError::Authentication(message) else {

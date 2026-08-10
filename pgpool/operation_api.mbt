@@ -6,23 +6,28 @@ async fn OperationScopeState::begin_request(
   self : OperationScopeState,
 ) -> @client.Client {
   if !self.active.val || self.closing.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
   while self.cancel_in_flight.val > 0 {
     if !self.active.val || self.closing.val {
-      raise PoolError::LeaseReleased
+      raise PoolError::ScopeExpired
     }
     @async.pause()
   }
   if !self.active.val || self.closing.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
-  if self.request_in_flight.val {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if !self.active.val || self.closing.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   let client = match self.connection.client.val {
     Some(client) => client
-    None => raise PoolError::LeaseReleased
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
+    }
   }
   self.next_request_id.val += 1
   self.active_request_id.val = self.next_request_id.val
@@ -36,6 +41,7 @@ fn OperationScopeState::finish_request(self : OperationScopeState) -> Unit {
   if self.request_in_flight.val {
     self.request_in_flight.val = false
     self.active_request_id.val = 0
+    self.gate.release()
   }
 }
 
@@ -89,15 +95,12 @@ async fn[T] run_cancellable_scope(
 ///|
 /// Run one callback inside an exclusive cancellable request scope.
 ///
-/// Preconditions: the client lease must still be active and no other exclusive
-/// scope may already be open on it. During the callback, requests issued through
-/// `Operation` run one at a time so `OperationCancelToken::cancel()` can target
-/// the current request. When the callback finishes, the cancel token becomes
-/// inert and the scope waits for any late cancel-send task to finish. A common
-/// pattern is to pass the token to another task or timeout handler while the
-/// callback uses `Operation` for the actual query work.
-pub async fn[T] Client::run_cancellable(
-  self : Client,
+/// The scope waits in FIFO order for earlier session work. During the callback,
+/// requests issued through `Operation` run one at a time so
+/// `OperationCancelToken::cancel()` targets the current request. When the
+/// callback finishes, the token becomes inert and late cancel work is drained.
+pub async fn[T] Session::run_cancellable(
+  self : Session,
   f : async (Operation, OperationCancelToken) -> T,
 ) -> T {
   let connection = self.state.begin_cancellable_scope()

@@ -1,197 +1,98 @@
-// The socket-owning connection task and its request/response state machine.
+// The socket-owning driver and its single-request state machine.
 
 ///|
-/// Drive the PostgreSQL connection until graceful shutdown or failure.
+/// Drive one PostgreSQL connection until graceful shutdown or failure.
 ///
-/// The loop alternates between:
-/// 1. taking queued client requests,
-/// 2. opportunistically pipelining additional non-barrier requests, and
-/// 3. forwarding backend messages either to async listeners or to the oldest
-///    pending request.
-///
-/// On any error, the loop closes all outstanding queues, marks the shared
-/// runtime as closed, and then closes the socket.
-pub async fn Connection::run(
-  self : Connection,
-  on_async? : (AsyncMessage) -> Unit = _ => (),
-) -> Unit {
-  @async.with_task_group(group => {
-    self.shared.background_group.val = Some(group)
-    defer {
-      self.shared.background_group.val = None
+/// Exactly one request is written and drained through `ReadyForQuery` before
+/// the next request is taken from the submission queue. Logical operations may
+/// still issue several requests, but the client operation gate keeps all of
+/// those stages under one exclusive capability.
+async fn Driver::run(self : Driver) -> Unit {
+  let mut active : Request? = None
+  defer {
+    self.stream.close()
+    self.shared.driver_task.val = None
+    ignore(self.shared.driver_done.try_put(())) catch {
+      _ => ()
     }
-
-    let pending : Array[Request] = []
-    let mut sent_terminate = false
-    try {
-      while true {
-        if pending.is_empty() && !sent_terminate {
-          // When nothing is in flight, block until the runtime has a request
-          // that can own subsequent backend replies.
-          let request = self.shared.requests.get()
-          sent_terminate = self.send_outbound_request(request, pending)
+    self.shared.driver_done.close()
+  }
+  try {
+    while true {
+      let request = self.shared.requests.get()
+      active = Some(request)
+      match request.kind {
+        Terminate => {
+          self.stream.write(request.bytes)
+          self.close_request(request, None)
+          active = None
+          self.drain_queued_requests(None)
+          close_runtime(self.shared)
+          return
         }
-        if self.can_pipeline_requests(pending) && !sent_terminate {
-          // If the current in-flight tail contains no barriers, batch more work
-          // onto the socket before we wait for the next backend frame.
-          sent_terminate = self.pipeline_pending_requests(pending)
+        Messages | CopyIn => {
+          self.stream.write(request.bytes)
+          self.drain_request(request)
+          self.close_request(request, None)
+          active = None
         }
-        if pending.is_empty() {
-          if sent_terminate {
-            // `Terminate` has no normal response stream. Once it is the only
-            // outstanding work, shutdown can converge locally.
-            self.drain_queued_requests(None)
-            close_runtime(self.shared)
-            self.stream.close()
-            return
-          }
-          continue
-        }
-        let message = self.read_message()
-        // After async side-channel frames are peeled off, protocol order says
-        // the oldest pending request owns the next reply.
-        self.forward_pending_message(pending, message, on_async)
-      }
-    } catch {
-      err => {
-        self.close_pending_requests(pending, Some(err))
-        self.drain_queued_requests(Some(err))
-        close_runtime(self.shared, error=err)
-        self.stream.close()
       }
     }
-  })
+  } catch {
+    err => {
+      let driver_error : Error = if self.shared.aborted.val {
+        ClientError::Closed("connection aborted")
+      } else {
+        err
+      }
+      match active {
+        Some(request) => self.close_request(request, Some(driver_error))
+        None => ()
+      }
+      self.drain_queued_requests(Some(driver_error))
+      close_runtime(self.shared, error=driver_error)
+    }
+  }
 }
 
 ///|
-/// Receive the next asynchronous message buffered by the connection loop.
+/// Receive the next asynchronous message buffered by the private driver.
 ///
-/// Returns `None` after the async-message queue is closed. This is usually read
-/// from one dedicated task that owns async notices / notifications for the
-/// connection.
-pub async fn Connection::next_message(self : Connection) -> AsyncMessage? {
+/// Returns `None` after the connection closes.
+pub async fn Client::next_message(self : Client) -> AsyncMessage? {
   Some(self.shared.async_messages.get()) catch {
     _ => None
   }
 }
 
 ///|
-/// Look up the latest value of a server parameter.
-pub fn Connection::parameter(self : Connection, name : String) -> String? {
-  self.shared.parameters.get(name)
-}
-
-///|
-/// Write one queued request to the wire and decide whether it stops pipelining.
-async fn Connection::send_outbound_request(
-  self : Connection,
-  request : Request,
-  pending : Array[Request],
-) -> Bool {
-  self.stream.write(request.bytes)
-  match request.kind {
-    Terminate => {
-      // PostgreSQL closes the socket after `Terminate`; there is no matching
-      // terminal `ReadyForQuery` for this synthetic request queue.
-      request.responses.close()
-      true
-    }
-    Messages | CopyIn => {
-      pending.push(request)
-      false
-    }
-  }
-}
-
-///|
-/// Return whether every currently pending request may be safely pipelined.
-///
-/// COPY IN and termination requests act as barriers because they require
-/// request-specific coordination with subsequent protocol messages.
-fn Connection::can_pipeline_requests(
-  self : Connection,
-  pending : Array[Request],
-) -> Bool {
-  ignore(self)
-  for request in pending {
-    match request.kind {
-      Messages => ()
-      _ => return false
-    }
-  }
-  true
-}
-
-///|
-/// Opportunistically enqueue more non-barrier requests without blocking.
-async fn Connection::pipeline_pending_requests(
-  self : Connection,
-  pending : Array[Request],
-) -> Bool {
-  while true {
-    let request = self.shared.requests.try_get() catch { _ => None }
-    match request {
-      None => return false
-      Some(request) => {
-        let sent_terminate = self.send_outbound_request(request, pending)
-        // Stop as soon as pipelining reaches a request that needs extra
-        // mid-stream coordination, such as COPY IN or graceful shutdown.
-        let is_barrier = match request.kind {
-          Messages => false
-          _ => true
-        }
-        if sent_terminate || is_barrier {
-          return sent_terminate
-        }
-        continue
-      }
-    }
-  }
-  false
-}
-
-///|
-/// Route one backend message to either async listeners or the oldest request.
-async fn Connection::forward_pending_message(
-  self : Connection,
-  pending : Array[Request],
-  message : @backend.Message,
-  on_async : (AsyncMessage) -> Unit,
-) -> Unit {
-  if self.handle_async_message(message, on_async) {
-    // Notices, notifications, and parameter updates never advance a request.
+/// Drain all backend messages belonging to one request.
+async fn Driver::drain_request(self : Driver, request : Request) -> Unit {
+  if request.kind is CopyIn {
+    self.drain_copy_in_request(request)
     return
   }
-  guard !pending.is_empty() else {
-    raise ClientError::UnexpectedMessage("unexpected backend message")
-  }
-  let request = pending[0]
-  // All remaining frames belong to the request at the front of the protocol
-  // timeline because PostgreSQL replies in request order.
-  match request.kind {
-    Messages => {
-      self.forward_message_to_request(request, message)
-      if message is ReadyForQuery(_) {
-        ignore(pending.remove(0))
-      }
+  while true {
+    let message = self.read_message()
+    if self.handle_async_message(message) {
+      continue
     }
-    CopyIn => {
-      self.forward_copy_in_message(request, message)
-      if message is ReadyForQuery(_) {
-        ignore(pending.remove(0))
-      }
+    match request.kind {
+      Messages => self.forward_message_to_request(request, message)
+      CopyIn => abort("COPY IN requests use drain_copy_in_request")
+      Terminate =>
+        raise ClientError::UnexpectedMessage("unexpected terminate request")
     }
-    Terminate =>
-      raise ClientError::UnexpectedMessage("unexpected terminate request")
+    if message is ReadyForQuery(_) {
+      return
+    }
   }
 }
 
 ///|
 /// Forward a regular request message to its response queue.
-///
-/// `ReadyForQuery` also updates the shared transaction status snapshot.
-async fn Connection::forward_message_to_request(
-  self : Connection,
+async fn Driver::forward_message_to_request(
+  self : Driver,
   request : Request,
   message : @backend.Message,
 ) -> Unit {
@@ -205,59 +106,103 @@ async fn Connection::forward_message_to_request(
 }
 
 ///|
-/// Forward a COPY IN request message and start draining client input when ready.
-async fn Connection::forward_copy_in_message(
-  self : Connection,
+/// Read COPY IN responses while one dedicated task writes producer frames.
+///
+/// Keeping the driver as the sole reader lets PostgreSQL report malformed COPY
+/// data before the producer calls `finish`. The writer is always joined before
+/// `ReadyForQuery` becomes visible or the next request can start.
+async fn Driver::drain_copy_in_request(
+  self : Driver,
   request : Request,
-  message : @backend.Message,
 ) -> Unit {
   let copy_input = request.copy_input.unwrap()
-  match message {
-    CopyInResponse(_) => {
-      request.responses.put(message)
-      // Only after PostgreSQL enters COPY mode may the client start producing
-      // `CopyData` / `CopyDone` / `CopyFail` frames for this request.
-      self.drain_copy_input(copy_input)
+  let copy_error = request.copy_error.unwrap()
+  let writer_stopped = @ref.new(false)
+  let mut writer : @async.Task[Unit]? = None
+  while true {
+    let message = self.read_message()
+    if self.handle_async_message(message) {
+      continue
     }
-    ReadyForQuery(body) => {
-      self.shared.transaction_status.val = body.status
-      request.responses.put(message)
+    match message {
+      CopyInResponse(_) => {
+        guard writer is None else {
+          raise ClientError::UnexpectedMessage("duplicate CopyInResponse")
+        }
+        request.responses.put(message)
+        writer = Some(self.spawn_copy_writer(copy_input, writer_stopped))
+      }
+      ErrorResponse(body) => {
+        let database_error = parse_database_error(body.fields())
+        copy_error.val = Some(database_error)
+        request.responses.put(message)
+        if !writer_stopped.val {
+          writer_stopped.val = true
+          copy_input.close(
+            error=ClientError::Database(database_error),
+            clear=true,
+          )
+        }
+      }
+      ReadyForQuery(body) => {
+        match writer {
+          Some(writer) => writer.wait()
+          None => ()
+        }
+        self.shared.transaction_status.val = body.status
+        request.responses.put(message)
+        return
+      }
+      _ => request.responses.put(message)
     }
-    _ => request.responses.put(message)
   }
 }
 
 ///|
-/// Drain one COPY IN sink until it finishes or aborts.
-///
-/// The driver writes each client-produced action as a protocol message on the
-/// shared connection stream. Once `Finish` or `Fail` is seen, the COPY request
-/// returns to normal backend-response processing.
-async fn Connection::drain_copy_input(
-  self : Connection,
+/// Start the unique writer paired with one COPY IN request.
+fn Driver::spawn_copy_writer(
+  self : Driver,
   input : @async.Queue[CopyInAction],
+  stopped : @ref.Ref[Bool],
+) -> @async.Task[Unit] raise {
+  match self.shared.background_group.val {
+    Some(group) =>
+      group.spawn(no_wait=true, allow_failure=true, () => {
+        self.drain_copy_input(input, stopped)
+      })
+    None => raise ClientError::Closed("connection driver is unavailable")
+  }
+}
+
+///|
+/// Drain one COPY IN sink until it finishes, aborts, or the reader stops it.
+async fn Driver::drain_copy_input(
+  self : Driver,
+  input : @async.Queue[CopyInAction],
+  stopped : @ref.Ref[Bool],
 ) -> Unit {
-  for act = input.get() {
+  while true {
+    let act = input.get() catch {
+      err => if stopped.val { return } else { raise err }
+    }
     match act {
       Data(data) => {
-        // Data chunks can flow indefinitely; keep consuming producer input
-        // until it explicitly finishes or aborts this COPY exchange.
         let payload = Buffer()
         @frontend.CopyData::new(data[:]).write(payload)
         self.stream.write(payload.to_bytes())
-        continue input.get()
+        // Small socket writes may complete without suspending. Yield after one
+        // complete frame so the sole reader can observe an early ErrorResponse
+        // instead of being starved by the producer/writer handoff.
+        @async.pause()
+        continue
       }
       Finish => {
-        // After `CopyDone`, the request returns to normal backend completion
-        // handling on the response queue.
         let payload = Buffer()
         @frontend.copy_done(payload)
         self.stream.write(payload.to_bytes())
         return
       }
       Fail(message) => {
-        // PostgreSQL still sends trailing completion frames after `CopyFail`,
-        // so the request stays pending until the backend catches up.
         let payload = Buffer()
         @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
         self.stream.write(payload.to_bytes())
@@ -269,8 +214,8 @@ async fn Connection::drain_copy_input(
 
 ///|
 /// Close one request's queues, optionally propagating an error.
-fn Connection::close_request(
-  self : Connection,
+fn Driver::close_request(
+  self : Driver,
   request : Request,
   error : Error?,
 ) -> Unit {
@@ -282,7 +227,19 @@ fn Connection::close_request(
   match request.copy_input {
     Some(input) =>
       match error {
-        None => input.close()
+        None =>
+          match request.copy_error {
+            Some(copy_error) =>
+              match copy_error.val {
+                Some(database_error) =>
+                  input.close(
+                    error=ClientError::Database(database_error),
+                    clear=true,
+                  )
+                None => input.close()
+              }
+            None => input.close()
+          }
         Some(err) => input.close(error=err, clear=true)
       }
     None => ()
@@ -290,26 +247,12 @@ fn Connection::close_request(
 }
 
 ///|
-/// Close every currently pending request.
-fn Connection::close_pending_requests(
-  self : Connection,
-  pending : Array[Request],
-  error : Error?,
-) -> Unit {
-  for request in pending {
-    self.close_request(request, error)
-  }
-}
-
-///|
 /// Drain and close requests that were queued but never written to the wire.
-fn Connection::drain_queued_requests(self : Connection, error : Error?) -> Unit {
+fn Driver::drain_queued_requests(self : Driver, error : Error?) -> Unit {
   let close_error = match error {
     Some(err) => Some(err)
     None => Some(ClientError::Closed("connection is closed"))
   }
-  // Requests still sitting in the submission queue were never written to the
-  // socket, so they can only fail locally as shutdown fallout.
   while true {
     let request = self.shared.requests.try_get() catch { _ => None }
     match request {
@@ -323,29 +266,21 @@ fn Connection::drain_queued_requests(self : Connection, error : Error?) -> Unit 
 }
 
 ///|
-/// Handle backend messages that are not tied to the current request head.
-///
-/// PostgreSQL may send notices, notifications, and parameter updates while
-/// ordinary requests are in flight. The connection loop peels those off first
-/// so request-specific stream parsers only see messages that belong to them.
-fn Connection::handle_async_message(
-  self : Connection,
+/// Handle backend messages that are not tied to the active request.
+fn Driver::handle_async_message(
+  self : Driver,
   message : @backend.Message,
-  on_async : (AsyncMessage) -> Unit,
 ) -> Bool raise {
   match message {
     ParameterStatus(body) => {
       let name = body.name_str()
       let value = body.value_str()
       self.shared.parameters[name] = value
-      self.push_async_message(ParameterStatus(name, value), on_async)
+      self.push_async_message(ParameterStatus(name, value))
       true
     }
     NoticeResponse(body) => {
-      self.push_async_message(
-        Notice(parse_database_error(body.fields())),
-        on_async,
-      )
+      self.push_async_message(Notice(parse_database_error(body.fields())))
       true
     }
     NotificationResponse(body) => {
@@ -355,7 +290,6 @@ fn Connection::handle_async_message(
           channel: body.channel_str(),
           payload: body.message_str(),
         }),
-        on_async,
       )
       true
     }
@@ -364,21 +298,16 @@ fn Connection::handle_async_message(
 }
 
 ///|
-/// Publish one async message to both the callback and the queue buffer.
-fn Connection::push_async_message(
-  self : Connection,
-  message : AsyncMessage,
-  on_async : (AsyncMessage) -> Unit,
-) -> Unit {
-  on_async(message)
+/// Publish one asynchronous backend message.
+fn Driver::push_async_message(self : Driver, message : AsyncMessage) -> Unit {
   ignore(self.shared.async_messages.try_put(message)) catch {
     _ => ()
   }
 }
 
 ///|
-/// Read and parse one backend message from the shared connection stream.
-async fn Connection::read_message(self : Connection) -> @backend.Message {
+/// Read and parse one backend message from the connection stream.
+async fn Driver::read_message(self : Driver) -> @backend.Message {
   let header = self.stream.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = self.stream.read_exactly(body_len - 4)

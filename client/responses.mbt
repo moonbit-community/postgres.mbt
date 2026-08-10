@@ -5,6 +5,7 @@
 fn new_row_stream(
   background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
+  permit : OperationPermit?,
   initial_columns? : Array[Column] = [],
   cleanup? : StreamCleanup? = None,
 ) -> RowStream {
@@ -13,11 +14,13 @@ fn new_row_stream(
     columns: initial_columns,
     responses,
     cleanup,
+    permit,
     command_tag: "",
     row_count: 0,
     suspended: false,
     database_error: None,
     detached: false,
+    detached_task: None,
     summary: None,
   }
 }
@@ -27,21 +30,27 @@ fn new_row_stream(
 fn new_simple_query_stream(
   background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
+  permit : OperationPermit?,
 ) -> SimpleQueryStream {
   {
     background_group,
     responses,
+    permit,
     columns: [],
     database_error: None,
     detached: false,
+    detached_task: None,
     finished: false,
   }
 }
 
 ///|
 /// Build the deferred cleanup object for a temporary prepared statement.
-fn make_statement_cleanup(client : Client, name : Bytes) -> StreamCleanup raise {
-  { client, bytes: close_bytes(b'S', name[:]), done: false }
+fn make_statement_cleanup(
+  context : OpContext,
+  name : Bytes,
+) -> StreamCleanup raise {
+  { context, bytes: close_bytes(b'S', name[:]), done: false }
 }
 
 ///|
@@ -49,8 +58,11 @@ fn make_statement_cleanup(client : Client, name : Bytes) -> StreamCleanup raise 
 ///
 /// This is used on early failures that happen before a `RowStream` can be
 /// returned to the caller and therefore before deferred cleanup is available.
-async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
-  let responses = client.send_request(Messages, close_bytes(b'S', name[:]))
+async fn close_temporary_statement(context : OpContext, name : Bytes) -> Unit {
+  let responses = context.client.send_request(
+    Messages,
+    close_bytes(b'S', name[:]),
+  )
   drain_close_response(responses)
 }
 
@@ -59,6 +71,7 @@ async fn close_temporary_statement(client : Client, name : Bytes) -> Unit {
 async fn start_copy_out(
   background_group : @ref.Ref[@async.TaskGroup[Unit]?],
   responses : @async.Queue[@backend.Message],
+  permit : OperationPermit?,
 ) -> CopyOutStream {
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -69,9 +82,11 @@ async fn start_copy_out(
         return {
           background_group,
           responses,
+          permit,
           formats: parse_copy_formats(body.column_formats()),
           database_error,
           detached: false,
+          detached_task: None,
           finished: false,
         }
       ErrorResponse(body) => {
@@ -84,7 +99,11 @@ async fn start_copy_out(
           None =>
             raise ClientError::UnexpectedMessage("expected CopyOutResponse")
         }
-      _ => raise ClientError::UnexpectedMessage("unexpected copy out response")
+      _ =>
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected copy out response"),
+        )
     }
   }
 }
@@ -96,7 +115,7 @@ async fn start_copy_out(
 /// neither depending on the statement. Database errors are deferred until the
 /// terminal `ReadyForQuery` just like the public stream helpers do.
 async fn read_prepare_response(
-  shared : Shared,
+  context : OpContext,
   responses : @async.Queue[@backend.Message],
 ) -> (Array[Type], Array[Column]) {
   let mut param_oids : Array[@proto.Oid] = []
@@ -127,13 +146,17 @@ async fn read_prepare_response(
             // Resolve cached type metadata once, at the end, so callers see a
             // fully enriched result without partial-success bookkeeping.
             let result = (
-              resolve_parameter_types(shared, param_oids),
-              resolve_columns(shared, columns),
+              resolve_parameter_types(context, param_oids),
+              resolve_columns(context, columns),
             )
             break result
           }
         }
-      _ => raise ClientError::UnexpectedMessage("unexpected prepare response")
+      _ =>
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected prepare response"),
+        )
     }
   }
 }
@@ -163,7 +186,11 @@ async fn collect_copy_in_completion(
           Some(err) => raise ClientError::Database(err)
           None => break rows_affected(command_tag)
         }
-      _ => raise ClientError::UnexpectedMessage("unexpected copy in completion")
+      _ =>
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected copy in completion"),
+        )
     }
   }
 }
@@ -186,7 +213,11 @@ async fn drain_close_response(
           Some(err) => raise ClientError::Database(err)
           None => break ()
         }
-      _ => raise ClientError::UnexpectedMessage("unexpected close response")
+      _ =>
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected close response"),
+        )
     }
   }
 }
@@ -198,7 +229,11 @@ async fn drain_sync_response(
 ) -> Unit {
   match responses.get() {
     ReadyForQuery(_) => ()
-    _ => raise ClientError::UnexpectedMessage("unexpected sync response")
+    _ =>
+      fail_response_stream(
+        responses,
+        ClientError::UnexpectedMessage("unexpected sync response"),
+      )
   }
 }
 
@@ -224,8 +259,9 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
           None => break ()
         }
       _ =>
-        raise ClientError::UnexpectedMessage(
-          "unexpected batch execute response",
+        fail_response_stream(
+          responses,
+          ClientError::UnexpectedMessage("unexpected batch execute response"),
         )
     }
   }

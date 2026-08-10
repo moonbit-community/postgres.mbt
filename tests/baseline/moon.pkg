@@ -18,3 +18,5 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/core/test",
 } for "test"
+
+supported_targets = "native+wasm"

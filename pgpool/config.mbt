@@ -96,11 +96,9 @@ pub fn TransactionOptions::new(
 ///|
 /// Optional checkout timeout overrides in milliseconds.
 ///
-/// These values control how long the pool waits in each phase of `get()`:
-/// waiting for capacity, creating a new connection, and recycling an idle
-/// connection. `None` leaves the phase unbounded. Negative values are rejected
-/// later when the timeouts are validated by `PoolConfig::new`, `Pool::get`, or
-/// `Pool::timeout_get`.
+/// These values control how long the pool waits for capacity, creates a new
+/// connection, or recycles an idle connection. `None` leaves the phase
+/// unbounded. Negative values are rejected by `PoolConfig::new` or checkout.
 pub struct Timeouts {
   /// Maximum wait for a checkout slot before raising `PoolError::Timeout(Wait)`.
   wait_ms : Int?
@@ -177,12 +175,16 @@ pub fn RecyclingMethod::custom(sql : String) -> RecyclingMethod {
 pub struct PoolConfig {
   /// Maximum number of live physical PostgreSQL sessions owned by the pool.
   max_size : Int
-  /// Default timeout policy used by `Pool::get()`.
+  /// Default timeout policy used by automatic checkout.
   timeouts : Timeouts
   /// Strategy used when selecting from the idle connection list.
   queue_mode : QueueMode
   /// Cleanup strategy applied when reusing an idle connection.
   recycling_method : RecyclingMethod
+  /// Maximum prepared statements cached on each physical connection.
+  ///
+  /// `0` disables caching.
+  statement_cache_capacity : Int
 } derive(Eq, Debug)
 
 ///|
@@ -195,9 +197,16 @@ pub fn PoolConfig::new(
   timeouts? : Timeouts = Timeouts::new(),
   queue_mode? : QueueMode = Fifo,
   recycling_method? : RecyclingMethod = Fast,
+  statement_cache_capacity? : Int = 100,
 ) -> PoolConfig raise {
-  validate_pool_config({ max_size, timeouts, queue_mode, recycling_method })
-  { max_size, timeouts, queue_mode, recycling_method }
+  validate_pool_config({
+    max_size,
+    timeouts,
+    queue_mode,
+    recycling_method,
+    statement_cache_capacity,
+  })
+  { max_size, timeouts, queue_mode, recycling_method, statement_cache_capacity }
 }
 
 ///|
@@ -338,7 +347,7 @@ pub struct Status {
   size : Int
   /// Number of idle connections immediately available for reuse.
   available : Int
-  /// Number of tasks currently waiting for capacity in `get()` or `timeout_get()`.
+  /// Number of tasks currently waiting for pool capacity.
   waiting : Int
   /// Current configured connection limit for the pool.
   max_size : Int
@@ -349,15 +358,13 @@ pub struct Status {
 ///|
 /// Failures raised by pool lifecycle, checkout, and scoped-handle operations.
 ///
-/// `LeaseReleased` reports use-after-scope on pooled handles, `Closed` rejects
-/// new checkouts after `Pool::close()`, `Timeout` identifies the checkout phase
-/// that expired, and `OperationInProgress` reports an exclusive scope conflict.
+/// `ScopeExpired` reports use-after-scope on pooled handles, `Closed` rejects
+/// new checkouts after `Pool::close()`, and `Timeout` identifies the checkout
+/// phase that expired.
 pub suberror PoolError {
   Closed
   Timeout(TimeoutKind)
-  LeaseReleased
-  OperationInProgress
-  RowCount(String)
+  ScopeExpired
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
 
@@ -366,6 +373,11 @@ pub suberror PoolError {
 fn validate_pool_config(config : PoolConfig) -> Unit raise {
   if config.max_size < 1 {
     raise PoolError::InvalidConfig("pool max_size must be at least 1")
+  }
+  if config.statement_cache_capacity < 0 {
+    raise PoolError::InvalidConfig(
+      "statement_cache_capacity must be non-negative",
+    )
   }
   validate_timeout("wait_ms", config.timeouts.wait_ms)
   validate_timeout("create_ms", config.timeouts.create_ms)

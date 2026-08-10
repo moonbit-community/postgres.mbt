@@ -2,21 +2,26 @@
 
 ///|
 /// Start one client operation or reject work after release begins.
-fn ClientLeaseState::begin_operation(
+async fn ClientLeaseState::begin_operation(
   self : ClientLeaseState,
-) -> @client.Client raise {
+) -> @client.Client {
   if self.releasing.val || self.released.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
-  if self.scope_active.val {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if self.releasing.val || self.released.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   match self.connection.client.val {
     Some(client) => {
       self.active_ops.val += 1
       client
     }
-    None => raise PoolError::LeaseReleased
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
+    }
   }
 }
 
@@ -26,6 +31,7 @@ fn ClientLeaseState::finish_operation(self : ClientLeaseState) -> Unit {
   if self.active_ops.val > 0 {
     self.active_ops.val -= 1
   }
+  self.gate.release()
   if self.releasing.val && !self.released.val && self.active_ops.val == 0 {
     self.finalize_release()
   }
@@ -33,57 +39,63 @@ fn ClientLeaseState::finish_operation(self : ClientLeaseState) -> Unit {
 
 ///|
 /// Start one exclusive cancellable scope on this lease.
-fn ClientLeaseState::begin_cancellable_scope(
+async fn ClientLeaseState::begin_cancellable_scope(
   self : ClientLeaseState,
-) -> ConnectionState raise {
+) -> ConnectionState {
   if self.releasing.val || self.released.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
-  if self.scope_active.val || self.active_ops.val > 0 {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if self.releasing.val || self.released.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   match self.connection.client.val {
     Some(_) => {
-      self.scope_active.val = true
       self.active_ops.val += 1
       self.connection
     }
-    None => raise PoolError::LeaseReleased
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
+    }
   }
 }
 
 ///|
 /// Finish one exclusive cancellable scope on this lease.
 fn ClientLeaseState::finish_cancellable_scope(self : ClientLeaseState) -> Unit {
-  self.scope_active.val = false
   self.finish_operation()
 }
 
 ///|
 /// Start one exclusive transaction scope on this lease.
-fn ClientLeaseState::begin_transaction_scope(
+async fn ClientLeaseState::begin_transaction_scope(
   self : ClientLeaseState,
-) -> (@client.Client, ConnectionState) raise {
+) -> (@client.Client, ConnectionState) {
   if self.releasing.val || self.released.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
-  if self.scope_active.val || self.active_ops.val > 0 {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if self.releasing.val || self.released.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   match self.connection.client.val {
     Some(client) => {
-      self.scope_active.val = true
       self.active_ops.val += 1
       (client, self.connection)
     }
-    None => raise PoolError::LeaseReleased
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
+    }
   }
 }
 
 ///|
 /// Finish one exclusive transaction scope on this lease.
 fn ClientLeaseState::finish_transaction_scope(self : ClientLeaseState) -> Unit {
-  self.scope_active.val = false
   self.finish_operation()
 }
 
@@ -99,8 +111,8 @@ fn ClientLeaseState::finalize_release(self : ClientLeaseState) -> Unit {
 
 ///|
 /// Run one async operation against the checked-out client.
-async fn[T] Client::run_operation(
-  self : Client,
+async fn[T] Session::run_operation(
+  self : Session,
   op : async (@client.Client) -> T,
 ) -> T {
   let client = self.state.begin_operation()
@@ -111,11 +123,11 @@ async fn[T] Client::run_operation(
 ///|
 /// Mark this pooled client lease for release.
 ///
-/// Side effects: new scoped operations start failing with `PoolError::LeaseReleased`.
+/// Side effects: new scoped operations start failing with `PoolError::ScopeExpired`.
 /// Existing in-flight operations are allowed to finish first, and the physical
 /// connection is returned to the pool only after the active-operation count
 /// reaches zero. Repeated calls are idempotent.
-pub fn Client::release(self : Client) -> Unit {
+fn Session::release(self : Session) -> Unit {
   if self.state.releasing.val || self.state.released.val {
     return
   }
@@ -126,29 +138,15 @@ pub fn Client::release(self : Client) -> Unit {
 }
 
 ///|
-/// Permanently detach the raw client from pool management.
-///
-/// Preconditions: the lease must still be active, and no operation,
-/// transaction-building scope, or cancellable scope may be in progress.
-/// Side effects: the pool forgets this physical connection, frees one capacity
-/// slot, and stops recycling or closing the detached client for you. The caller
-/// becomes responsible for closing the returned raw client. The returned
-/// `@client.Client` keeps using the existing background connection driver, so it
-/// can continue ordinary client operations immediately after detaching.
-pub fn Client::detach_raw(self : Client) -> @client.Client raise {
-  if self.state.releasing.val || self.state.released.val {
-    raise PoolError::LeaseReleased
+/// Access the raw client while an outer callback owns this session's gate.
+fn ClientLeaseState::scoped_client(
+  self : ClientLeaseState,
+) -> @client.Client raise {
+  if self.released.val {
+    raise PoolError::ScopeExpired
   }
-  if self.state.scope_active.val || self.state.active_ops.val > 0 {
-    raise PoolError::OperationInProgress
-  }
-  let client = match self.state.connection.client.val {
+  match self.connection.client.val {
     Some(client) => client
-    None => raise PoolError::LeaseReleased
+    None => raise PoolError::ScopeExpired
   }
-  self.state.releasing.val = true
-  self.state.released.val = true
-  retire_connection(self.state.pool, self.state.connection, close_client=false)
-  restore_available_slot(self.state.pool)
-  client
 }

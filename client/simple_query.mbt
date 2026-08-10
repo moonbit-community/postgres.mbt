@@ -67,9 +67,11 @@ pub enum SimpleQueryMessage {
 struct SimpleQueryStream {
   background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   responses : @async.Queue[@backend.Message]
+  permit : OperationPermit?
   mut columns : Array[String]
   mut database_error : DatabaseError?
   mut detached : Bool
+  mut detached_task : @async.Task[Unit]?
   mut finished : Bool
 }
 
@@ -80,6 +82,18 @@ struct SimpleQueryStream {
 /// raising them until the terminal `ReadyForQuery` so the server and driver stay
 /// in sync with the protocol.
 pub async fn SimpleQueryStream::next(
+  self : SimpleQueryStream,
+) -> SimpleQueryMessage? {
+  self.next_inner() catch {
+    err => {
+      self.abandon_after_error()
+      raise err
+    }
+  }
+}
+
+///|
+async fn SimpleQueryStream::next_inner(
   self : SimpleQueryStream,
 ) -> SimpleQueryMessage? {
   self.assert_attached()
@@ -114,6 +128,7 @@ pub async fn SimpleQueryStream::next(
       ReadyForQuery(_) => {
         // The simple-query batch is complete only after the final ready frame.
         self.finished = true
+        self.release_permit()
         return self.raise_terminal_error_or_none()
       }
       _ =>
@@ -145,6 +160,14 @@ pub async fn SimpleQueryStream::collect(
 ///|
 /// Drain the simple-query stream.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
+  if self.detached {
+    match self.detached_task {
+      Some(task) => task.wait()
+      None => ()
+    }
+    ignore(self.raise_terminal_error_or_none())
+    return
+  }
   for msg = self.next() {
     match msg {
       Some(_) => continue self.next()
@@ -162,8 +185,28 @@ pub fn SimpleQueryStream::detach(self : SimpleQueryStream) -> Unit {
   if self.finished || self.detached {
     return
   }
+  self.start_detached_drain()
+}
+
+///|
+fn SimpleQueryStream::start_detached_drain(self : SimpleQueryStream) -> Unit {
   self.detached = true
-  spawn_detached_drain(self.background_group, () => self.drain_discard())
+  self.detached_task = spawn_detached_drain(self.background_group, () => {
+    defer self.release_permit()
+    self.drain_discard()
+  })
+  if self.detached_task is None {
+    self.release_permit()
+  }
+}
+
+///|
+fn SimpleQueryStream::abandon_after_error(self : SimpleQueryStream) -> Unit {
+  if self.finished {
+    self.release_permit()
+  } else if !self.detached {
+    self.start_detached_drain()
+  }
 }
 
 ///|
@@ -189,6 +232,7 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
       }
       ReadyForQuery(_) => {
         self.finished = true
+        self.release_permit()
         match self.database_error {
           Some(err) => raise ClientError::Database(err)
           None => return
@@ -200,6 +244,14 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
           ClientError::UnexpectedMessage("unexpected simple query response"),
         )
     }
+  }
+}
+
+///|
+fn SimpleQueryStream::release_permit(self : SimpleQueryStream) -> Unit {
+  match self.permit {
+    Some(permit) => permit.release()
+    None => ()
   }
 }
 

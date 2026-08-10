@@ -4,17 +4,16 @@ Single-event-loop PostgreSQL connection pooling for MoonBit.
 
 Package path: `moonbit-community/postgres/pgpool`.
 
-This package is for:
+The package supports `native` and classic `wasm`. WasmGC is intentionally
+excluded because pooled clients require the socket/TLS transport.
 
-- reusing PostgreSQL sessions
-- isolating long-running queries from short ones
-- letting multiple async tasks talk to PostgreSQL without sharing one connection timeline
-
-This package is not a multi-threaded throughput layer. MoonBit still runs on a
-single event loop, so pool sizing should reflect session isolation needs rather
-than CPU core count.
+Each physical `@client.Client` is single-flight. The pool supplies concurrency
+by checking out different sessions, while preserving FIFO execution within one
+callback-scoped `Session`.
 
 ## Quick Start
+
+For ordinary fully consumed operations, call the pool directly:
 
 ```mbt check
 ///|
@@ -31,36 +30,129 @@ async fn _pool_quick_start(
       dbname=database,
       password~,
       application_name="my-service",
-      pool=PoolConfig::new(2),
+      pool=PoolConfig::new(4),
     )
     let pool = Pool::new(config, group)
-
-    let value : Int = pool.with_client(client => {
-      client.query_one("select 1::int4 as value").get_name("value")
-    })
+    let value : Int = pool
+      .query_one("select 1::int4 as value")
+      .get_name("value")
     ignore(value)
-
     pool.close()
   })
 }
 ```
 
-`Pool::with_client` is the main entry point. It avoids the usual "borrow and
-forget to return" problem that shows up in MoonBit because there is no Rust
-style `Drop` hook to rely on.
+Pool-level operations automatically checkout, use, and return a connection:
 
-When one pooled operation needs explicit PostgreSQL cancellation, use
-`Client::run_cancellable(...)`. The callback receives a short-lived
-`OperationCancelToken` plus an `Operation` handle that keeps the cancel scope
-tied to that one callback:
+- `query_all`, `query_one`, `query_opt`, and `query_typed_all`
+- `execute` and `batch_execute`
+- `check_connection`
+- `with_transaction`
+
+There is no manual `get` / `release` / `detach_raw` API.
+
+## Session-Scoped Work
+
+Use `Pool::with_session` when several operations must use the same PostgreSQL
+session:
 
 ```mbt check
 ///|
-async fn _pool_cancellable_example(pool : Pool) -> Unit {
+async fn _session_example(pool : Pool) -> Int {
+  pool.with_session(session => {
+    session.batch_execute("set application_name = 'pool-example'")
+    session.query_one("select 42::int4 as value").get_name("value")
+  })
+}
+```
+
+`Session` replaces the former pooled `Client` name. A session is valid only
+during its callback. Captured handles used afterwards raise
+`PoolError::ScopeExpired`.
+
+Calls submitted through one `Session` execute FIFO. Do not capture the outer
+session and wait on it from inside a transaction, prepared-statement, or
+cancellable callback: use the capability passed to that callback.
+
+## Transactions
+
+Pool and session transaction helpers reserve one physical connection for the
+callback:
+
+```mbt check
+///|
+async fn _pool_transaction(pool : Pool) -> Unit {
+  pool.with_transaction(tx => {
+    ignore(tx.execute("update accounts set active = true"))
+    ()
+  })
+}
+```
+
+The callback commits on success and rolls back best-effort on error. Nested
+transactions use savepoints. A captured `Transaction` is expired when its
+callback completes.
+
+## Streaming And COPY
+
+Low-level protocol handles are callback-scoped so the pool can restore the
+connection before reuse:
+
+- `Session::with_stream` and `with_typed_stream` receive
+  `@client.RowStream`
+- `Session::with_simple_query` receives `@client.SimpleQueryStream`
+- `Session::with_copy_in` receives `@client.CopyInSink`
+- `Session::with_copy_out` receives `@client.CopyOutStream`
+
+The callbacks may consume, finish, abort, or detach their handles. On callback
+exit, the pool waits for required cleanup before recycling the connection.
+There are no duplicate pgpool stream, portal, or COPY wrapper types.
+
+## Prepared Statements And Cache
+
+`Session::with_prepared` and `with_prepared_typed` provide a scoped
+`PreparedStatement`. It supports fully consumed query/execute helpers and
+`with_stream`; explicit bind, pooled portals, and manual close are not exposed.
+
+Ordinary query, execute, and streaming helpers use prepared statements cached
+automatically per physical connection. Configure the LRU capacity through
+`PoolConfig::new`:
+
+```mbt check
+///|
+fn _pool_config() -> PoolConfig raise {
+  PoolConfig::new(
+    8,
+    statement_cache_capacity=100,
+    timeouts=Timeouts::new(wait_ms=Some(500)),
+    queue_mode=QueueMode::fifo(),
+    recycling_method=RecyclingMethod::verified(),
+  )
+}
+```
+
+The default capacity is `100`. Set it to `0` to disable caching; negative
+values raise `PoolError::InvalidConfig`. Cache entries are local to one
+physical connection. Typed parameter arrays are copied when inserted, so later
+caller mutation cannot rewrite a cache key. There are no public cache-manager
+or cache-handle APIs.
+
+Invalid-statement SQLSTATE `26000` and unsupported-plan SQLSTATE `0A000`
+invalidate the affected entry and propagate the original database error. The
+pool does not retry automatically inside a transaction.
+
+## Operation-Scoped Cancellation
+
+Use `Session::run_cancellable` when cancellation must be tied to one pooled
+operation:
+
+```mbt check
+///|
+async fn _cancellable(pool : Pool) -> Unit {
   @async.with_task_group(group => {
     ignore(
-      pool.with_client(client => {
-        client.run_cancellable((op, token) => {
+      pool.with_session(session => {
+        session.run_cancellable((op, token) => {
           group.spawn_bg(no_wait=true, () => {
             @async.sleep(50)
             token.cancel()
@@ -68,7 +160,7 @@ async fn _pool_cancellable_example(pool : Pool) -> Unit {
           let value : Int = op
             .query_one("select pg_sleep(5), 1::int4 as value")
             .get_name("value")
-          value
+          ignore(value)
         })
       }),
     ) catch {
@@ -78,232 +170,57 @@ async fn _pool_cancellable_example(pool : Pool) -> Unit {
 }
 ```
 
-The pooled cancel token is best-effort and operation-scoped. After the
-callback returns, later `cancel()` calls become inert, so a stale handle cannot
-interrupt a later borrower that reuses the same physical PostgreSQL session.
+`OperationCancelToken` is best-effort and becomes inert when its callback
+ends, preventing a stale token from cancelling work performed by a later
+borrower.
 
-## Choose The Checkout Style
+## Configuration
 
-Start with the smallest API that matches the ownership you need:
+`pgpool.Config` normalizes one or more PostgreSQL targets into concrete
+`@client.Config` values. It supports host/hostaddr lists, per-target ports,
+`TargetSessionAttrs`, host load balancing, TLS, authentication, startup
+parameters, and `PoolConfig`.
 
-- `Pool::with_client(...)`: the normal entry point; borrow one client for one
-  callback and release it automatically
-- `Pool::get()`: manual lease management when the client must outlive one
-  callback
-- `Client::with_transaction(f, options?)`: run one callback inside a transaction
-  that auto-commits on success and rolls back best-effort on error
-- `Client::with_stream(...)`, `with_simple_query(...)`, `with_copy_in(...)`,
-  `with_copy_out(...)`: callback-scoped access to low-level streaming APIs
-- `Client::run_cancellable(...)`: exclusive one-request-at-a-time scope with a
-  cancel token
+`PoolConfig` controls:
 
-Use `Pool::get()` only when the automatic callback-scoped APIs are not enough.
-The lease must be released explicitly, and any open transaction or raw stream
-still belongs to that lease.
+- `max_size`
+- checkout/create/recycle timeouts
+- FIFO or LIFO idle-connection selection
+- fast, verified, clean, or custom recycling
+- per-connection statement-cache capacity
 
-## Multi-Target Config
+`PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
+Hooks receive the raw `@client.Client`; keep them short and leave the session
+idle when they return.
 
-`pgpool.Config` is declarative. The pool normalizes it into one or more
-concrete `@client.Config` targets before any network connection is opened.
-`Config::new(...)` mirrors `@client.Config::new(...)` for the primary target
-and then adds pool-specific multi-target options such as `hosts`, `hostaddrs`,
-`ports`, `target_session_attrs`, and `load_balance_hosts`.
+Create and recycle deadlines are hard for client I/O: when either expires, the
+pool first calls `Client::abort()` on the candidate physical connection and
+then reports `PoolError::Timeout(Create)` or retires the timed-out recycle
+candidate. Custom connector code before it returns a `Client`, and hook code
+that does not perform client I/O, must still cooperate with ordinary task
+cancellation.
 
-The practical rules are:
+A custom `Connector` receives `(Config, TaskGroup[Unit])` and returns an
+already-driven `@client.Client`.
 
-- `host` and `hosts` are appended together in order
-- `port` is broadcast to every target when `ports` is absent
-- `hostaddr` and `hostaddrs` let TCP routing differ from certificate identity
-- `password` is optional in the config, but each connection needs it when the
-  server selects cleartext password or SCRAM authentication
-- `application_name` is required by `Config::new` and is copied to every target
-- `target_session_attrs=ReadWrite` rejects a target that reports
-  `transaction_read_only = on`
-- `load_balance_hosts=Random` randomizes the order in which new connections try
-  targets; it does not reshuffle already-open idle connections
+## Lifecycle And Errors
 
-```mbt check
-///|
-fn _multi_target_config() -> Config raise {
-  Config::new(
-    "primary.db",
-    user="moon",
-    dbname="app",
-    application_name="my-service",
-    hosts=["replica.db"],
-    ports=[5432, 5432],
-    target_session_attrs=TargetSessionAttrs::read_write(),
-    load_balance_hosts=Random,
-    pool=PoolConfig::new(
-      4,
-      timeouts=Timeouts::new(
-        wait_ms=Some(500),
-        create_ms=Some(1000),
-        recycle_ms=Some(250),
-      ),
-      queue_mode=QueueMode::lifo(),
-      recycling_method=RecyclingMethod::verified(),
-    ),
-  )
-}
-```
+`Pool::close()` rejects new operations and closes idle connections. Active
+callbacks are allowed to clean up; their physical connections close instead of
+returning to the idle set.
 
-Use `host` / `hosts` when certificate identity matters. Add `hostaddr` only
-when routing must use a different IP address than the hostname used for TLS.
+`Pool::resize()` never interrupts checked-out sessions. When shrinking cannot
+remove enough currently available capacity tokens, the pool records resize
+debt; later failed checkouts and session returns repay that debt before making
+tokens available. Expanding first cancels debt and adds only the remaining
+capacity, preventing shrink/expand races from exceeding the configured maximum.
 
-## Timeouts, Queue Mode, And Recycling
+`PoolError` is limited to pool lifecycle:
 
-`PoolConfig.max_size` is required. There is no implicit CPU-based default,
-because this pool is about session isolation, not thread-per-core throughput.
+- `Closed`
+- `Timeout`
+- `ScopeExpired`
+- `InvalidConfig`
 
-`Timeouts::new(...)` controls three different waits:
-
-- `wait_ms`: time spent waiting for pool capacity
-- `create_ms`: time spent opening a new physical connection
-- `recycle_ms`: time spent validating or cleaning one idle connection
-
-`QueueMode::fifo()` reuses the oldest idle connection first.
-`QueueMode::lifo()` reuses the most recently returned idle connection first.
-This changes idle-connection selection only; it does not reorder tasks already
-waiting in `get()`.
-
-Recycling methods mean:
-
-- `RecyclingMethod::fast()`: trust the idle connection as-is
-- `RecyclingMethod::verified()`: run a lightweight health check
-- `RecyclingMethod::clean()`: reset session state before reuse
-- `RecyclingMethod::custom(sql)`: run your own cleanup SQL during checkout
-
-Choose `fast` for simple stateless workloads, `verified` when broken idle
-connections are the main concern, and `clean` when borrowers regularly leave
-session-local state such as open portals/cursors, LISTEN state, advisory locks,
-or temporary objects behind. Cached prepared statements are managed separately
-through the statement-cache APIs.
-
-## Pool Options
-
-`Pool::new(config, group, options?)` accepts runtime extension hooks:
-
-- `post_create`: run after a brand-new connection opens
-- `pre_recycle`: run before recycle-time validation / cleanup of an idle
-  connection
-- `post_recycle`: run after recycling succeeded and just before checkout
-
-Keep these hooks short and leave the session idle when they return. Good uses
-are `SET search_path`, session GUCs, or a custom validation query.
-
-```mbt check
-///|
-fn _pool_options_hook_example(group : @async.TaskGroup[Unit]) -> Pool raise {
-  let config = Config::new(
-    "db.example",
-    user="moon",
-    dbname="app",
-    application_name="my-service",
-    pool=PoolConfig::new(2),
-  )
-  let options = PoolOptions::new(
-    post_create=client => client.batch_execute("set search_path to app, public"),
-    pre_recycle=client => client.check_connection(),
-  )
-  Pool::new(config, group, options~)
-}
-```
-
-## Safe API Surface
-
-Most high-level operations on `Client`, `Operation`, and `Transaction` are
-scope-safe:
-
-- fully-drained query helpers such as `query_all`, `query_one`, `query_opt`,
-  and `query_typed_all`
-- command helpers such as `execute`, `batch_execute`, and `check_connection`
-- transaction helpers such as `transaction`, `with_transaction`, and
-  `with_savepoint`
-- scope-bound prepared statement helpers such as `with_prepared(...)` and
-  `with_prepared_cached(...)`
-- scope-bound low-level helpers such as `with_stream(...)`,
-  `with_simple_query(...)`, `with_copy_in(...)`, `with_copy_out(...)`, and
-  `PreparedStatement::with_portal(...)`
-
-There are still a few explicit ownership handoff APIs:
-
-- `Pool::get()` requires the caller to release the lease
-- `Client::transaction()` and `Transaction::transaction()` require an explicit
-  `commit()` or `rollback()`
-- `Client::detach_raw()` permanently removes the connection from pool management
-
-Prepared statements are available, but only through callback-scoped
-`PreparedStatement` handles. The handle is released automatically when the
-callback finishes, so it cannot leak across pool reuse boundaries.
-
-Low-level streams, portals, and `COPY` handles are available only through
-callback-scoped wrappers. When the callback returns, the pool drains, aborts,
-or closes unfinished protocol state before the connection becomes reusable.
-
-`Pool::close()` rejects future checkouts immediately and closes idle
-connections, but it does not revoke already borrowed clients. Those leases keep
-working until they are released, and then their physical connections are closed
-instead of returning to the idle pool.
-
-## Statement Cache
-
-Prepared-statement caching is per physical connection, not per pool. A cache hit
-on one connection does not warm up other connections.
-
-Use `with_prepared_cached(...)` when you want the pool to create or reuse one
-cached statement for the current callback:
-
-```mbt check
-///|
-async fn _statement_cache_example(pool : Pool) -> Unit {
-  pool.with_client(client => {
-    client.with_prepared_cached("select $1::int4 as value", prepared => {
-      let value = 7
-      let params : Array[&@client.ToSql] = [value as &@client.ToSql]
-      let row = prepared.query_one(params~)
-      let decoded : Int = row.get_name("value")
-      ignore(decoded)
-    })
-  })
-  |> ignore
-
-  let cache_size = pool.with_client(client => client.statement_cache().size())
-  ignore(cache_size)
-
-  pool.manager().statement_caches().clear()
-}
-```
-
-Use the handles like this:
-
-- `client.statement_cache()`: manage the cache of the currently checked-out
-  physical connection
-- `transaction.statement_cache()`: same, but from inside one pooled transaction
-- `pool.manager().statement_caches()`: clear or remove cached statements across
-  every connection that is live right now
-
-## Detaching A Raw Client
-
-`Client::detach_raw()` is the escape hatch when you intentionally want to stop
-using the pool for one checked-out connection.
-
-After detaching:
-
-- the pool frees one capacity slot immediately
-- the returned `@client.Client` keeps using the existing background driver task
-- the pool no longer recycles, tracks, or closes that connection for you
-- you must close the raw client yourself
-
-```mbt check
-///|
-async fn _detach_raw_example(pool : Pool) -> Unit {
-  let lease = pool.get()
-  let raw = lease.detach_raw()
-  let value : Int = raw.query_one("select 1::int4 as value").get_name("value")
-  ignore(value)
-  raw.close()
-}
-```
-
-Use this only when you really need to transfer ownership out of the pool.
+Database, decoding, and row-count errors are propagated as
+`@client.ClientError`.

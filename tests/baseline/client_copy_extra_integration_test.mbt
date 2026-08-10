@@ -1,13 +1,73 @@
 ///|
+/// Keep producing after an invalid first row until COPY backpressure surfaces
+/// PostgreSQL's early error. This intentionally never calls `finish`.
+async fn copy_in_early_error(sink : @client.CopyInSink) -> Error {
+  for i in 0..<64 {
+    let data = if i == 0 { b"not-an-int\n" } else { b"1\n" }
+    sink.send(data[:]) catch {
+      error => return error
+    }
+  }
+  fail("expected COPY IN send to surface an early database error")
+}
+
+///|
+async fn assert_copy_in_early_error_reuses_connection(
+  config : IntegrationConfig,
+  group : @async.TaskGroup[Unit],
+  ssl_mode : @client.SslMode,
+  application_name : String,
+) -> Unit {
+  let client = @client.connect(
+    as_client_config(config, ssl_mode~, application_name~),
+    group,
+  )
+  client.batch_execute("create temp table moon_copy_early_error(value int4)")
+  let sink = client.copy_in("copy moon_copy_early_error from stdin")
+  let database_error = expect_database_error(
+    @async.with_timeout(3000, () => copy_in_early_error(sink)),
+  )
+  @debug.assert_eq(database_error.code, Some("22P02"))
+
+  let probe : Int = client
+    .query_one("select 31::int4 as value")
+    .get_name("value")
+  @debug.assert_eq(probe, 31)
+  client.close()
+}
+
+///|
+/// PostgreSQL may reject malformed COPY data before `finish`; both plaintext
+/// and TLS connections must surface that error from `send` and remain reusable.
+async test "integration copy in early error before finish keeps plain and tls connections reusable" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  @async.with_task_group(group => {
+    assert_copy_in_early_error_reuses_connection(
+      config,
+      group,
+      Disable,
+      "moonbit-postgres-copy-early-error-plain",
+    )
+    assert_copy_in_early_error_reuses_connection(
+      config,
+      group,
+      VerifyFull,
+      "moonbit-postgres-copy-early-error-tls",
+    )
+  })
+}
+
+///|
 /// This verifies that a COPY IN startup failure surfaces PostgreSQL's database error and still drains to a reusable connection.
 /// The missing table forces PostgreSQL to reply with `ErrorResponse` before COPY mode starts.
 async test "integration copy in startup error keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(config, application_name="moonbit-postgres"),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     let err = expect_database_error(
       expect_error_async(() => {
@@ -31,10 +91,10 @@ async test "integration copy in startup error keeps connection reusable" {
 async test "integration copy in finish closes sink and commits rows" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(config, application_name="moonbit-postgres"),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     client.batch_execute("create temp table moon_copy_finish(value int4)")
 
@@ -66,10 +126,10 @@ async test "integration copy in finish closes sink and commits rows" {
 async test "integration copy out collect keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(config, application_name="moonbit-postgres"),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     let stream = client.copy_out(
       "copy (select value from (values ('alpha'), ('beta')) as t(value) order by value) to stdout",
@@ -91,10 +151,10 @@ async test "integration copy out collect keeps connection reusable" {
 async test "integration copy out finish drains large payload and keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let (client, connection) = @client.connect(
+    let client = @client.connect(
       as_client_config(config, application_name="moonbit-postgres"),
+      group,
     )
-    group.spawn_bg(() => connection.run())
 
     let stream = client.copy_out(
       "copy (select repeat('x', 32768) from generate_series(1, 8)) to stdout",

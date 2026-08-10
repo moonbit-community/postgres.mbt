@@ -266,4 +266,3 @@ pub fn SaslMechanisms::next_str(Self) -> String? raise @protocol.ProtocolError
 // Type aliases
 
 // Traits
-

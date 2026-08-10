@@ -3,19 +3,23 @@
 ///|
 /// Internal transport abstraction that hides whether startup negotiated TLS.
 ///
-/// Once startup finishes, the rest of the package can treat the connection as a
-/// generic reader/writer without branching on plain TCP versus TLS again.
+/// A secure stream retains both the TLS state and its original TCP transport.
+/// `Tls::close` releases only TLS resources, so the TCP handle must remain
+/// available for deterministic transport teardown.
 priv enum Stream {
   Plain(@socket.Tcp)
-  Secure(@tls.Tls)
+  Secure(@tls.Tls, @socket.Tcp)
 }
 
 ///|
-/// Close the underlying socket or TLS session.
+/// Release protocol state before closing the underlying transport.
 fn Stream::close(self : Stream) -> Unit {
   match self {
     Plain(conn) => conn.close()
-    Secure(conn) => conn.close()
+    Secure(tls, conn) => {
+      tls.close()
+      conn.close()
+    }
   }
 }
 
@@ -24,7 +28,7 @@ fn Stream::close(self : Stream) -> Unit {
 impl @io.Reader for Stream with fn _direct_read(self, buf, offset~, max_len~) {
   match self {
     Plain(conn) => conn._direct_read(buf, offset~, max_len~)
-    Secure(conn) => conn._direct_read(buf, offset~, max_len~)
+    Secure(tls, _) => tls._direct_read(buf, offset~, max_len~)
   }
 }
 
@@ -33,7 +37,7 @@ impl @io.Reader for Stream with fn _direct_read(self, buf, offset~, max_len~) {
 impl @io.Reader for Stream with fn _get_internal_buffer(self) {
   match self {
     Plain(conn) => conn._get_internal_buffer()
-    Secure(conn) => conn._get_internal_buffer()
+    Secure(tls, _) => tls._get_internal_buffer()
   }
 }
 
@@ -45,7 +49,7 @@ extend Stream with @io.Reader::{read_exactly}
 impl @io.Writer for Stream with fn write_once(self, buf, offset~, len~) {
   match self {
     Plain(conn) => conn.write_once(buf, offset~, len~)
-    Secure(conn) => conn.write_once(buf, offset~, len~)
+    Secure(tls, _) => tls.write_once(buf, offset~, len~)
   }
 }
 
@@ -58,7 +62,7 @@ extend Stream with @io.Writer::{write}
 /// `Messages` covers ordinary simple and extended protocol traffic.
 /// `CopyIn` marks a request that must interleave outbound `CopyData` frames with
 /// inbound backend messages.
-/// `Terminate` requests graceful shutdown and acts as a pipeline barrier.
+/// `Terminate` requests graceful shutdown after earlier logical operations.
 priv enum RequestKind {
   Messages
   CopyIn
@@ -77,12 +81,12 @@ priv enum CopyInAction {
 }
 
 ///|
-/// A small bounded per-request buffer keeps lightweight pipelining working
-/// while preventing unread streams from accumulating responses without bound.
+/// A small bounded per-request buffer prevents unread streams from accumulating
+/// responses without bound.
 let request_response_queue_kind : @aqueue.Kind = Blocking(8)
 
 ///|
-/// One outbound request queued for the connection task.
+/// One outbound request queued for the private driver.
 ///
 /// The request owns the exact bytes to write on the wire and the queue that the
 /// connection loop will feed with backend messages for this request.
@@ -91,13 +95,41 @@ priv struct Request {
   bytes : Bytes
   responses : @async.Queue[@backend.Message]
   copy_input : @async.Queue[CopyInAction]?
+  copy_error : @ref.Ref[DatabaseError?]?
+}
+
+///|
+/// FIFO gate that gives one logical operation exclusive use of a connection.
+///
+/// The permit covers the whole operation rather than one wire request. A query,
+/// for example, may prepare a statement, inspect type metadata, execute it, and
+/// close temporary server state before releasing the connection.
+priv struct OperationGate {
+  mutex : @async.Mutex
+}
+
+///|
+/// One idempotently releasable acquisition of an `OperationGate`.
+priv struct OperationPermit {
+  gate : OperationGate
+  released : @ref.Ref[Bool]
+}
+
+///|
+/// Private capability passed through nested pieces of one logical operation.
+///
+/// Internal helpers that receive this context must not reacquire the client's
+/// operation gate. This is what lets type-cache catalog queries and deferred
+/// statement cleanup remain part of their parent operation without deadlocking.
+priv struct OpContext {
+  client : Client
 }
 
 ///|
 /// Shared mutable state visible to every handle created from one connection.
 ///
 /// All user-facing handles (`Client`, `Statement`, `Portal`, `Transaction`,
-/// cancellation tokens, and the `Connection` task itself) reference this struct
+/// cancellation tokens, and the private driver task) reference this struct
 /// so they can coordinate lifecycle, cache type metadata, and publish async
 /// messages without global state.
 priv struct Shared {
@@ -112,11 +144,15 @@ priv struct Shared {
   transaction_status : @ref.Ref[Byte]
   closed : @ref.Ref[Bool]
   closing : @ref.Ref[Bool]
+  aborted : @ref.Ref[Bool]
+  operation_gate : OperationGate
+  driver_task : @ref.Ref[@async.Task[Unit]?]
+  driver_done : @async.Queue[Unit]
   next_id : @ref.Ref[Int]
 }
 
 ///|
-/// User-facing handle used to enqueue work onto the connection task.
+/// User-facing handle used to enqueue work onto the private driver.
 ///
 /// `Client` is intentionally lightweight. It does not own the socket and can be
 /// cloned freely by value because all mutable state lives inside `Shared`.
@@ -131,17 +167,14 @@ struct Client {
 /// the returned `RowStream` so the statement is closed only after all rows and
 /// trailing protocol messages have been consumed.
 priv struct StreamCleanup {
-  client : Client
+  context : OpContext
   bytes : Bytes
   mut done : Bool
 }
 
 ///|
-/// Socket-owning runtime task that executes queued requests and reads replies.
-///
-/// `connect` returns a `Connection` alongside `Client`; callers must keep
-/// `Connection::run` alive for the client handle to make progress.
-struct Connection {
+/// Socket-owning private runtime task.
+priv struct Driver {
   shared : Shared
   stream : Stream
 }
@@ -195,9 +228,11 @@ struct CancelToken {
 /// The sink feeds `CopyInAction` values to the connection loop while the paired
 /// response queue waits for the backend's completion status.
 struct CopyInSink {
+  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
   input : @async.Queue[CopyInAction]
   responses : @async.Queue[@backend.Message]
   finished : @ref.Ref[Bool]
+  permit : OperationPermit
 }
 
 ///|
@@ -207,6 +242,10 @@ struct CopyInSink {
 /// is reused for the top-level transaction and for nested savepoint scopes.
 struct Transaction {
   client : Client
+  context : OpContext
+  scope_gate : OperationGate
+  root_permit : OperationPermit?
+  parent_permit : OperationPermit?
   savepoint : String?
   finished : @ref.Ref[Bool]
 }
