@@ -1,258 +1,108 @@
-# Postgres Client Internals
-
-## Core Design
-
-The package is built around an explicit split between:
-
-- `Client`: a lightweight handle used to submit work
-- `Connection`: the socket-owning runtime that performs all PostgreSQL I/O
-
-That split is the main architectural decision in the package.
-
-At a conceptual level, one live connection consists of:
-
-- one shared outbound queue
-- one ordered list of requests registered for sending but not yet completed
-- one private inbound queue for each in-flight request
-- one side channel for asynchronous backend messages
-
-Direction note: `outbound` and `inbound` are named relative to the local
-socket-owning connection runtime. `outbound` means bytes and requests flowing
-from this package to PostgreSQL. `inbound` means backend frames flowing from
-PostgreSQL back into this package.
-
-The important consequence is that the package does not route replies by looking
-up a particular client handle. It routes replies by request ownership.
-
-## Queue Ownership Model
-
-Every operation submitted through a client handle is turned into one or more
-request objects.
-
-Each request owns:
-
-- encoded outbound protocol bytes
-- a private response queue for backend messages
-- optional extra state when the request needs bidirectional coordination, such
-  as COPY FROM STDIN input
-
-All client handles derived from the same connection share the same submission
-path. They all send work through one socket and therefore share one protocol
-timeline. The runtime keeps their results separate by giving each request its
-own response queue and routing replies according to request ownership.
-
-That is the central routing rule in this package.
-
-## End-To-End Flow
-
-From a high level, message delivery works like this:
-
-1. Connection startup finishes and constructs shared runtime state.
-2. Application code submits work through a lightweight handle.
-3. That work is packaged as a request and pushed into the shared outbound
-   queue.
-4. The socket-owning runtime takes requests from that queue in protocol order
-   and registers them in the ordered pending list.
-5. It writes each registered request to the wire. Registering before the write
-   keeps the request reachable by cleanup if writing fails or is cancelled.
-   A successfully sent `Terminate` is removed immediately and its response
-   queue is closed because it has no backend reply.
-6. Backend frames are then read from the socket in order.
-7. Frames that are globally asynchronous are peeled off into the async side
-   channel.
-8. All other frames are delivered to the oldest pending request.
-9. The consumer that already owns that request's private response queue reads
-   and decodes the frames into rows, completion states, copy chunks, or errors.
-10. When PostgreSQL sends `ReadyForQuery`, that request is considered complete
-    and is removed from the pending list.
-
-So the full handoff model is:
-
-- shared outbound queue
-- FIFO pending list
-- one inbound response queue per request
-
-## What "A Specific Client Gets The Data" Means
-
-A `Client` value is only a lightweight reference into shared runtime state.
-It does not own a mailbox of its own.
-
-Inside one live connection, reply ownership is tracked like this:
-
-- the submitting side creates a fresh response queue for a request
-- the consumer that represents that request keeps the queue
-- the connection runtime forwards matching backend frames into that queue
-- that same consumer drains and decodes them
-
-This leads to two important properties:
-
-- copying or passing around a client handle does not create an independent
-  connection
-- true isolation only exists across separate connections, because separate
-  connections have different shared state, queues, pending lists, and sockets
-
-In other words, the runtime is not asking "which client object should receive
-this frame?" It is asking "which pending request owns this frame?"
-
-## Multi-Stage Operations
-
-Not every user-visible operation maps to exactly one protocol request.
-
-Some operations naturally decompose into multiple stages, for example:
-
-- a metadata-discovery stage
-- an execution stage
-- a cleanup stage
-
-Each stage can have its own request object and therefore its own response
-queue, but those stages still belong to one higher-level operation from the
-caller's point of view.
-
-This matters for understanding the runtime:
-
-- one high-level action may occupy multiple positions on the protocol timeline
-- later stages may depend on metadata learned from earlier stages
-- cleanup may be delayed until the response stream reaches its terminal state
-
-So the abstraction boundary is:
-
-- protocol scheduling happens per request
-- user intent is often expressed per multi-stage operation
-
-## Backpressure And Stream Lifetime
-
-The package relies on a strict invariant:
-
-- a request is not complete until PostgreSQL sends `ReadyForQuery`
-
-This is why response consumers cannot be abandoned casually.
-
-Per-request response queues are intentionally bounded. That means an unfinished
-consumer can stop the socket-owning runtime from making forward progress, which
-in turn can stall later pipelined work.
-
-This is also why some cleanup actions are tied to terminal stream state instead
-of happening immediately: interrupting the active protocol exchange would be
-incorrect.
-
-At a conceptual level, a response consumer must do one of three things:
-
-- consume to completion
-- synchronously drain to completion
-- delegate the remaining drain to background work
-
-If none of those happens, protocol progress may stop behind unread messages.
-
-## Pipelining Rules
-
-The runtime opportunistically pipelines requests when it is safe to do so.
-
-The rule is simple:
-
-- ordinary one-way request/response traffic may be pipelined
-- requests that require tight mid-stream coordination act as barriers
-
-COPY FROM STDIN is the main example of a barrier, because the client must
-continue producing outbound data while also processing inbound backend messages
-for the same logical request.
-
-Graceful shutdown is also a barrier, because once termination is requested the
-runtime must stop accepting normal forward progress and instead converge toward
-closure.
-
-## Startup And Authentication
-
-Startup is conceptually separate from the normal request loop.
-
-Before the runtime can begin ordinary request scheduling, it must first:
-
-1. open the transport
-2. negotiate TLS if needed
-3. send PostgreSQL startup parameters
-4. complete authentication
-5. collect backend identity and initial session state
-6. construct the shared runtime state
-
-Only after that handoff does the connection enter its steady-state request loop.
-
-## Request Encoding
-
-Request construction is intentionally front-loaded.
-
-Before a request enters the shared outbound queue, the runtime tries to do as
-much deterministic work as possible:
-
-- assemble protocol frames
-- validate parameter counts and type compatibility
-- serialize parameter payloads
-- represent SQL `NULL` explicitly rather than implicitly
-
-This front-loading keeps runtime behavior predictable and makes many failures
-occur before bytes are written to the socket.
-
-## Response Interpretation
-
-Inbound processing is split into two layers:
-
-- the connection runtime only decides where each backend frame belongs
-- the request-specific consumer interprets the meaning of those frames
-
-That second layer is responsible for things like:
-
-- turning row data into user-facing values
-- tracking completion summaries
-- delaying database errors until the terminal ready state
-- detecting impossible protocol states and failing the stream
-
-This separation keeps the routing logic simple and keeps protocol semantics
-close to the consumer that actually cares about them.
-
-## Async Side Channel
-
-Some backend messages are intentionally treated as out-of-band:
-
-- parameter updates
-- notices
-- notifications
-
-These messages do not belong to the current request head in the same way that
-row data or command completion does, so the runtime peels them off first and
-publishes them through a separate side channel.
-
-That separation has two benefits:
-
-- request-specific consumers can stay focused on messages that advance their own
-  protocol state
-- session-wide events remain observable even while ordinary requests are in
-  flight
-
-## Type Metadata And Caching
-
-The package separates two concerns:
-
-- PostgreSQL's own type metadata
-- MoonBit-side encode/decode contracts
-
-The runtime starts with a built-in set of known PostgreSQL types, then enriches
-that picture lazily when later operations need more detail.
-
-This allows early progress with only raw OIDs while still supporting richer
-metadata for enums, composites, domains, ranges, and other server-defined
-types.
-
-The shared cache exists so later operations do not have to rediscover the same
-type information repeatedly.
-
-## Cancellation
-
-PostgreSQL query cancellation is out-of-band.
-
-Instead of trying to interrupt the main socket directly, the client keeps the
-backend identity needed to open a separate short-lived control connection and
-send a PostgreSQL cancel request there.
-
-This matches PostgreSQL's own cancellation model and avoids corrupting the main
-protocol stream.
+# Client Runtime Architecture
+
+This document describes the invariants behind the `client` package. Public
+usage belongs in `README.mbt.md`.
+
+## Ownership Model
+
+`Client` is the only public connection handle. `connect(config, group)`:
+
+1. performs PostgreSQL startup and authentication
+2. creates shared queues and session state
+3. spawns the socket-owning driver in the supplied task group
+4. returns a cloneable `Client`
+
+Transport ownership stays with connection setup until startup and driver spawn
+both succeed. Any TLS negotiation, authentication, startup-protocol, spawn, or
+connection-timeout failure closes the established transport before propagating
+the error.
+
+The secure `Stream` variant retains both `Tls` and the original `Tcp`. TLS reads
+and writes use `Tls`, but teardown calls `Tls::close()` first and then
+`Tcp::close()`: the TLS API releases protocol resources without closing its
+underlying transport. Teardown intentionally does not call the asynchronous TLS
+shutdown exchange, so cancellation and error unwinding can always release the
+transport synchronously.
+
+The driver is private and its task handle is stored in shared state so
+`Client::abort()` can request cancellation synchronously. The driver owns all
+socket reads, writes ordinary frontend messages, and publishes notices,
+notifications, and parameter-status updates. Closing the task group cannot
+leave an orphan driver.
+
+## Single-Flight Invariant
+
+One PostgreSQL session has exactly one active logical operation. Public
+entrypoints acquire an `OperationGate` permit in FIFO order before submitting
+protocol work. Cancellation while waiting removes that waiter without
+transferring ownership incorrectly.
+
+The permit covers the full logical operation, not one frontend message:
+
+- prepare, parameter-type lookup, execution, and cleanup share one context
+- a stream retains the context until EOF, finish, or detached drain
+- COPY IN retains it through finish or abort
+- a transaction retains it through commit or rollback
+- nested transactions transfer the same context through savepoint scopes
+
+Internal phases receive a private `OpContext` and call its internal methods.
+They must never re-enter a public `Client` method and reacquire the gate. This
+is especially important for catalog queries issued by type resolution and for
+temporary prepared-statement cleanup.
+
+## Driver And Queues
+
+The driver processes one `Request` at a time:
+
+1. receive and retain the next accepted operation request before any socket I/O
+2. write its frontend bytes
+3. route every ordinary response to that request's bounded response queue
+4. continue until `ReadyForQuery` or the request's protocol-specific terminal
+   state
+5. move to the next request
+
+There is no pending-request list, opportunistic pipeline decision, or
+oldest-request response routing.
+
+Each request response queue remains bounded (currently eight messages).
+Backpressure therefore stops socket reads for the active request rather than
+growing memory without limit. Because execution is single-flight, a stalled
+consumer cannot be bypassed by a later request.
+
+COPY IN is the protocol exception that requires bidirectional coordination.
+Its producer queue is bounded to eight actions. After PostgreSQL enters COPY
+mode, the driver starts exactly one request-local writer for data, finish, or
+abort actions while the driver itself remains the sole backend reader. An early
+`ErrorResponse` is forwarded to the sink, the input queue is cleared and closed,
+and the writer stops after its current complete frame. The driver joins that
+writer before forwarding the final `ReadyForQuery` or starting another request.
+It is still one logical operation.
+
+## Streams And Detach
+
+Row, simple-query, and COPY OUT streams own the operation permit.
+
+- natural EOF releases it
+- `finish()` drains to the operation boundary and releases it
+- `detach()` transfers both the queue and permit to a driver-managed background
+  drain
+- `finish()` after detach waits for that drain's completion
+
+Cleanup is idempotent. A consumer cancellation must not leak the permit or
+allow the next operation to start before PostgreSQL reaches a safe boundary.
+
+Stream factories check pending cancellation after acquiring their permit and
+before starting protocol work. Factories that protect an asynchronous prepare
+or COPY startup check again after leaving protection, inside the same `errdefer`
+scope. Before a stream exists, that scope releases the permit on failure. Once
+it exists, cancellation hands the stream and permit to a detached drain instead
+of returning an unowned handle or releasing the connection prematurely.
+
+Detached tasks return `Result[Unit, ClientError]`: `Closed` is an expected
+shutdown outcome saved as `Err`, not a task-group failure. Database errors stay
+in stream state; other errors still fail the group. `finish()` checks the task
+result before reading a terminal summary. If no background task could start,
+it drains synchronously to obtain a terminal result or error.
 
 MoonBit task cancellation has separate lifecycle rules. Once `execute_raw`
 owns a result stream, its error cleanup drains to `ReadyForQuery` under
@@ -263,100 +113,72 @@ error or cancellation, and `execute_raw` never closes a caller-owned statement.
 Draining can wait for the SQL command to finish; task cancellation alone does
 not ask PostgreSQL to interrupt it.
 
-`Connection::run` uses synchronous, idempotent exit cleanup on normal shutdown,
-ordinary errors, and cancellation. It closes pending and queued request
+`Driver::run` uses synchronous, idempotent exit cleanup on normal shutdown,
+ordinary errors, and cancellation. It closes the active and queued request
 responses, COPY inputs, the submission and notification queues, and the socket,
 and marks the runtime closed. Ordinary driver errors reach waiting requests;
 cancellation gives them `ClientError::Closed` while preserving the driver's
-cancellation. Cleanup runs inside the group's main task before joining child
-tasks, so even cancellation-protected consumers can wake up. An outer defer
-provides a fallback without overwriting the original failure.
+cancellation. The driver's exit defer wakes even cancellation-protected
+consumers before publishing `driver_done`, without overwriting an earlier
+failure.
 
 ## Transactions
 
-Transaction handling is layered on top of the same request machinery.
+Beginning a transaction transfers the permit from the Client call into the
+`Transaction`. Transaction methods use the same private context. The permit is
+released only after commit or rollback reaches `ReadyForQuery`.
 
-Top-level transactions use PostgreSQL transaction commands directly. Nested
-transaction scopes are modeled with savepoints.
+Calls submitted through another clone of the outer Client queue behind the
+transaction. Nested transactions use savepoints and temporarily transfer the
+same context to the child transaction.
 
-The important runtime property is not the SQL spelling, but the handle
-discipline:
+Callback transactions roll back on errors and task cancellation. Rollback is
+protected from cancellation and finishes before releasing the owning permit.
 
-- a transaction scope is single-use
-- once committed or rolled back, that scope must not be reused
+async 0.22 does not automatically propagate pending cancellation on leaving a
+protected block. Client and transaction operation boundaries check before new
+work and after the outermost protection ends. Callback transactions also check
+before auto-commit. An enclosing caller protection intentionally defers these
+checks to its own boundary. Successful `BEGIN` or `SAVEPOINT` followed by
+cancellation before handle delivery is rolled back while the original permit
+is still held. A `COMMIT` already submitted is drained and recorded according
+to its server result before cancellation propagates.
 
-That rule prevents later requests from being issued against a logical scope
-that no longer exists on the server.
+## Async Messages
 
-## COPY
+Out-of-band backend messages never enter an operation response queue:
 
-COPY support stays intentionally low-level.
+- `NoticeResponse`
+- `NotificationResponse`
+- `ParameterStatus`
 
-The package treats COPY as protocol transport rather than as a format parser.
-It therefore moves raw copy payloads and completion states, but leaves CSV,
-text, or binary interpretation to higher layers.
+They update shared state and are published through the Client async-message
+queue. `Client::next_message()` has one-consumer semantics and returns `None`
+when the driver terminates.
 
-COPY is also the clearest example of why the runtime distinguishes between
-ordinary request traffic and barrier-style traffic:
+## Failure And Close
 
-- COPY TO STDOUT is still a streamed response
-- COPY FROM STDIN is a coordinated exchange in both directions
+A fatal socket/protocol error is terminal shared state. The driver:
 
-That distinction is part of the runtime scheduler, not just part of the public
-API surface.
+1. fails the active request
+2. fails accepted but unsent requests
+3. lets operation-gate waiters acquire and observe the closed runtime
+4. closes the async-message queue
 
-## File Map
+`Client::close()` seals the gate against new work, waits behind already
+accepted FIFO operations, submits `Terminate`, and waits for driver exit.
+Repeated close calls wait for the same result. Cancelling one close caller does
+not undo a close that has already started.
 
-- `config.mbt`, `errors.mbt`
-  Config and public error surface.
-- `descriptors.mbt`
-  PostgreSQL type descriptors and builtin-type helpers.
-- `sqldata.mbt`, `scalars.mbt`
-  Codec traits and built-in primitive codecs.
-- `rows.mbt`, `row_stream.mbt`
-  Row values and extended-query streaming.
-- `simple_query.mbt`
-  Simple-query messages and stream.
-- `copy.mbt`
-  Async messages plus COPY IN/OUT APIs and streams.
-- `backend_parsing.mbt`
-  Shared backend parsing helpers.
-- `runtime.mbt`
-  Shared runtime structs and internal handle types.
-- `connect.mbt`
-  Public connect/close/cancel APIs.
-- `startup.mbt`
-  TCP/TLS startup and authentication.
-- `query.mbt`
-  Prepare/query/execute/bind/portal APIs.
-- `transactions.mbt`
-  Transaction and savepoint APIs.
-- `connection_loop.mbt`
-  Socket-owning event loop and message routing.
-- `wire.mbt`
-  Frontend protocol encoding helpers.
-- `responses.mbt`
-  Backend response interpretation helpers.
-- `type_cache.mbt`
-  Lazy catalog-backed type lookup.
-- `support.mbt`
-  Smaller shared runtime helpers such as request submission and shutdown.
+`Client::abort()` instead marks the runtime closed immediately, closes the
+submission queue without discarding its buffered request records, and cancels
+the stored driver task. Driver teardown then fails both the active response
+queue and every buffered request queue with the same
+`ClientError::Closed("connection aborted")`. Keeping the request records until
+that teardown is essential: clearing the submission queue directly would leave
+queued callers without a terminal notification. `is_closed()` consequently
+describes runtime usability: it is already true while cancellation unwinds and
+the driver performs the final physical transport close.
 
-## Reading Order For New Maintainers
-
-If you are taking over this package, this is a good reading order:
-
-1. [`README.mbt.md`](./README.mbt.md)
-2. `runtime.mbt`
-3. `connect.mbt`
-4. `support.mbt`
-5. `query.mbt`
-6. `connection_loop.mbt`
-7. `startup.mbt`
-8. `row_stream.mbt`
-9. `simple_query.mbt`
-10. `copy.mbt`
-11. `type_cache.mbt`
-
-That order gets you from public API shape to queue ownership to socket control
-flow and finally to codec/type machinery with minimal jumping around.
+These convergence rules are required so `pgpool` can determine whether a
+physical connection is safe to recycle.
