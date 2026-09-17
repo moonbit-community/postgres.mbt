@@ -3,6 +3,5 @@ import {
   "moonbit-community/postgres/protocol/crypto",
   "tonyfettes/unicode/normalization" @unicode_normalization,
   "moonbitlang/x/codec/base64",
-  "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
 }
