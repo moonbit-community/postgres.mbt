@@ -224,16 +224,10 @@ async fn[T] run_prepared_callback(
   prepared : PreparedStatement,
   f : async (PreparedStatement) -> T,
 ) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(prepared))
-    prepared.release_internal()
-    result
-  } catch {
-    err => {
-      prepared.release_best_effort()
-      raise err
-    }
-  }
+  errdefer prepared.release_best_effort()
+  let result = @async.protect_from_cancel(() => f(prepared))
+  prepared.release_internal()
+  result
 }
 
 ///|
@@ -721,16 +715,10 @@ async fn Portal::close_best_effort(self : Portal) -> Unit {
 ///|
 /// Run one portal-scoped callback and guarantee portal cleanup.
 async fn[T] run_portal_callback(portal : Portal, f : async (Portal) -> T) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(portal))
-    portal.close()
-    result
-  } catch {
-    err => {
-      portal.close_best_effort()
-      raise err
-    }
-  }
+  errdefer portal.close_best_effort()
+  let result = @async.protect_from_cancel(() => f(portal))
+  portal.close()
+  result
 }
 
 ///|
