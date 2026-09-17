@@ -74,16 +74,8 @@ async fn[T] run_cancellable_scope(
   f : async (Operation, OperationCancelToken) -> T,
 ) -> T {
   let (operation, token) = make_pooled_operation(connection)
-  try {
-    let result = f(operation, token)
-    operation.state.finish_scope()
-    result
-  } catch {
-    err => {
-      operation.state.finish_scope()
-      raise err
-    }
-  }
+  defer @async.protect_from_cancel(() => operation.state.finish_scope())
+  f(operation, token)
 }
 
 ///|
