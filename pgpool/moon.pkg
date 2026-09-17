@@ -4,7 +4,6 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/core/random",
   "moonbitlang/core/ref",
-  "moonbitlang/core/string",
 }
 
 import {
