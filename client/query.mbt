@@ -254,6 +254,9 @@ pub fn Client::query_statement(
 ///
 /// This convenience helper prepares a temporary statement, executes it once,
 /// waits for completion, and then closes the prepared statement.
+/// If execution is cancelled, cleanup drains the results before closing the
+/// temporary statement, then propagates cancellation. This can wait for the
+/// current SQL command to finish so the connection remains reusable.
 pub async fn Client::execute(
   self : Client,
   sql : String,
@@ -262,11 +265,11 @@ pub async fn Client::execute(
   let statement = self.prepare(sql)
   // Route through the named-statement path so success and failure share one
   // close policy and one row-count extraction path.
-  let rows = self.execute_raw(statement, params~) catch {
-    err => {
+  let rows = {
+    errdefer @async.protect_from_cancel(() => {
       let _ = statement.close() catch { _ => () }
-      raise err
-    }
+    })
+    self.execute_raw(statement, params~)
   }
   statement.close()
   rows
@@ -276,13 +279,20 @@ pub async fn Client::execute(
 /// Execute a prepared statement and return the affected row count.
 ///
 /// The result stream is drained internally so the command tag can be parsed and
-/// converted into a numeric row count.
+/// converted into a numeric row count. On cancellation, remaining results are
+/// drained before cancellation propagates, which may wait for the SQL command
+/// to finish. The caller retains ownership of the prepared statement.
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Int {
   let stream = self.query_statement(statement, params~)
+  // Release response-queue backpressure before the caller tries to close a
+  // temporary statement. Cleanup must preserve the original error or cancellation.
+  errdefer @async.protect_from_cancel(() => {
+    let _ = stream.drain_discard() catch { _ => () }
+  })
   let summary = stream.finish()
   rows_affected(summary.command_tag)
 }

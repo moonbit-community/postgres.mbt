@@ -308,6 +308,13 @@ task or timeout handler. `CancelToken::cancel()` opens PostgreSQL's separate
 cancellation connection and asks the server to interrupt the current backend
 operation.
 
+While consuming execution results, `execute` and `execute_raw` handle task
+cancellation by draining through `ReadyForQuery` before it propagates.
+`execute` then closes its temporary statement; `execute_raw` leaves the caller's
+statement open.
+This cleanup keeps the connection reusable, but can wait for the current SQL
+command to finish. It does not itself send a PostgreSQL cancel request.
+
 For `LISTEN` / `NOTIFY` and notices, pick one ownership model per connection:
 
 - pass `on_async=...` to `Connection::run(...)` when you want push-style handling
