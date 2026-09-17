@@ -9,7 +9,7 @@
 pub fn Connector::new(
   f : async (@client.Config) -> (@client.Client, @client.Connection),
 ) -> Connector {
-  { run: f }
+  { run: f, }
 }
 
 ///|
@@ -20,7 +20,7 @@ pub fn PoolOptions::new(
   pre_recycle? : async (@client.Client) -> Unit,
   post_recycle? : async (@client.Client) -> Unit,
 ) -> PoolOptions {
-  { connector, post_create, pre_recycle, post_recycle }
+  { connector, post_create, pre_recycle, post_recycle, }
 }
 
 ///|
@@ -146,13 +146,13 @@ pub fn Pool::config(self : Pool) -> PoolConfig {
 ///|
 /// Return the administrative manager handle for this pool.
 pub fn Pool::manager(self : Pool) -> Manager {
-  { shared: self.shared }
+  { shared: self.shared, }
 }
 
 ///|
 /// Return a handle that can manage statement caches on all live connections.
 pub fn Manager::statement_caches(self : Manager) -> StatementCaches {
-  { shared: self.shared }
+  { shared: self.shared, }
 }
 
 ///|

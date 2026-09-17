@@ -72,7 +72,7 @@ pub struct ByteReader {
 ///|
 /// Create a byte reader over `buf`.
 pub fn ByteReader::new(buf : BytesView) -> ByteReader {
-  { buf, idx: 0 }
+  { buf, idx: 0, }
 }
 
 ///|

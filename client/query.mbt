@@ -51,7 +51,7 @@ pub async fn Client::prepare_typed(
   let bytes = prepare_bytes(name[:], sql, types)
   let responses = self.send_request(Messages, bytes)
   let (params, columns) = read_prepare_response(self.shared, responses)
-  { client: self, name, params, columns, closed: @ref.new(false) }
+  { client: self, name, params, columns, closed: @ref.new(false), }
 }
 
 ///|

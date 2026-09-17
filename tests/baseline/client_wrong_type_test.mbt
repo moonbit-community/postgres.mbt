@@ -49,7 +49,7 @@ async test "integration wrong type errors on read and write" {
     @debug.assert_eq(read_err.postgres_type, @client.Type::int4())
 
     // The write path should fail before encoding, so `to_sql` must never be reached.
-    let text_param : TextOnlyParam = { value: "moonbit" }
+    let text_param : TextOnlyParam = { value: "moonbit", }
     let params : Array[&@client.ToSql] = [text_param as &@client.ToSql]
     let write_result = expect_error_async(() => {
       client

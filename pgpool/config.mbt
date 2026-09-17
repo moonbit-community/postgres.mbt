@@ -90,7 +90,7 @@ pub fn TransactionOptions::new(
   read_only? : Bool,
   deferrable? : Bool,
 ) -> TransactionOptions {
-  { isolation_level, read_only, deferrable }
+  { isolation_level, read_only, deferrable, }
 }
 
 ///|
@@ -120,7 +120,7 @@ pub fn Timeouts::new(
   create_ms? : Int? = None,
   recycle_ms? : Int? = None,
 ) -> Timeouts {
-  { wait_ms, create_ms, recycle_ms }
+  { wait_ms, create_ms, recycle_ms, }
 }
 
 ///|
@@ -196,8 +196,8 @@ pub fn PoolConfig::new(
   queue_mode? : QueueMode = Fifo,
   recycling_method? : RecyclingMethod = Fast,
 ) -> PoolConfig raise {
-  validate_pool_config({ max_size, timeouts, queue_mode, recycling_method })
-  { max_size, timeouts, queue_mode, recycling_method }
+  validate_pool_config({ max_size, timeouts, queue_mode, recycling_method, })
+  { max_size, timeouts, queue_mode, recycling_method, }
 }
 
 ///|

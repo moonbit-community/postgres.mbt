@@ -64,4 +64,3 @@ pub type Lsn = UInt64
 pub type Oid = UInt
 
 // Traits
-

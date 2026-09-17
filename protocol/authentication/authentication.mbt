@@ -510,7 +510,7 @@ priv struct Parser {
 
 ///|
 fn Parser::new(buf : BytesView) -> Parser {
-  { buf, idx: 0 }
+  { buf, idx: 0, }
 }
 
 ///|
@@ -611,7 +611,7 @@ fn Parser::server_first_message(
   self.eat(b',')
   let iteration_count = self.iteration_count()
   self.eof()
-  { nonce: nonce.to_owned(), salt: salt.to_owned(), iteration_count }
+  { nonce: nonce.to_owned(), salt: salt.to_owned(), iteration_count, }
 }
 
 ///|

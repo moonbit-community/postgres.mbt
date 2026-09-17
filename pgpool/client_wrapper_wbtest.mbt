@@ -13,7 +13,7 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
       releasing: @ref.new(false),
       released: @ref.new(false),
     }
-    let released_client : Client = { state: released_state }
+    let released_client : Client = { state: released_state, }
     let cache = released_client.statement_cache()
     assert_eq(cache.connection.id, 10)
     released_client.release()
@@ -34,7 +34,7 @@ async test "pgpool client wrapper helpers cover release and detach guards" {
       releasing: @ref.new(false),
       released: @ref.new(false),
     }
-    let delaying_client : Client = { state: delaying_state }
+    let delaying_client : Client = { state: delaying_state, }
     delaying_client.release()
     assert_true(delaying_state.releasing.val)
     assert_false(delaying_state.released.val)

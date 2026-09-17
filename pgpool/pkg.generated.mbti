@@ -291,4 +291,3 @@ pub(open) trait GenericClient {
   async fn batch_execute(Self, String) -> Unit
   async fn check_connection(Self) -> Unit
 }
-

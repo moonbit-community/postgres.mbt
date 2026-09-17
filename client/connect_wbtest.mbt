@@ -189,7 +189,7 @@ async test "client close handles closed request queue and check_connection rejec
   @debug.assert_eq(shared.closing.val, true)
 
   let closed_shared = make_shared(closed=true)
-  let closed_client : Client = { shared: closed_shared }
+  let closed_client : Client = { shared: closed_shared, }
   let result = expect_error_async(() => closed_client.check_connection())
   guard result is ClientError::Closed(message) else {
     fail("expected closed connection error")

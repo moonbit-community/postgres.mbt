@@ -29,5 +29,5 @@ fn client_api_test_connection(
   group : @async.TaskGroup[Unit],
   id? : Int = 1,
 ) -> ConnectionState {
-  { id, group, client: @ref.new(None), statement_cache: [] }
+  { id, group, client: @ref.new(None), statement_cache: [], }
 }

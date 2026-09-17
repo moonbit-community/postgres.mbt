@@ -265,7 +265,7 @@ test "backend parsing merges stream columns and reports mismatches" {
 
   let mismatch_oid = @test.expect_error(() => {
     merge_stream_columns(
-      [{ ..resolved[0], type_: Type::unknown(25U, name="text") }],
+      [{ ..resolved[0], type_: Type::unknown(25U, name="text"), }],
       body,
     )
   })
