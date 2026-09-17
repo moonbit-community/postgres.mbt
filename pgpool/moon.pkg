@@ -7,6 +7,8 @@ import {
 }
 
 import {
+  "moonbit-community/postgres/protocol" @proto,
+  "moonbitlang/async/socket",
   "moonbitlang/core/debug",
   "moonbitlang/core/test",
 } for "wbtest"

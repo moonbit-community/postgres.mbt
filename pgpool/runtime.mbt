@@ -7,6 +7,9 @@ let clean_recycle_sql = "CLOSE ALL; SET SESSION AUTHORIZATION DEFAULT; RESET ALL
 ///|
 /// Shared mutable pool state. The package runs on one event loop, so this
 /// state only needs async-safe coordination, not cross-thread primitives.
+/// An idle connection removed for recycling stays in `connections` and `size`
+/// until checkout succeeds or retirement removes it. Cancelled recycling must
+/// retire it; the checkout owner separately restores its reserved `slots` entry.
 priv struct Shared {
   group : @async.TaskGroup[Unit]
   targets : Array[@client.Config]

@@ -162,6 +162,11 @@ because this pool is about session isolation, not thread-per-core throughput.
 - `create_ms`: time spent opening a new physical connection
 - `recycle_ms`: time spent validating or cleaning one idle connection
 
+If checkout is cancelled during recycling, including either recycle hook, the
+pool discards that connection and its statement cache and restores the reserved
+capacity slot. Cancellation still propagates to the caller; a later checkout
+can open a replacement connection.
+
 `QueueMode::fifo()` reuses the oldest idle connection first.
 `QueueMode::lifo()` reuses the most recently returned idle connection first.
 This changes idle-connection selection only; it does not reorder tasks already
