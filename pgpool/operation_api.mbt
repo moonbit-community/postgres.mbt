@@ -10,6 +10,7 @@ async fn OperationScopeState::begin_request(
   }
   self.gate.acquire()
   errdefer self.gate.release()
+  check_pending_cancellation()
   // A waiter may have queued before the previous request started cancellation.
   // Holding the gate here prevents that late send from reaching its successor.
   while self.cancel_in_flight.val > 0 {
@@ -66,6 +67,8 @@ async fn[T] Operation::run_request(
 ) -> T {
   let client = self.state.begin_request()
   defer self.state.finish_request()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => op(client))
 }
 
@@ -93,6 +96,8 @@ pub async fn[T] Session::run_cancellable(
 ) -> T {
   let connection = self.state.begin_cancellable_scope()
   defer self.state.finish_cancellable_scope()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => run_cancellable_scope(connection, f))
 }
 

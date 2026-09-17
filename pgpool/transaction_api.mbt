@@ -48,6 +48,7 @@ pub async fn[T] Session::with_transaction(
     transaction.rollback_best_effort()
   })
   let result = f(transaction)
+  check_pending_cancellation()
   if !transaction.state.finished.val {
     transaction.commit_internal()
   }
@@ -152,10 +153,11 @@ async fn Transaction::take_for_completion(
     raise PoolError::ScopeExpired
   }
   self.state.gate.acquire()
+  errdefer self.state.gate.release()
   if self.state.finished.val {
-    self.state.gate.release()
     raise PoolError::ScopeExpired
   }
+  check_pending_cancellation()
   self.state.finished.val = true
   match self.state.transaction.val {
     Some(transaction) => {
@@ -163,10 +165,7 @@ async fn Transaction::take_for_completion(
       self.state.gate.release()
       transaction
     }
-    None => {
-      self.state.gate.release()
-      raise PoolError::ScopeExpired
-    }
+    None => raise PoolError::ScopeExpired
   }
 }
 
@@ -175,6 +174,7 @@ async fn Transaction::take_for_completion(
 async fn Transaction::commit_internal(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => transaction.commit())
 }
 
@@ -202,6 +202,8 @@ async fn[T] Transaction::run_operation(
 ) -> T {
   let transaction = self.state.begin_operation()
   defer self.state.finish_operation()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => op(transaction))
 }
 
@@ -223,6 +225,7 @@ pub async fn Transaction::commit(self : Transaction) -> Unit {
 pub async fn Transaction::rollback(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => transaction.rollback())
 }
 
@@ -265,6 +268,7 @@ pub async fn[T] Transaction::with_transaction(
   let nested = self.transaction()
   errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
   let result = f(nested)
+  check_pending_cancellation()
   if !nested.state.finished.val {
     nested.commit_internal()
   }
@@ -284,6 +288,7 @@ pub async fn[T] Transaction::with_savepoint(
   let nested = self.savepoint(name)
   errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
   let result = f(nested)
+  check_pending_cancellation()
   if !nested.state.finished.val {
     nested.commit_internal()
   }

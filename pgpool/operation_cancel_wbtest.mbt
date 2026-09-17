@@ -112,3 +112,67 @@ async test "late cancel wait releases the operation gate on cancellation or expi
     })
   }
 }
+
+///|
+async test "pooled operation boundary propagates cancellation after protected work" {
+  with_operation_test_state((group, state) => {
+    let operation : Operation = { state, }
+    let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
+    let release_work : @async.Queue[Unit] = Queue(kind=Unbounded)
+    defer release_work.close()
+    let returned = @ref.new(false)
+    let task = group.spawn(allow_failure=true, () => {
+      operation.run_request(_ => {
+        entered.put(())
+        release_work.get()
+      })
+      returned.val = true
+    })
+    entered.get()
+    task.cancel()
+    release_work.put(())
+    assert_true(
+      expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+    )
+    assert_false(returned.val)
+    assert_false(state.request_in_flight.val)
+    ignore(state.begin_request())
+    state.finish_request()
+  })
+}
+
+///|
+async test "session boundaries recheck cancellation outside their outer protection" {
+  for cancellable in [false, true] {
+    with_operation_test_state((group, state) => {
+      let pool = client_api_test_pool(group)
+      defer pool.close()
+      let session = make_session(pool.shared, state.connection)
+      let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
+      let release_work : @async.Queue[Unit] = Queue(kind=Unbounded)
+      defer release_work.close()
+      async fn work() {
+        entered.put(())
+        release_work.get()
+      }
+      let returned = @ref.new(false)
+      let task = group.spawn(allow_failure=true, () => {
+        if cancellable {
+          session.run_cancellable((_, _) => work())
+        } else {
+          session.run_operation(_ => work())
+        }
+        returned.val = true
+      })
+      entered.get()
+      task.cancel()
+      release_work.put(())
+      assert_true(
+        expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+      )
+      assert_false(returned.val)
+      assert_eq(session.state.active_ops.val, 0)
+      session.check_connection()
+    })
+  }
+}
