@@ -23,48 +23,36 @@ pub async fn Client::transaction(
   options? : TransactionOptions = TransactionOptions::new(),
 ) -> Transaction {
   let (client, connection) = self.state.begin_transaction_scope()
-  try {
-    let client_options = @client.TransactionOptions::new(
-      isolation_level?=options.isolation_level.map(isolation_level_sql),
-      read_only?=options.read_only,
-      deferrable?=options.deferrable,
-    )
-    let transaction = client.transaction(options=client_options)
-    make_pooled_transaction(connection, transaction, ClientLease(self.state))
-  } catch {
-    err => {
-      self.state.finish_transaction_scope()
-      raise err
-    }
-  }
+  errdefer self.state.finish_transaction_scope()
+  let client_options = @client.TransactionOptions::new(
+    isolation_level?=options.isolation_level.map(isolation_level_sql),
+    read_only?=options.read_only,
+    deferrable?=options.deferrable,
+  )
+  let transaction = client.transaction(options=client_options)
+  make_pooled_transaction(connection, transaction, ClientLease(self.state))
 }
 
 ///|
 /// Run one callback inside a transaction and auto-complete it.
 ///
 /// On normal return, the transaction is committed if the callback did not
-/// already finish it explicitly. If the callback raises, the transaction is
-/// rolled back best-effort unless it was already finished.
+/// already finish it explicitly. If the callback raises or is cancelled, the
+/// transaction is rolled back best-effort unless it was already finished.
 pub async fn[T] Client::with_transaction(
   self : Client,
   f : async (Transaction) -> T,
   options? : TransactionOptions = TransactionOptions::new(),
 ) -> T {
   let transaction = self.transaction(options~)
-  try {
-    let result = f(transaction)
-    if !transaction.state.finished.val {
-      transaction.commit_internal()
-    }
-    result
-  } catch {
-    err => {
-      if !transaction.state.finished.val {
-        transaction.rollback_best_effort()
-      }
-      raise err
-    }
+  errdefer (if !transaction.state.finished.val {
+    transaction.rollback_best_effort()
+  })
+  let result = f(transaction)
+  if !transaction.state.finished.val {
+    transaction.commit_internal()
   }
+  result
 }
 
 ///|
@@ -178,11 +166,13 @@ async fn Transaction::commit_internal(self : Transaction) -> Unit {
 ///|
 /// Roll back one pooled transaction while ignoring rollback failures.
 async fn Transaction::rollback_best_effort(self : Transaction) -> Unit {
-  try {
-    let transaction = self.take_for_completion()
-    defer self.state.release_owner_scope()
-    @async.protect_from_cancel(() => transaction.rollback())
-  } catch {
+  try
+    @async.protect_from_cancel(() => {
+      let transaction = self.take_for_completion()
+      defer self.state.release_owner_scope()
+      transaction.rollback()
+    })
+  catch {
     _ => ()
   } noraise {
     _ => ()
@@ -229,15 +219,9 @@ pub async fn Transaction::rollback(self : Transaction) -> Unit {
 /// transaction must also be committed or rolled back.
 pub async fn Transaction::transaction(self : Transaction) -> Transaction {
   let (transaction, connection) = self.state.begin_nested_scope()
-  try {
-    let nested = transaction.transaction()
-    make_pooled_transaction(connection, nested, ParentTransaction(self.state))
-  } catch {
-    err => {
-      self.state.finish_nested_scope()
-      raise err
-    }
-  }
+  errdefer self.state.finish_nested_scope()
+  let nested = transaction.transaction()
+  make_pooled_transaction(connection, nested, ParentTransaction(self.state))
 }
 
 ///|
@@ -249,68 +233,46 @@ pub async fn Transaction::savepoint(
   name : String,
 ) -> Transaction {
   let (transaction, connection) = self.state.begin_nested_scope()
-  try {
-    let nested = transaction.savepoint(name)
-    make_pooled_transaction(connection, nested, ParentTransaction(self.state))
-  } catch {
-    err => {
-      self.state.finish_nested_scope()
-      raise err
-    }
-  }
+  errdefer self.state.finish_nested_scope()
+  let nested = transaction.savepoint(name)
+  make_pooled_transaction(connection, nested, ParentTransaction(self.state))
 }
 
 ///|
 /// Run one callback inside an unnamed savepoint-backed nested transaction.
 ///
 /// On success the nested transaction is committed if still unfinished; on error
-/// it is rolled back best-effort.
+/// or cancellation it is rolled back best-effort.
 pub async fn[T] Transaction::with_transaction(
   self : Transaction,
   f : async (Transaction) -> T,
 ) -> T {
   let nested = self.transaction()
-  try {
-    let result = f(nested)
-    if !nested.state.finished.val {
-      nested.commit_internal()
-    }
-    result
-  } catch {
-    err => {
-      if !nested.state.finished.val {
-        nested.rollback_best_effort()
-      }
-      raise err
-    }
+  errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
+  let result = f(nested)
+  if !nested.state.finished.val {
+    nested.commit_internal()
   }
+  result
 }
 
 ///|
 /// Run one callback inside a named savepoint-backed nested transaction.
 ///
 /// On success the nested transaction is committed if still unfinished; on error
-/// it is rolled back best-effort.
+/// or cancellation it is rolled back best-effort.
 pub async fn[T] Transaction::with_savepoint(
   self : Transaction,
   name : String,
   f : async (Transaction) -> T,
 ) -> T {
   let nested = self.savepoint(name)
-  try {
-    let result = f(nested)
-    if !nested.state.finished.val {
-      nested.commit_internal()
-    }
-    result
-  } catch {
-    err => {
-      if !nested.state.finished.val {
-        nested.rollback_best_effort()
-      }
-      raise err
-    }
+  errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
+  let result = f(nested)
+  if !nested.state.finished.val {
+    nested.commit_internal()
   }
+  result
 }
 
 ///|
