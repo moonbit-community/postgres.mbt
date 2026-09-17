@@ -12,7 +12,7 @@ That split is the main architectural decision in the package.
 At a conceptual level, one live connection consists of:
 
 - one shared outbound queue
-- one ordered list of requests that have been sent but not yet completed
+- one ordered list of requests registered for sending but not yet completed
 - one private inbound queue for each in-flight request
 - one side channel for asynchronous backend messages
 
@@ -52,8 +52,11 @@ From a high level, message delivery works like this:
 3. That work is packaged as a request and pushed into the shared outbound
    queue.
 4. The socket-owning runtime takes requests from that queue in protocol order
-   and writes them to the wire.
-5. Sent requests enter an ordered pending list.
+   and registers them in the ordered pending list.
+5. It writes each registered request to the wire. Registering before the write
+   keeps the request reachable by cleanup if writing fails or is cancelled.
+   A successfully sent `Terminate` is removed immediately and its response
+   queue is closed because it has no backend reply.
 6. Backend frames are then read from the socket in order.
 7. Frames that are globally asynchronous are peeled off into the async side
    channel.
@@ -259,6 +262,15 @@ waiting for statement closure. Cleanup errors do not replace the original
 error or cancellation, and `execute_raw` never closes a caller-owned statement.
 Draining can wait for the SQL command to finish; task cancellation alone does
 not ask PostgreSQL to interrupt it.
+
+`Connection::run` uses synchronous, idempotent exit cleanup on normal shutdown,
+ordinary errors, and cancellation. It closes pending and queued request
+responses, COPY inputs, the submission and notification queues, and the socket,
+and marks the runtime closed. Ordinary driver errors reach waiting requests;
+cancellation gives them `ClientError::Closed` while preserving the driver's
+cancellation. Cleanup runs inside the group's main task before joining child
+tasks, so even cancellation-protected consumers can wake up. An outer defer
+provides a fallback without overwriting the original failure.
 
 ## Transactions
 

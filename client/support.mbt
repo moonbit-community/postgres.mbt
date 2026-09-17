@@ -88,12 +88,11 @@ fn Transaction::assert_open(self : Transaction) -> Unit raise {
 ///|
 /// Mark the shared runtime as closed and close its public queues.
 ///
-/// This is the central place where shutdown semantics are normalized for both
-/// graceful termination and error-driven teardown.
+/// This is the central place where shutdown semantics are normalized for
+/// graceful termination, error-driven teardown, and cancellation.
 fn close_runtime(shared : Shared, error? : Error) -> Unit {
-  if shared.closed.val {
-    return
-  }
+  // Close the queues even if Client::close already marked the runtime closed
+  // after failing to enqueue Terminate.
   // Flip the visible shutdown flags first so concurrent submitters observe a
   // consistent "no new work" state even if queue closure races with them.
   shared.closed.val = true

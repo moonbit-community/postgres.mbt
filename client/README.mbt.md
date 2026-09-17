@@ -278,6 +278,10 @@ Connection lifecycle APIs:
 - `Client::check_connection()`: send a cheap round trip and fail if the connection is no longer healthy
 - `Client::parameter(name)` and `Connection::parameter(name)`: read server parameters such as `server_version`
 
+Cancelling the `Connection::run` task closes its socket and all request, COPY
+input, and notification queues. Waiting requests receive `ClientError::Closed`,
+and `Client::is_closed()` becomes `true`. The driver task remains cancelled.
+
 If you want out-of-band messages such as `LISTEN` / `NOTIFY`, parameter updates,
 or PostgreSQL notices, you can consume them from the callback or from
 `Connection::next_message()`:
