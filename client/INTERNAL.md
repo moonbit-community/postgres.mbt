@@ -242,7 +242,7 @@ type information repeatedly.
 
 ## Cancellation
 
-Cancellation is intentionally out-of-band.
+PostgreSQL query cancellation is out-of-band.
 
 Instead of trying to interrupt the main socket directly, the client keeps the
 backend identity needed to open a separate short-lived control connection and
@@ -250,6 +250,15 @@ send a PostgreSQL cancel request there.
 
 This matches PostgreSQL's own cancellation model and avoids corrupting the main
 protocol stream.
+
+MoonBit task cancellation has separate lifecycle rules. Once `execute_raw`
+owns a result stream, its error cleanup drains to `ReadyForQuery` under
+cancellation protection. The outer `execute` then closes its temporary
+statement. This order releases bounded response-queue backpressure before
+waiting for statement closure. Cleanup errors do not replace the original
+error or cancellation, and `execute_raw` never closes a caller-owned statement.
+Draining can wait for the SQL command to finish; task cancellation alone does
+not ask PostgreSQL to interrupt it.
 
 ## Transactions
 
