@@ -609,6 +609,11 @@ Use these transaction APIs according to scope:
 
 The handle does not auto-commit or auto-rollback for you. Finish it explicitly.
 
+Use `Client::with_transaction(...)` for callback-scoped transactions. It commits
+an unfinished transaction when the callback returns normally and attempts to
+roll it back if the callback raises or is cancelled. Rollback cleanup is
+protected from task cancellation.
+
 ### `Client::prepare`
 
 Use `prepare` when the same SQL will be executed many times. A prepared

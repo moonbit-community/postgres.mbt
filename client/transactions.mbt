@@ -56,28 +56,24 @@ pub async fn Client::transaction(
 /// Run one callback inside a transaction and auto-complete it.
 ///
 /// On normal return, the transaction is committed if the callback did not
-/// already finish it explicitly. If the callback raises, the transaction is
-/// rolled back best-effort unless it was already finished.
+/// already finish it explicitly. If the callback raises or is cancelled, the
+/// transaction is rolled back best-effort unless it was already finished.
 pub async fn[T] Client::with_transaction(
   self : Client,
   f : async (Transaction) -> T,
   options? : TransactionOptions = TransactionOptions::new(),
 ) -> T {
   let transaction = self.transaction(options~)
-  try {
-    let result = f(transaction)
+  errdefer @async.protect_from_cancel(() => {
     if !transaction.finished.val {
-      transaction.commit()
+      let _ = transaction.rollback() catch { _ => () }
     }
-    result
-  } catch {
-    err => {
-      if !transaction.finished.val {
-        let _ = transaction.rollback() catch { _ => () }
-      }
-      raise err
-    }
+  })
+  let result = f(transaction)
+  if !transaction.finished.val {
+    transaction.commit()
   }
+  result
 }
 
 ///|
