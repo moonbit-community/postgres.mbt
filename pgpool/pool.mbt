@@ -77,7 +77,8 @@ pub async fn Pool::get(self : Pool) -> Client {
 ///
 /// The provided `timeouts` are validated for this call only and do not mutate
 /// the pool's stored defaults. If checkout fails after capacity was reserved,
-/// the slot is restored before the error is re-raised.
+/// the slot is restored before the error is re-raised. Cancelling checkout
+/// during recycling discards that connection and restores the capacity slot.
 pub async fn Pool::timeout_get(self : Pool, timeouts : Timeouts) -> Client {
   validate_pool_config({
     max_size: self.shared.pool_config.val.max_size,
@@ -360,7 +361,7 @@ async fn Pool::try_recycle_client(
 }
 
 ///|
-/// Run one recycle operation with timeout handling.
+/// Run one recycle operation with timeout and cancellation cleanup.
 async fn Pool::run_recycle(
   self : Pool,
   connection : ConnectionState,
@@ -374,6 +375,9 @@ async fn Pool::run_recycle(
       return None
     }
   }
+  // Cancellation bypasses catch. Retire the connection while it is owned by
+  // recycling; timeout_get alone restores the reserved checkout slot.
+  errdefer self.discard_client(connection, close_client=true)
   try run_with_timeout(recycle_ms, Recycle, op) catch {
     _ => {
       self.discard_client(connection, close_client=true)
