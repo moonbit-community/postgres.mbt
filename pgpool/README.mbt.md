@@ -241,6 +241,11 @@ Low-level streams, portals, and `COPY` handles are available only through
 callback-scoped wrappers. When the callback returns, the pool drains, aborts,
 or closes unfinished protocol state before the connection becomes reusable.
 
+If a `with_transaction(...)` or `with_savepoint(...)` callback raises or is
+cancelled, the pool attempts to roll back the unfinished transaction or
+savepoint before releasing its scope. Rollback cleanup is protected from task
+cancellation, including the wait for any in-flight operations to finish.
+
 `Pool::close()` rejects future checkouts immediately and closes idle
 connections, but it does not revoke already borrowed clients. Those leases keep
 working until they are released, and then their physical connections are closed
