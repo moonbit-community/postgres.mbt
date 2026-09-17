@@ -94,6 +94,12 @@ cancellation. Nested transactions use savepoints. Rollback cleanup is protected
 from cancellation, including the wait for in-flight operations. A captured
 `Transaction` is expired when its callback completes.
 
+Cancellation received while SQL is waiting for a response propagates after
+protected protocol cleanup and before automatic commit. This includes nested
+savepoints. If cancellation arrives during `BEGIN` or `SAVEPOINT`, successful
+creation is rolled back before releasing the session or parent scope. A
+`COMMIT` already sent still completes according to PostgreSQL's response.
+
 ## Streaming And COPY
 
 Low-level protocol handles are callback-scoped so the pool can restore the
@@ -183,6 +189,12 @@ Queued requests keep FIFO order while waiting for a previous cancel send to
 finish. The next request is marked active only after that wait, so a delayed
 cancel cannot spill into the next request. Cancelling a waiter releases its
 place and any acquired operation lock.
+
+Ordinary task cancellation waits for required protocol cleanup and rollback;
+it does not automatically send a PostgreSQL cancellation request or retry SQL.
+Cancellation is checked again when the outermost protected operation ends.
+Explicit caller protection defers cancellation further. Use explicit `abort()`
+on a raw client when the physical connection must be stopped immediately.
 
 ## Configuration
 

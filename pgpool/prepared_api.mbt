@@ -7,6 +7,9 @@ async fn[T] PreparedStatementScope::run_request(
   client_op : async (@client.Client) -> T,
   transaction_op : async (@client.Transaction) -> T,
 ) -> T {
+  check_pending_cancellation()
+  // This can return a stream; its callback helper owns cancellation cleanup
+  // after protection ends, before the handle can be delivered to user code.
   match self {
     ClientScope(state) =>
       @async.protect_from_cancel(() => client_op(state.scoped_client()))
@@ -306,7 +309,9 @@ async fn[T] run_prepared_callback(
   f : async (PreparedStatement) -> T,
 ) -> T {
   errdefer prepared.release_best_effort()
+  check_pending_cancellation()
   let result = @async.protect_from_cancel(() => f(prepared))
+  check_pending_cancellation()
   prepared.release_internal()
   result
 }

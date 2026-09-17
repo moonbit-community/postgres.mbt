@@ -117,6 +117,8 @@ async fn[T] Session::run_operation(
 ) -> T {
   let client = self.state.begin_operation()
   defer self.state.finish_operation()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => op(client))
 }
 

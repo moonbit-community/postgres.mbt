@@ -17,7 +17,9 @@ async fn[T] with_row_stream(
   f : async (@client.RowStream) -> T,
 ) -> T {
   errdefer finish_row_stream_best_effort(stream)
+  check_pending_cancellation()
   let result = @async.protect_from_cancel(() => f(stream))
+  check_pending_cancellation()
   ignore(stream.finish())
   result
 }
@@ -41,7 +43,9 @@ async fn[T] with_simple_stream(
   f : async (@client.SimpleQueryStream) -> T,
 ) -> T {
   errdefer finish_simple_stream_best_effort(stream)
+  check_pending_cancellation()
   let result = @async.protect_from_cancel(() => f(stream))
+  check_pending_cancellation()
   stream.finish()
   result
 }
@@ -63,7 +67,9 @@ async fn[T] with_copy_out_stream(
   f : async (@client.CopyOutStream) -> T,
 ) -> T {
   errdefer finish_copy_out_best_effort(stream)
+  check_pending_cancellation()
   let result = @async.protect_from_cancel(() => f(stream))
+  check_pending_cancellation()
   stream.finish()
   result
 }
@@ -85,7 +91,9 @@ async fn[T] with_copy_in_sink(
   f : async (@client.CopyInSink) -> T,
 ) -> T {
   errdefer abort_copy_in_best_effort(sink)
+  check_pending_cancellation()
   let result = @async.protect_from_cancel(() => f(sink))
+  check_pending_cancellation()
   sink.abort()
   result
 }
