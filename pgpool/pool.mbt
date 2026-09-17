@@ -426,21 +426,14 @@ async fn Pool::connect_target(
 ) -> ConnectionState {
   let (client, connection) = self.shared.connector.connect(target)
   self.shared.group.spawn_bg(no_wait=true, () => connection.run())
-  try {
-    if self.shared.closed.val {
-      client.close()
-      raise PoolError::Closed
-    }
-    check_target_session_attrs(self.shared.target_session_attrs, client)
-    run_client_hook(self.shared.post_create, client)
-    self.shared.size.val += 1
-    make_connection_state(self.shared, client)
-  } catch {
-    err => {
-      client.close()
-      raise err
-    }
+  errdefer client.close()
+  if self.shared.closed.val {
+    raise PoolError::Closed
   }
+  check_target_session_attrs(self.shared.target_session_attrs, client)
+  run_client_hook(self.shared.post_create, client)
+  self.shared.size.val += 1
+  make_connection_state(self.shared, client)
 }
 
 ///|
