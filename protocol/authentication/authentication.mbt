@@ -40,7 +40,7 @@ pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
 
 ///|
 fn map_saslprep_input(s : String) -> String {
-  let out = StringBuilder::new(size_hint=s.length())
+  let out = StringBuilder(size_hint=s.length())
   for ch in s {
     if is_mapped_to_nothing(ch) {
       continue
