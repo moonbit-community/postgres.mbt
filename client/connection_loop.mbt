@@ -9,19 +9,37 @@
 /// 3. forwarding backend messages either to async listeners or to the oldest
 ///    pending request.
 ///
-/// On any error, the loop closes all outstanding queues, marks the shared
-/// runtime as closed, and then closes the socket.
+/// On exit, including cancellation, the loop closes all outstanding queues and
+/// the socket, and marks the shared runtime as closed. Ordinary errors are sent
+/// to waiting requests; cancellation closes them with `ClientError::Closed`
+/// while the driver task itself remains cancelled.
 pub async fn Connection::run(
   self : Connection,
   on_async? : (AsyncMessage) -> Unit = _ => (),
 ) -> Unit {
+  let pending : Array[Request] = []
+  let mut cleaned_up = false
+  fn cleanup(error : Error?) {
+    if cleaned_up {
+      return
+    }
+    cleaned_up = true
+    let error = error.unwrap_or(ClientError::Closed("connection is closed"))
+    self.close_pending_requests(pending, Some(error))
+    self.drain_queued_requests(Some(error))
+    close_runtime(self.shared, error~)
+    self.stream.close()
+  }
+  // Also cover exit before the group's main task starts or while joining it.
+  defer cleanup(None)
   @async.with_task_group(group => {
     self.shared.background_group.val = Some(group)
     defer {
       self.shared.background_group.val = None
+      // Wake even cancellation-protected drains before the group joins them.
+      cleanup(None)
     }
 
-    let pending : Array[Request] = []
     let mut sent_terminate = false
     try {
       while true {
@@ -40,9 +58,6 @@ pub async fn Connection::run(
           if sent_terminate {
             // `Terminate` has no normal response stream. Once it is the only
             // outstanding work, shutdown can converge locally.
-            self.drain_queued_requests(None)
-            close_runtime(self.shared)
-            self.stream.close()
             return
           }
           continue
@@ -53,12 +68,7 @@ pub async fn Connection::run(
         self.forward_pending_message(pending, message, on_async)
       }
     } catch {
-      err => {
-        self.close_pending_requests(pending, Some(err))
-        self.drain_queued_requests(Some(err))
-        close_runtime(self.shared, error=err)
-        self.stream.close()
-      }
+      err => cleanup(Some(err))
     }
   })
 }
@@ -88,18 +98,19 @@ async fn Connection::send_outbound_request(
   request : Request,
   pending : Array[Request],
 ) -> Bool {
+  // Once dequeued, a request must remain reachable by exit cleanup even if
+  // writing its bytes fails or is cancelled before the write completes.
+  pending.push(request)
   self.stream.write(request.bytes)
   match request.kind {
     Terminate => {
       // PostgreSQL closes the socket after `Terminate`; there is no matching
       // terminal `ReadyForQuery` for this synthetic request queue.
+      ignore(pending.pop())
       request.responses.close()
       true
     }
-    Messages | CopyIn => {
-      pending.push(request)
-      false
-    }
+    Messages | CopyIn => false
   }
 }
 
