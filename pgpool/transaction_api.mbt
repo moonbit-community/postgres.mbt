@@ -172,7 +172,7 @@ async fn Transaction::take_for_completion(
 async fn Transaction::commit_internal(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
-  @async.protect_from_cancel(() => transaction.commit(), resume_on_cancel=true)
+  @async.protect_from_cancel(() => transaction.commit())
 }
 
 ///|
@@ -181,10 +181,7 @@ async fn Transaction::rollback_best_effort(self : Transaction) -> Unit {
   try {
     let transaction = self.take_for_completion()
     defer self.state.release_owner_scope()
-    @async.protect_from_cancel(
-      () => transaction.rollback(),
-      resume_on_cancel=true,
-    )
+    @async.protect_from_cancel(() => transaction.rollback())
   } catch {
     _ => ()
   } noraise {
@@ -200,7 +197,7 @@ async fn[T] Transaction::run_operation(
 ) -> T {
   let transaction = self.state.begin_operation()
   defer self.state.finish_operation()
-  @async.protect_from_cancel(() => op(transaction), resume_on_cancel=true)
+  @async.protect_from_cancel(() => op(transaction))
 }
 
 ///|
@@ -221,10 +218,7 @@ pub async fn Transaction::commit(self : Transaction) -> Unit {
 pub async fn Transaction::rollback(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
-  @async.protect_from_cancel(
-    () => transaction.rollback(),
-    resume_on_cancel=true,
-  )
+  @async.protect_from_cancel(() => transaction.rollback())
 }
 
 ///|

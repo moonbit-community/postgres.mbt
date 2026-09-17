@@ -188,9 +188,6 @@ fn expect_closed_error(error : Error) -> String raise {
 
 ///|
 /// Async counterpart to `@test.expect_error` for integration tests.
-///
-/// The project currently uses async 0.19.0, whose public test support does not
-/// provide this helper.
 #callsite(autofill(loc))
 async fn[T, E : Error] expect_error_async(
   f : async () -> T raise E,
