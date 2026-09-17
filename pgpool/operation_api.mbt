@@ -64,7 +64,7 @@ async fn[T] Operation::run_request(
 ) -> T {
   let client = self.state.begin_request()
   defer self.state.finish_request()
-  @async.protect_from_cancel(() => op(client), resume_on_cancel=true)
+  @async.protect_from_cancel(() => op(client))
 }
 
 ///|
@@ -102,10 +102,7 @@ pub async fn[T] Client::run_cancellable(
 ) -> T {
   let connection = self.state.begin_cancellable_scope()
   defer self.state.finish_cancellable_scope()
-  @async.protect_from_cancel(
-    () => run_cancellable_scope(connection, f),
-    resume_on_cancel=true,
-  )
+  @async.protect_from_cancel(() => run_cancellable_scope(connection, f))
 }
 
 ///|
@@ -198,12 +195,7 @@ pub async fn OperationCancelToken::cancel(self : OperationCancelToken) -> Unit {
   defer (if self.state.cancel_in_flight.val > 0 {
     self.state.cancel_in_flight.val -= 1
   })
-  try
-    @async.protect_from_cancel(
-      () => self.state.cancel_token.cancel(),
-      resume_on_cancel=true,
-    )
-  catch {
+  try @async.protect_from_cancel(() => self.state.cancel_token.cancel()) catch {
     _ => ()
   } noraise {
     _ => ()

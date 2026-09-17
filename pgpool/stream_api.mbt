@@ -36,9 +36,7 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
 ///|
 /// Ignore row-stream cleanup failures when another error is already in flight.
 async fn RowStream::run_cleanup_best_effort(self : RowStream) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.run_cleanup(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.run_cleanup()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -60,9 +58,7 @@ async fn RowStream::finish_scope(self : RowStream) -> Unit {
 ///|
 /// Ignore row-stream closeout failures when another error already won.
 async fn RowStream::finish_scope_best_effort(self : RowStream) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.finish_scope(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.finish_scope()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -190,9 +186,7 @@ async fn SimpleQueryStream::finish_scope(self : SimpleQueryStream) -> Unit {
 async fn SimpleQueryStream::finish_scope_best_effort(
   self : SimpleQueryStream,
 ) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.finish_scope(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.finish_scope()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -265,9 +259,7 @@ async fn CopyOutStream::finish_scope(self : CopyOutStream) -> Unit {
 ///|
 /// Ignore COPY OUT closeout failures when another error already won.
 async fn CopyOutStream::finish_scope_best_effort(self : CopyOutStream) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.finish_scope(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.finish_scope()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -342,9 +334,7 @@ async fn CopyInSink::finish_scope(self : CopyInSink) -> Unit {
 ///|
 /// Ignore COPY IN cleanup failures when another error already won.
 async fn CopyInSink::finish_scope_best_effort(self : CopyInSink) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.finish_scope(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.finish_scope()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -396,10 +386,7 @@ async fn[T] run_row_stream_callback(
   f : async (RowStream) -> T,
 ) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(stream),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(stream))
     stream.finish_scope()
     result
   } catch {
@@ -417,10 +404,7 @@ async fn[T] run_simple_query_callback(
   f : async (SimpleQueryStream) -> T,
 ) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(stream),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(stream))
     stream.finish_scope()
     result
   } catch {
@@ -438,10 +422,7 @@ async fn[T] run_copy_out_callback(
   f : async (CopyOutStream) -> T,
 ) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(stream),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(stream))
     stream.finish_scope()
     result
   } catch {
@@ -459,10 +440,7 @@ async fn[T] run_copy_in_callback(
   f : async (CopyInSink) -> T,
 ) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(sink),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(sink))
     sink.finish_scope()
     result
   } catch {

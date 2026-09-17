@@ -11,20 +11,17 @@ async fn[T] PreparedStatementScope::run_request(
     ClientScope(state) => {
       let client = state.begin_operation()
       defer state.finish_operation()
-      @async.protect_from_cancel(() => client_op(client), resume_on_cancel=true)
+      @async.protect_from_cancel(() => client_op(client))
     }
     OperationScope(state) => {
       let client = state.begin_request()
       defer state.finish_request()
-      @async.protect_from_cancel(() => client_op(client), resume_on_cancel=true)
+      @async.protect_from_cancel(() => client_op(client))
     }
     TransactionScope(state) => {
       let transaction = state.begin_operation()
       defer state.finish_operation()
-      @async.protect_from_cancel(
-        () => transaction_op(transaction),
-        resume_on_cancel=true,
-      )
+      @async.protect_from_cancel(() => transaction_op(transaction))
     }
   }
 }
@@ -86,9 +83,7 @@ fn take_cached_statement_entry(
 ///|
 /// Best-effort close one raw prepared statement.
 async fn close_statement_best_effort(statement : @client.Statement) -> Unit {
-  try
-    @async.protect_from_cancel(() => statement.close(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => statement.close()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -216,12 +211,7 @@ async fn PreparedStatement::release_internal(self : PreparedStatement) -> Unit {
 async fn PreparedStatement::release_best_effort(
   self : PreparedStatement,
 ) -> Unit {
-  try
-    @async.protect_from_cancel(
-      () => self.release_internal(),
-      resume_on_cancel=true,
-    )
-  catch {
+  try @async.protect_from_cancel(() => self.release_internal()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -235,10 +225,7 @@ async fn[T] run_prepared_callback(
   f : async (PreparedStatement) -> T,
 ) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(prepared),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(prepared))
     prepared.release_internal()
     result
   } catch {
@@ -724,9 +711,7 @@ pub async fn PreparedStatement::bind(
 ///|
 /// Best-effort close path used when a portal callback already failed.
 async fn Portal::close_best_effort(self : Portal) -> Unit {
-  try
-    @async.protect_from_cancel(() => self.close(), resume_on_cancel=true)
-  catch {
+  try @async.protect_from_cancel(() => self.close()) catch {
     _ => ()
   } noraise {
     _ => ()
@@ -737,10 +722,7 @@ async fn Portal::close_best_effort(self : Portal) -> Unit {
 /// Run one portal-scoped callback and guarantee portal cleanup.
 async fn[T] run_portal_callback(portal : Portal, f : async (Portal) -> T) -> T {
   try {
-    let result = @async.protect_from_cancel(
-      () => f(portal),
-      resume_on_cancel=true,
-    )
+    let result = @async.protect_from_cancel(() => f(portal))
     portal.close()
     result
   } catch {

@@ -105,7 +105,7 @@ async fn[T] Client::run_operation(
 ) -> T {
   let client = self.state.begin_operation()
   defer self.state.finish_operation()
-  @async.protect_from_cancel(() => op(client), resume_on_cancel=true)
+  @async.protect_from_cancel(() => op(client))
 }
 
 ///|
