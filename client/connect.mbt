@@ -40,7 +40,7 @@ async fn connect_inner(config : Config) -> (Client, Connection) {
     closing: @ref.new(false),
     next_id: @ref.new(0),
   }
-  ({ shared, }, { shared, stream: setup.stream })
+  ({ shared, }, { shared, stream: setup.stream, })
 }
 
 ///|

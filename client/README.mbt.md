@@ -488,12 +488,12 @@ impl @client.FromSql for EmailText with fn moonbit_type_name() {
 
 ///|
 impl @client.FromSql for EmailText with fn from_sql(_, _, raw) {
-  { value: @utf8.decode(raw) }
+  { value: @utf8.decode(raw), }
 }
 
 ///|
 async fn _custom_codec_example(client : @client.Client) -> Unit {
-  let email : EmailText = { value: "moonbit@example.com" }
+  let email : EmailText = { value: "moonbit@example.com", }
   let params : Array[&@client.ToSql] = [email as &@client.ToSql]
   let row = client.query_one("select $1::text as email", params~)
   let decoded : EmailText = row.get_name("email")

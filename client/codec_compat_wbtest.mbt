@@ -11,7 +11,7 @@ fn make_row(type_ : Type, raw : Bytes, format? : WireFormat = Text) -> Row {
       format,
     },
   ]
-  { columns, values: [Some(raw)] }
+  { columns, values: [Some(raw)], }
 }
 
 ///|

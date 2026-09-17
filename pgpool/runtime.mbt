@@ -392,7 +392,7 @@ fn make_pooled_transaction(
 ///|
 /// Build the default connector around `@client.connect`.
 fn default_connector() -> Connector {
-  { run: config => @client.connect(config) }
+  { run: config => @client.connect(config), }
 }
 
 ///|
@@ -414,7 +414,7 @@ fn make_prepared_statement(
   {
     params: statement.params,
     columns: statement.columns,
-    state: { scope, handle, active: @ref.new(true), released: @ref.new(false) },
+    state: { scope, handle, active: @ref.new(true), released: @ref.new(false), },
   }
 }
 
@@ -442,13 +442,13 @@ fn make_simple_query_stream(
   group : @async.TaskGroup[Unit],
   raw : @client.SimpleQueryStream,
 ) -> SimpleQueryStream {
-  { group, raw, detached_task: @ref.new(None), completed: @ref.new(false) }
+  { group, raw, detached_task: @ref.new(None), completed: @ref.new(false), }
 }
 
 ///|
 /// Wrap one raw COPY IN sink for pooled callback-scoped cleanup.
 fn make_copy_in_sink(raw : @client.CopyInSink) -> CopyInSink {
-  { raw, finished: @ref.new(false) }
+  { raw, finished: @ref.new(false), }
 }
 
 ///|
@@ -469,5 +469,5 @@ fn make_copy_out_stream(
 ///|
 /// Wrap one raw portal for pooled callback-scoped cleanup.
 fn make_portal(scope : PreparedStatementScope, raw : @client.Portal) -> Portal {
-  { columns: raw.columns, scope, raw, closed: @ref.new(false) }
+  { columns: raw.columns, scope, raw, closed: @ref.new(false), }
 }

@@ -29,7 +29,7 @@ fn integration_config() -> IntegrationConfig? raise {
   let user = env_var("POSTGRES_USER").unwrap_or("moon")
   let password = env_var("POSTGRES_PASSWORD").unwrap_or("moonpass")
   let database = env_var("POSTGRES_DB").unwrap_or("moondb")
-  Some({ host, port, user, password, database })
+  Some({ host, port, user, password, database, })
 }
 
 ///|

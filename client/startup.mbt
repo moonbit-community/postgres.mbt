@@ -140,7 +140,7 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
     )
   }
   match config.ssl_mode {
-    Disable => { stream: Plain(conn), channel_binding: NoBinding }
+    Disable => { stream: Plain(conn), channel_binding: NoBinding, }
     VerifyCa | VerifyFull => {
       let request = Buffer()
       // PostgreSQL SSL negotiation is a one-byte capability probe that happens
@@ -168,7 +168,7 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
               raise ClientError::Ssl(tls_error_message(err))
             }
           }
-          { stream: Secure(tls), channel_binding }
+          { stream: Secure(tls), channel_binding, }
         }
         b'N' => {
           conn.close()

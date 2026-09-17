@@ -70,7 +70,7 @@ async fn lookup_type(shared : Shared, oid : @proto.Oid) -> Type {
           None => Simple
         }
       }
-      { oid, name, kind }
+      { oid, name, kind, }
     }
   }
 }
@@ -111,7 +111,7 @@ async fn query_composite_fields(
   let rows = query_oid_catalog(shared, typeinfo_composite_query, oid) catch {
     _ => []
   }
-  rows.map(row => { name: row.get(0), type_oid: row.get(1) })
+  rows.map(row => { name: row.get(0), type_oid: row.get(1), })
 }
 
 ///|
@@ -155,7 +155,7 @@ async fn resolve_columns(
   for column in columns {
     // Preserve every other row-description field and swap only the placeholder
     // type descriptor for its cached rich form.
-    out.push({ ..column, type_: cached_type(shared, column.type_.oid) })
+    out.push({ ..column, type_: cached_type(shared, column.type_.oid), })
   }
   out
 }

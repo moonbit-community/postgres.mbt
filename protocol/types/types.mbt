@@ -265,7 +265,7 @@ pub fn hstore_from_sql(
   if count < 0 {
     raise InvalidInput("invalid entry count")
   }
-  { remaining: count, buf: buf[4:] }
+  { remaining: count, buf: buf[4:], }
 }
 
 ///|
@@ -340,7 +340,7 @@ pub fn varbit_from_sql(buf : BytesView) -> Varbit raise @proto.ProtocolError {
   if buf.length() != 4 + bytes_len {
     raise InvalidInput("invalid message length: varbit mismatch")
   }
-  { len, bytes: buf[4:] }
+  { len, bytes: buf[4:], }
 }
 
 ///|
@@ -536,7 +536,7 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
   if dimensions == 0 {
     elements = 0
   }
-  { dimensions, has_nulls, element_type, elements, buf: buf.to_owned() }
+  { dimensions, has_nulls, element_type, elements, buf: buf.to_owned(), }
 }
 
 ///|
@@ -554,14 +554,14 @@ pub struct PgArray {
 pub fn PgArray::dimensions(self : PgArray) -> ArrayDimensions {
   let start = 12
   let end = start + self.dimensions * 8
-  { buf: self.buf[start:end] }
+  { buf: self.buf[start:end], }
 }
 
 ///|
 /// Return an iterator over the raw array elements.
 pub fn PgArray::values(self : PgArray) -> ArrayValues {
   let start = 12 + self.dimensions * 8
-  { remaining: self.elements, buf: self.buf[start:] }
+  { remaining: self.elements, buf: self.buf[start:], }
 }
 
 ///|
@@ -582,7 +582,7 @@ pub fn ArrayDimensions::next(
   let len = r.read_i32_be()
   let lower_bound = r.read_i32_be()
   self.buf = self.buf[8:]
-  Some({ len, lower_bound })
+  Some({ len, lower_bound, })
 }
 
 ///|
@@ -595,7 +595,7 @@ pub struct ArrayDimension {
 ///|
 /// Construct an array dimension descriptor.
 pub fn ArrayDimension::new(len : Int, lower_bound : Int) -> ArrayDimension {
-  { len, lower_bound }
+  { len, lower_bound, }
 }
 
 ///|
@@ -776,7 +776,7 @@ pub fn point_from_sql(buf : BytesView) -> Point raise @proto.ProtocolError {
   if !r.is_empty() {
     raise InvalidInput("invalid buffer size")
   }
-  { x, y }
+  { x, y, }
 }
 
 ///|
@@ -811,7 +811,7 @@ pub fn box_from_sql(buf : BytesView) -> Box raise @proto.ProtocolError {
   if !r.is_empty() {
     raise InvalidInput("invalid buffer size")
   }
-  { upper_right: { x: x1, y: y1 }, lower_left: { x: x2, y: y2 } }
+  { upper_right: { x: x1, y: y1, }, lower_left: { x: x2, y: y2, }, }
 }
 
 ///|
@@ -854,7 +854,7 @@ pub fn path_from_sql(buf : BytesView) -> Path raise @proto.ProtocolError {
   if payload_len < 0 || payload_len % 16 != 0 || payload_len / 16 != points {
     raise InvalidInput("invalid message length")
   }
-  { closed, points, buf: buf[5:] }
+  { closed, points, buf: buf[5:], }
 }
 
 ///|
@@ -868,7 +868,7 @@ pub struct Path {
 ///|
 /// Return an iterator over the path points.
 pub fn Path::points(self : Path) -> PathPoints {
-  { remaining: self.points, buf: self.buf }
+  { remaining: self.points, buf: self.buf, }
 }
 
 ///|
@@ -892,7 +892,7 @@ pub fn PathPoints::next(self : PathPoints) -> Point? raise @proto.ProtocolError 
   let x = r.read_f64_be()
   let y = r.read_f64_be()
   self.buf = self.buf[16:]
-  Some({ x, y })
+  Some({ x, y, })
 }
 
 ///|
@@ -920,7 +920,7 @@ pub fn Ipv4Addr::from_octets(
   if octets.length() != 4 {
     raise InvalidInput("invalid IPv4 length")
   }
-  { octets: octets.to_owned() }
+  { octets: octets.to_owned(), }
 }
 
 ///|
@@ -931,7 +931,7 @@ pub fn Ipv6Addr::from_octets(
   if octets.length() != 16 {
     raise InvalidInput("invalid IPv6 length")
   }
-  { octets: octets.to_owned() }
+  { octets: octets.to_owned(), }
 }
 
 ///|
@@ -1001,7 +1001,7 @@ pub fn inet_from_sql(buf : BytesView) -> Inet raise @proto.ProtocolError {
   if !r.is_empty() {
     raise InvalidInput("invalid buffer size")
   }
-  { addr, netmask }
+  { addr, netmask, }
 }
 
 ///|

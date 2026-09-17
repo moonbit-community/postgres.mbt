@@ -41,7 +41,7 @@ fn new_simple_query_stream(
 ///|
 /// Build the deferred cleanup object for a temporary prepared statement.
 fn make_statement_cleanup(client : Client, name : Bytes) -> StreamCleanup raise {
-  { client, bytes: close_bytes(b'S', name[:]), done: false }
+  { client, bytes: close_bytes(b'S', name[:]), done: false, }
 }
 
 ///|

@@ -66,7 +66,7 @@ fn parse_text_row(
   let buffer = body.buffer()
   for range = ranges.next() {
     match range {
-      None => break { columns, values }
+      None => break { columns, values, }
       Some(None) => {
         values.push(None)
         continue ranges.next()
@@ -191,7 +191,7 @@ fn merge_stream_columns(
         "row description type mismatch at column \{index.to_string()}: expected oid \{resolved.type_.oid.to_string()}, got \{column.type_.oid.to_string()}",
       )
     }
-    merged.push({ ..column, type_: resolved.type_ })
+    merged.push({ ..column, type_: resolved.type_, })
   }
   merged
 }

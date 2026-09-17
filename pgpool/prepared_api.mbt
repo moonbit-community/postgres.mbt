@@ -348,7 +348,7 @@ pub fn Client::statement_cache(self : Client) -> StatementCache raise {
   if self.state.released.val {
     raise PoolError::LeaseReleased
   }
-  { connection: self.state.connection }
+  { connection: self.state.connection, }
 }
 
 ///|
@@ -538,7 +538,7 @@ pub fn Transaction::statement_cache(self : Transaction) -> StatementCache raise 
   if self.state.finished.val {
     raise PoolError::LeaseReleased
   }
-  { connection: self.state.connection }
+  { connection: self.state.connection, }
 }
 
 ///|

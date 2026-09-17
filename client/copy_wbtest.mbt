@@ -217,7 +217,7 @@ async test "client copy in streams input and returns affected rows" {
 async test "client copy in surfaces startup errors and missing startup response" {
   @async.with_task_group(group => {
     let error_shared = copy_test_shared(@ref.new(None))
-    let error_client : Client = { shared: error_shared }
+    let error_client : Client = { shared: error_shared, }
 
     group.spawn_bg(() => {
       let request = error_shared.requests.get()
@@ -236,7 +236,7 @@ async test "client copy in surfaces startup errors and missing startup response"
 
   @async.with_task_group(group => {
     let missing_shared = copy_test_shared(@ref.new(None))
-    let missing_client : Client = { shared: missing_shared }
+    let missing_client : Client = { shared: missing_shared, }
 
     group.spawn_bg(() => {
       let request = missing_shared.requests.get()

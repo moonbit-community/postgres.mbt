@@ -62,7 +62,10 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
         self.row_count += 1
         // Rows must copy their field bytes now because the backend message
         // buffer does not outlive this iteration step.
-        return Some({ columns: self.columns, values: parse_binary_values(body) })
+        return Some({
+          columns: self.columns,
+          values: parse_binary_values(body),
+        })
       }
       CommandComplete(body) => {
         self.command_tag = body.tag_str()

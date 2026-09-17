@@ -15,7 +15,7 @@ impl FromSql for OnlyInt8Value with fn moonbit_type_name() {
 
 ///|
 impl FromSql for OnlyInt8Value with fn from_sql(_, _, _) {
-  { value: 0L }
+  { value: 0L, }
 }
 
 ///|
@@ -32,7 +32,7 @@ fn make_text_row(type_ : Type, value : String) -> Row {
     },
   ]
   let values : Array[Bytes?] = [Some(@proto.utf8_encode(value))]
-  { columns, values }
+  { columns, values, }
 }
 
 ///|

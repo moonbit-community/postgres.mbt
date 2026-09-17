@@ -18,7 +18,7 @@ pub fn TransactionOptions::new(
   read_only? : Bool,
   deferrable? : Bool,
 ) -> TransactionOptions {
-  { isolation_level, read_only, deferrable }
+  { isolation_level, read_only, deferrable, }
 }
 
 ///|
@@ -49,7 +49,7 @@ pub async fn Client::transaction(
     "BEGIN " + join_clauses(clauses)
   }
   self.batch_execute(sql)
-  { client: self, savepoint: None, finished: @ref.new(false) }
+  { client: self, savepoint: None, finished: @ref.new(false), }
 }
 
 ///|
@@ -89,7 +89,7 @@ pub async fn Transaction::transaction(self : Transaction) -> Transaction {
   self.assert_open()
   let name = "moon_tx_\{next_id(self.client.shared).to_string()}"
   self.client.batch_execute("SAVEPOINT \{name}")
-  { client: self.client, savepoint: Some(name), finished: @ref.new(false) }
+  { client: self.client, savepoint: Some(name), finished: @ref.new(false), }
 }
 
 ///|
@@ -152,7 +152,7 @@ pub async fn Transaction::savepoint(
 ) -> Transaction {
   self.assert_open()
   self.client.batch_execute("SAVEPOINT \{name}")
-  { client: self.client, savepoint: Some(name), finished: @ref.new(false) }
+  { client: self.client, savepoint: Some(name), finished: @ref.new(false), }
 }
 
 ///|

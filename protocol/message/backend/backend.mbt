@@ -98,7 +98,7 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
   if len < 4 {
     raise InvalidInput("invalid message length: header length < 4")
   }
-  Some({ tag, len })
+  Some({ tag, len, })
 }
 
 ///|
@@ -182,12 +182,12 @@ pub fn Message::parse(
       let process_id = reader.read_i32_be()
       let channel = reader.read_cstr()
       let msg = reader.read_cstr()
-      NotificationResponse({ process_id, channel, message: msg })
+      NotificationResponse({ process_id, channel, message: msg, })
     }
     COPY_DONE_TAG => CopyDone
     COMMAND_COMPLETE_TAG => {
       let tag_bytes = reader.read_cstr()
-      CommandComplete({ tag: tag_bytes })
+      CommandComplete({ tag: tag_bytes, })
     }
     COPY_DATA_TAG => {
       let storage = reader.read_all().to_owned()
@@ -196,7 +196,7 @@ pub fn Message::parse(
     DATA_ROW_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      DataRow({ storage, len })
+      DataRow({ storage, len, })
     }
     ERROR_RESPONSE_TAG => {
       let storage = reader.read_all().to_owned()
@@ -206,19 +206,19 @@ pub fn Message::parse(
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      CopyInResponse({ format, len, storage })
+      CopyInResponse({ format, len, storage, })
     }
     COPY_OUT_RESPONSE_TAG => {
       let format = reader.read_u8()
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      CopyOutResponse({ format, len, storage })
+      CopyOutResponse({ format, len, storage, })
     }
     EMPTY_QUERY_RESPONSE_TAG => EmptyQueryResponse
     BACKEND_KEY_DATA_TAG => {
       let process_id = reader.read_i32_be()
       let secret_key = reader.read_i32_be()
-      BackendKeyData({ process_id, secret_key })
+      BackendKeyData({ process_id, secret_key, })
     }
     NO_DATA_TAG => NoData
     NOTICE_RESPONSE_TAG => {
@@ -263,17 +263,17 @@ pub fn Message::parse(
     PARAMETER_STATUS_TAG => {
       let name = reader.read_cstr()
       let value = reader.read_cstr()
-      ParameterStatus({ name, value })
+      ParameterStatus({ name, value, })
     }
     PARAMETER_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      ParameterDescription({ storage, len })
+      ParameterDescription({ storage, len, })
     }
     ROW_DESCRIPTION_TAG => {
       let len = reader.read_u16_be().to_int()
       let storage = reader.read_all().to_owned()
-      RowDescription({ storage, len })
+      RowDescription({ storage, len, })
     }
     READY_FOR_QUERY_TAG => {
       let status = reader.read_u8()
@@ -284,7 +284,7 @@ pub fn Message::parse(
   if !reader.is_empty() {
     raise InvalidInput("invalid message length: expected buffer to be empty")
   }
-  Some({ message, consumed: total_len })
+  Some({ message, consumed: total_len, })
 }
 
 ///|
@@ -341,7 +341,7 @@ pub struct AuthenticationSaslBody {
 pub fn AuthenticationSaslBody::mechanisms(
   self : AuthenticationSaslBody,
 ) -> SaslMechanisms {
-  { buf: self.data[:] }
+  { buf: self.data[:], }
 }
 
 ///|
@@ -518,7 +518,7 @@ pub struct CopyInResponseBody {
 pub fn CopyInResponseBody::column_formats(
   self : CopyInResponseBody,
 ) -> ColumnFormats {
-  { remaining: self.len, buf: self.storage[:] }
+  { remaining: self.len, buf: self.storage[:], }
 }
 
 ///|
@@ -570,7 +570,7 @@ pub struct CopyOutResponseBody {
 pub fn CopyOutResponseBody::column_formats(
   self : CopyOutResponseBody,
 ) -> ColumnFormats {
-  { remaining: self.len, buf: self.storage[:] }
+  { remaining: self.len, buf: self.storage[:], }
 }
 
 ///|
@@ -595,7 +595,7 @@ pub struct DataRowBody {
 ///|
 /// Return an iterator over the raw value ranges in this row.
 pub fn DataRowBody::ranges(self : DataRowBody) -> DataRowRanges {
-  { buf: self.storage[:], len: self.storage.length(), remaining: self.len }
+  { buf: self.storage[:], len: self.storage.length(), remaining: self.len, }
 }
 
 ///|
@@ -654,7 +654,7 @@ pub fn DataRowRanges::next(
   let start = base + 4
   let end = start + len
   self.buf = self.buf[4 + len:]
-  Some(Some({ start, end }))
+  Some(Some({ start, end, }))
 }
 
 ///|
@@ -677,7 +677,7 @@ pub struct ErrorResponseBody {
 ///|
 /// Return an iterator over error fields.
 pub fn ErrorResponseBody::fields(self : ErrorResponseBody) -> ErrorFields {
-  { buf: self.storage[:] }
+  { buf: self.storage[:], }
 }
 
 ///|
@@ -709,7 +709,7 @@ pub fn ErrorFields::next(
   let value_end = find_null(self.buf, 0)
   let value = self.buf[0:value_end]
   self.buf = self.buf[value_end + 1:]
-  Some({ type_, value: value.to_owned() })
+  Some({ type_, value: value.to_owned(), })
 }
 
 ///|
@@ -744,7 +744,7 @@ pub struct NoticeResponseBody {
 ///|
 /// Return an iterator over notice fields.
 pub fn NoticeResponseBody::fields(self : NoticeResponseBody) -> ErrorFields {
-  { buf: self.storage[:] }
+  { buf: self.storage[:], }
 }
 
 ///|
@@ -814,7 +814,7 @@ pub struct ParameterDescriptionBody {
 pub fn ParameterDescriptionBody::parameters(
   self : ParameterDescriptionBody,
 ) -> Parameters {
-  { buf: self.storage[:], remaining: self.len }
+  { buf: self.storage[:], remaining: self.len, }
 }
 
 ///|
@@ -936,7 +936,7 @@ pub struct RowDescriptionBody {
 ///|
 /// Return an iterator over described result fields.
 pub fn RowDescriptionBody::fields(self : RowDescriptionBody) -> Fields {
-  { buf: self.storage[:], remaining: self.len }
+  { buf: self.storage[:], remaining: self.len, }
 }
 
 ///|

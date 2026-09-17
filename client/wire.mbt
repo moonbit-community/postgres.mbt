@@ -107,7 +107,7 @@ fn encode_param(param : &ToSql, type_ : Type) -> EncodedParam raise {
     Yes => None
     No => Some(payload.to_bytes())
   }
-  { format: param.format(type_), value }
+  { format: param.format(type_), value, }
 }
 
 ///|

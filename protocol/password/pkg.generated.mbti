@@ -17,4 +17,3 @@ pub fn scram_sha_256_salt(BytesView, BytesView) -> Bytes raise @protocol.Protoco
 // Type aliases
 
 // Traits
-

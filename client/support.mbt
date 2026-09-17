@@ -16,7 +16,7 @@ fn Client::send_request(
   // `false` for "queue full". The only failure mode here is a closed queue,
   // which still raises and propagates out of this helper.
   ignore(
-    self.shared.requests.try_put({ kind, bytes, responses, copy_input: None }),
+    self.shared.requests.try_put({ kind, bytes, responses, copy_input: None, }),
   )
   responses
 }

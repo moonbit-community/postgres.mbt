@@ -31,7 +31,7 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
       CopyInResponse(_) =>
         // The producer side queue is usable only after PostgreSQL explicitly
         // switches this request into COPY FROM STDIN mode.
-        return { input, responses, finished: @ref.new(false) }
+        return { input, responses, finished: @ref.new(false), }
       ErrorResponse(body) => {
         // COPY startup failures still drain until `ReadyForQuery`, mirroring
         // the delayed-error behavior of the other streaming helpers.
