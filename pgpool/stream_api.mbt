@@ -397,16 +397,10 @@ async fn[T] run_copy_out_callback(
   stream : CopyOutStream,
   f : async (CopyOutStream) -> T,
 ) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(stream))
-    stream.finish_scope()
-    result
-  } catch {
-    err => {
-      stream.finish_scope_best_effort()
-      raise err
-    }
-  }
+  errdefer stream.finish_scope_best_effort()
+  let result = @async.protect_from_cancel(() => f(stream))
+  stream.finish_scope()
+  result
 }
 
 ///|
@@ -415,16 +409,10 @@ async fn[T] run_copy_in_callback(
   sink : CopyInSink,
   f : async (CopyInSink) -> T,
 ) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(sink))
-    sink.finish_scope()
-    result
-  } catch {
-    err => {
-      sink.finish_scope_best_effort()
-      raise err
-    }
-  }
+  errdefer sink.finish_scope_best_effort()
+  let result = @async.protect_from_cancel(() => f(sink))
+  sink.finish_scope()
+  result
 }
 
 ///|
