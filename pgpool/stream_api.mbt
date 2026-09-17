@@ -93,20 +93,16 @@ pub async fn RowStream::next(self : RowStream) -> @client.Row? {
 /// `columns` with the latest metadata, and runs deferred cleanup before
 /// returning. If the collect operation fails, cleanup still runs best-effort.
 pub async fn RowStream::collect(self : RowStream) -> Array[@client.Row] {
-  try {
-    let rows = self.raw.collect()
+  errdefer {
     self.sync_columns()
     self.completed.val = true
-    self.run_cleanup()
-    rows
-  } catch {
-    err => {
-      self.sync_columns()
-      self.completed.val = true
-      self.run_cleanup_best_effort()
-      raise err
-    }
+    self.run_cleanup_best_effort()
   }
+  let rows = self.raw.collect()
+  self.sync_columns()
+  self.completed.val = true
+  self.run_cleanup()
+  rows
 }
 
 ///|
@@ -116,20 +112,16 @@ pub async fn RowStream::collect(self : RowStream) -> Array[@client.Row] {
 /// instead of materializing all rows. As with `collect()`, cleanup runs before
 /// the call returns and also runs best-effort on error.
 pub async fn RowStream::finish(self : RowStream) -> @client.QuerySummary {
-  try {
-    let summary = self.raw.finish()
+  errdefer {
     self.sync_columns()
     self.completed.val = true
-    self.run_cleanup()
-    summary
-  } catch {
-    err => {
-      self.sync_columns()
-      self.completed.val = true
-      self.run_cleanup_best_effort()
-      raise err
-    }
+    self.run_cleanup_best_effort()
   }
+  let summary = self.raw.finish()
+  self.sync_columns()
+  self.completed.val = true
+  self.run_cleanup()
+  summary
 }
 
 ///|
@@ -144,19 +136,15 @@ pub fn RowStream::detach(self : RowStream) -> Unit {
     return
   }
   let task = self.group.spawn(no_wait=true, allow_failure=true, () => {
-    try {
-      ignore(self.raw.finish())
+    errdefer {
       self.sync_columns()
       self.completed.val = true
-      self.run_cleanup()
-    } catch {
-      err => {
-        self.sync_columns()
-        self.completed.val = true
-        self.run_cleanup_best_effort()
-        raise err
-      }
+      self.run_cleanup_best_effort()
     }
+    ignore(self.raw.finish())
+    self.sync_columns()
+    self.completed.val = true
+    self.run_cleanup()
   })
   self.detached_task.val = Some(task)
 }
@@ -385,16 +373,10 @@ async fn[T] run_row_stream_callback(
   stream : RowStream,
   f : async (RowStream) -> T,
 ) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(stream))
-    stream.finish_scope()
-    result
-  } catch {
-    err => {
-      stream.finish_scope_best_effort()
-      raise err
-    }
-  }
+  errdefer stream.finish_scope_best_effort()
+  let result = @async.protect_from_cancel(() => f(stream))
+  stream.finish_scope()
+  result
 }
 
 ///|
@@ -403,16 +385,10 @@ async fn[T] run_simple_query_callback(
   stream : SimpleQueryStream,
   f : async (SimpleQueryStream) -> T,
 ) -> T {
-  try {
-    let result = @async.protect_from_cancel(() => f(stream))
-    stream.finish_scope()
-    result
-  } catch {
-    err => {
-      stream.finish_scope_best_effort()
-      raise err
-    }
-  }
+  errdefer stream.finish_scope_best_effort()
+  let result = @async.protect_from_cancel(() => f(stream))
+  stream.finish_scope()
+  result
 }
 
 ///|
@@ -583,19 +559,13 @@ pub async fn[T] Transaction::with_typed_stream(
   let transaction = self.state.begin_operation()
   defer self.state.finish_operation()
   let statement = transaction.prepare_typed(sql, param_types)
-  try {
-    let stream = make_row_stream(
-      self.state.connection.group,
-      transaction.query_statement(statement, params~),
-      cleanup=Some(() => statement.close()),
-    )
-    run_row_stream_callback(stream, f)
-  } catch {
-    err => {
-      close_statement_best_effort(statement)
-      raise err
-    }
-  }
+  errdefer close_statement_best_effort(statement)
+  let stream = make_row_stream(
+    self.state.connection.group,
+    transaction.query_statement(statement, params~),
+    cleanup=Some(() => statement.close()),
+  )
+  run_row_stream_callback(stream, f)
 }
 
 ///|
