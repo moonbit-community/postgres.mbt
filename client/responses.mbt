@@ -3,14 +3,14 @@
 ///|
 /// Construct a `RowStream` over one backend response queue.
 fn new_row_stream(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
   initial_columns? : Array[Column] = [],
   cleanup? : StreamCleanup? = None,
 ) -> RowStream {
   {
-    background_group,
+    control,
     columns: initial_columns,
     responses,
     cleanup,
@@ -20,7 +20,7 @@ fn new_row_stream(
     suspended: false,
     database_error: None,
     detached: false,
-    detached_task: None,
+    detached_done: None,
     summary: None,
   }
 }
@@ -28,18 +28,18 @@ fn new_row_stream(
 ///|
 /// Construct a `SimpleQueryStream` over one backend response queue.
 fn new_simple_query_stream(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
 ) -> SimpleQueryStream {
   {
-    background_group,
+    control,
     responses,
     permit,
     columns: [],
     database_error: None,
     detached: false,
-    detached_task: None,
+    detached_done: None,
     finished: false,
   }
 }
@@ -69,7 +69,7 @@ async fn close_temporary_statement(context : OpContext, name : Bytes) -> Unit {
 ///|
 /// Wait for PostgreSQL to acknowledge `COPY OUT` mode and build the stream.
 async fn start_copy_out(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
 ) -> CopyOutStream {
@@ -80,13 +80,13 @@ async fn start_copy_out(
         // The stream is valid only after PostgreSQL explicitly enters COPY OUT
         // mode and advertises the per-column wire formats.
         return {
-          background_group,
+          control,
           responses,
           permit,
           formats: parse_copy_formats(body.column_formats()),
           database_error,
           detached: false,
-          detached_task: None,
+          detached_done: None,
           finished: false,
         }
       ErrorResponse(body) => {

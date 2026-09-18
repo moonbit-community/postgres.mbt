@@ -65,13 +65,13 @@ pub enum SimpleQueryMessage {
 ///|
 /// Incremental stream of `SimpleQueryMessage` values.
 struct SimpleQueryStream {
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
+  control : DrainControl
   responses : @async.Queue[@backend.Message]
   permit : OperationPermit?
   mut columns : Array[String]
   mut database_error : DatabaseError?
   mut detached : Bool
-  mut detached_task : @async.Task[Result[Unit, ClientError]]?
+  mut detached_done : Completion?
   mut finished : Bool
 }
 
@@ -159,12 +159,8 @@ pub async fn SimpleQueryStream::collect(
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
   if self.detached {
-    match self.detached_task {
-      Some(task) =>
-        match task.wait() {
-          Ok(_) => ()
-          Err(err) => raise err
-        }
+    match self.detached_done {
+      Some(done) => done.wait()
       None => {
         defer self.release_permit()
         self.drain_discard()
@@ -196,11 +192,11 @@ pub fn SimpleQueryStream::detach(self : SimpleQueryStream) -> Unit {
 ///|
 fn SimpleQueryStream::start_detached_drain(self : SimpleQueryStream) -> Unit {
   self.detached = true
-  self.detached_task = spawn_detached_drain(self.background_group, () => {
+  self.detached_done = spawn_detached_drain(self.control, () => {
     defer self.release_permit()
     self.drain_discard()
   })
-  if self.detached_task is None {
+  if self.detached_done is None {
     self.release_permit()
   }
 }

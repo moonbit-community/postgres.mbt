@@ -19,11 +19,7 @@ pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   })
   let stream = @async.protect_from_cancel(() => {
     let responses = self.send_request(Messages, simple_query_bytes(sql))
-    let stream = start_copy_out(
-      self.shared.background_group,
-      responses,
-      Some(permit),
-    )
+    let stream = start_copy_out(self.shared.control, responses, Some(permit))
     completed.val = Some(stream)
     stream
   })
@@ -47,12 +43,7 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
   errdefer (if terminal.val {
     permit.release()
   } else {
-    start_abandoned_copy_in(
-      self.shared.background_group,
-      input,
-      responses,
-      permit,
-    )
+    start_abandoned_copy_in(self.shared.control, input, responses, permit)
   })
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -61,7 +52,7 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
         // The producer side queue is usable only after PostgreSQL explicitly
         // switches this request into COPY FROM STDIN mode.
         return {
-          background_group: self.shared.background_group,
+          control: self.shared.control,
           input,
           responses,
           finished: @ref.new(false),
@@ -109,7 +100,7 @@ async fn CopyInSink::enqueue_action(
   errdefer (if !self.finished.val {
     self.finished.val = true
     start_abandoned_copy_in(
-      self.background_group,
+      self.control,
       self.input,
       self.responses,
       self.permit,
@@ -151,7 +142,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
   self.finished.val = true
   errdefer (if !self.permit.released.val {
     start_abandoned_copy_in(
-      self.background_group,
+      self.control,
       self.input,
       self.responses,
       self.permit,
@@ -183,7 +174,7 @@ pub async fn CopyInSink::abort(
   self.finished.val = true
   defer (if !self.permit.released.val {
     start_abandoned_copy_in(
-      self.background_group,
+      self.control,
       self.input,
       self.responses,
       self.permit,
@@ -216,12 +207,12 @@ pub async fn CopyInSink::abort(
 /// Queueing `CopyFail` also covers cancellation during startup: if PostgreSQL
 /// has already entered COPY mode, the driver can immediately unwind it.
 fn start_abandoned_copy_in(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   input : @async.Queue[CopyInAction],
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit,
 ) -> Unit {
-  let task = spawn_detached_drain(background_group, () => {
+  let task = spawn_detached_drain(control, () => {
     defer permit.release()
     ignore(input.put(Fail("COPY abandoned"))) catch {
       _ => ()
@@ -270,14 +261,14 @@ pub enum AsyncMessage {
 /// each `CopyData` payload exactly as received so higher-level code can parse
 /// CSV, text, or binary COPY output as needed.
 pub struct CopyOutStream {
-  priv background_group : @ref.Ref[@async.TaskGroup[Unit]?]
+  priv control : DrainControl
   priv responses : @async.Queue[@backend.Message]
   priv permit : OperationPermit?
   /// Column wire formats reported by PostgreSQL's `CopyOutResponse`.
   formats : Array[WireFormat]
   priv mut database_error : DatabaseError?
   priv mut detached : Bool
-  priv mut detached_task : @async.Task[Result[Unit, ClientError]]?
+  priv mut detached_done : Completion?
   priv mut finished : Bool
 }
 
@@ -342,12 +333,8 @@ pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
   if self.detached {
-    match self.detached_task {
-      Some(task) =>
-        match task.wait() {
-          Ok(_) => ()
-          Err(err) => raise err
-        }
+    match self.detached_done {
+      Some(done) => done.wait()
       None => {
         defer self.release_permit()
         self.drain_discard()
@@ -380,11 +367,11 @@ pub fn CopyOutStream::detach(self : CopyOutStream) -> Unit {
 ///|
 fn CopyOutStream::start_detached_drain(self : CopyOutStream) -> Unit {
   self.detached = true
-  self.detached_task = spawn_detached_drain(self.background_group, () => {
+  self.detached_done = spawn_detached_drain(self.control, () => {
     defer self.release_permit()
     self.drain_discard()
   })
-  if self.detached_task is None {
+  if self.detached_done is None {
     self.release_permit()
   }
 }

@@ -136,7 +136,11 @@ priv struct Shared {
   config : Config
   requests : @async.Queue[Request]
   async_messages : @async.Queue[AsyncMessage]
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
+  control : DrainControl
+  ready : Completion
+  done : Completion
+  started : @ref.Ref[Bool]
+  runtime_error : @ref.Ref[Error?]
   parameters : Map[String, String]
   types : Map[@proto.Oid, Type]
   process_id : @ref.Ref[Int]
@@ -144,10 +148,10 @@ priv struct Shared {
   transaction_status : @ref.Ref[Byte]
   closed : @ref.Ref[Bool]
   closing : @ref.Ref[Bool]
+  close_requested : @ref.Ref[Bool]
   aborted : @ref.Ref[Bool]
   operation_gate : OperationGate
   driver_task : @ref.Ref[@async.Task[Unit]?]
-  driver_done : @async.Queue[Unit]
   next_id : @ref.Ref[Int]
 }
 
@@ -158,6 +162,13 @@ priv struct Shared {
 /// cloned freely by value because all mutable state lives inside `Shared`.
 struct Client {
   shared : Shared
+}
+
+///|
+/// Owns the socket and all background work for a single client.
+/// Spawn `run` once, then await `Client::ready` before using startup metadata.
+pub struct ClientExecutor {
+  priv shared : Shared
 }
 
 ///|
@@ -228,7 +239,7 @@ struct CancelToken {
 /// The sink feeds `CopyInAction` values to the connection loop while the paired
 /// response queue waits for the backend's completion status.
 struct CopyInSink {
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?]
+  control : DrainControl
   input : @async.Queue[CopyInAction]
   responses : @async.Queue[@backend.Message]
   finished : @ref.Ref[Bool]

@@ -41,6 +41,7 @@ async fn[T] Client::run_operation(
   self : Client,
   f : async (OpContext) -> T,
 ) -> T {
+  self.ready()
   let permit = self.shared.operation_gate.acquire()
   defer permit.release()
   ensure_open(self.shared)
@@ -55,6 +56,7 @@ async fn[T] Client::run_operation(
 async fn Client::begin_stream_operation(
   self : Client,
 ) -> (OpContext, OperationPermit) {
+  self.ready()
   let permit = self.shared.operation_gate.acquire()
   errdefer permit.release()
   ensure_open(self.shared)
@@ -125,29 +127,62 @@ fn ensure_open(shared : Shared) -> Unit raise {
 }
 
 ///|
-/// Spawn one detached stream drain on the client's task group.
+/// Schedule one detached stream drain on the executor's control queue.
 ///
 /// Terminal database errors remain in the stream. Expected connection closure
 /// is saved for finish() without failing sibling tasks. Other failures still
 /// tear down the task group so protocol bugs are not silently ignored.
 fn spawn_detached_drain(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   drain : async () -> Unit,
-) -> @async.Task[Result[Unit, ClientError]]? {
-  match background_group.val {
-    Some(group) =>
-      Some(
-        group.spawn(no_wait=true, () => {
-          try drain() catch {
-            ClientError::Database(_) => Ok(())
-            ClientError::Closed(_) as err => Err(err)
-            err => raise err
-          } noraise {
-            _ => Ok(())
-          }
-        }),
+) -> Completion? {
+  if control.closed.val {
+    return None
+  }
+  let completion = Completion::new()
+  control.next_id.val += 1
+  let id = control.next_id.val
+  control.pending.push({ id, completion, })
+  let queued = control.queue.try_put(() => {
+    let settled = @ref.new(false)
+    defer (if !settled.val {
+      control.finish(
+        id,
+        completion,
+        Some(ClientError::Closed("connection is closed")),
       )
-    None => None
+    })
+    try {
+      drain()
+      control.finish(id, completion, None)
+      settled.val = true
+    } catch {
+      ClientError::Database(_) => {
+        control.finish(id, completion, None)
+        settled.val = true
+      }
+      ClientError::Closed(_) as error => {
+        control.finish(id, completion, Some(error))
+        settled.val = true
+      }
+      error => {
+        control.finish(id, completion, Some(error))
+        settled.val = true
+        raise error
+      }
+    }
+  }) catch {
+    _ => false
+  }
+  if queued {
+    Some(completion)
+  } else {
+    control.finish(
+      id,
+      completion,
+      Some(ClientError::Closed("connection is closed")),
+    )
+    None
   }
 }
 

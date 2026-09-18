@@ -2,11 +2,9 @@
 async test "row stream detach does not swallow non-database drain failures" {
   let result = expect_error_async(() => {
     @async.with_task_group(group => {
-      let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(
-        Some(group),
-      )
+      let control : DrainControl = test_control(Some(group))
       let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
-      let stream = new_row_stream(background_group, responses, None)
+      let stream = new_row_stream(control, responses, None)
       responses.close(error=ClientError::UnexpectedMessage("boom"), clear=true)
       stream.detach()
     })
@@ -18,31 +16,47 @@ async test "row stream detach does not swallow non-database drain failures" {
 }
 
 ///|
+async test "queued detached drain receives closure before its worker starts" {
+  let control = DrainControl::new()
+  let responses : @async.Queue[@backend.Message] = Queue(kind=Blocking(8))
+  let stream = new_row_stream(control, responses, None)
+  stream.detach()
+  assert_eq(control.pending.length(), 1)
+  responses.close(error=ClientError::Closed("connection aborted"))
+  control.close(error=ClientError::Closed("connection aborted"))
+  assert_true(
+    expect_error_async(() => stream.finish())
+    is ClientError::Closed("connection aborted"),
+  )
+  assert_eq(control.pending.length(), 0)
+}
+
+///|
 /// Share lifecycle assertions across the three public output stream types.
 fn detach_test_stream(
   kind : Int,
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
 ) -> (async () -> Unit, () -> Unit) {
   match kind {
     0 => {
-      let stream = new_row_stream(background_group, responses, permit)
+      let stream = new_row_stream(control, responses, permit)
       (() => ignore(stream.finish()), () => stream.detach())
     }
     1 => {
-      let stream = new_simple_query_stream(background_group, responses, permit)
+      let stream = new_simple_query_stream(control, responses, permit)
       (() => stream.finish(), () => stream.detach())
     }
     _ => {
       let stream : CopyOutStream = {
-        background_group,
+        control,
         responses,
         permit,
         formats: [],
         database_error: None,
         detached: false,
-        detached_task: None,
+        detached_done: None,
         finished: false,
       }
       (() => stream.finish(), () => stream.detach())
@@ -57,7 +71,7 @@ async test "detached stream abort reports Closed without failing sibling connect
       let (client, driver, backend) = connection_test_pair(group)
       defer backend.close()
       client.shared.driver_task.val = Some(
-        group.spawn(no_wait=true, () => driver.run()),
+        group.spawn(no_wait=true, () => driver.run(group)),
       )
       defer client.abort()
       let (sibling, sibling_driver, sibling_backend) = connection_test_pair(
@@ -65,7 +79,7 @@ async test "detached stream abort reports Closed without failing sibling connect
       )
       defer sibling_backend.close()
       sibling.shared.driver_task.val = Some(
-        group.spawn(no_wait=true, () => sibling_driver.run()),
+        group.spawn(no_wait=true, () => sibling_driver.run(group)),
       )
       defer sibling.abort()
       @async.with_timeout(2000, () => {
@@ -74,7 +88,7 @@ async test "detached stream abort reports Closed without failing sibling connect
         let responses = client.send_request(Messages, bytes)
         let (finish, detach) = detach_test_stream(
           kind,
-          client.shared.background_group,
+          client.shared.control,
           responses,
           Some(permit),
         )
@@ -93,14 +107,15 @@ async test "detached stream abort reports Closed without failing sibling connect
         assert_eq(sibling_backend.read_exactly(5), sync_bytes())
         sibling_backend.write(ready_for_query_packet(b'I'))
         ping.wait()
-        client.close()
+        // This fixture drives `Driver` directly, without `ClientExecutor`
+        // to publish its lifecycle completion.
       })
     })
   }
 }
 
 ///|
-async test "detached finish drains synchronously when its background group is unavailable" {
+async test "detached finish drains synchronously when its control queue is closed" {
   for kind in 0..<3 {
     for closed in [false, true] {
       let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
@@ -108,7 +123,7 @@ async test "detached finish drains synchronously when its background group is un
       let permit = gate.acquire()
       let (finish, detach) = detach_test_stream(
         kind,
-        @ref.new(None),
+        test_control(None),
         responses,
         Some(permit),
       )
@@ -139,7 +154,7 @@ async test "all detached stream types preserve database errors for finish" {
       let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
       let (finish, detach) = detach_test_stream(
         kind,
-        @ref.new(Some(group)),
+        test_control(Some(group)),
         responses,
         None,
       )
@@ -162,7 +177,7 @@ async test "all detached stream types still fail the task group on protocol erro
         let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
         let (finish, detach) = detach_test_stream(
           kind,
-          @ref.new(Some(group)),
+          test_control(Some(group)),
           responses,
           None,
         )

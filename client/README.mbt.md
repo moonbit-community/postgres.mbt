@@ -21,19 +21,25 @@ async fn _quick_start() -> Unit {
       ssl_mode=Disable,
       application_name="my-service",
     )
-    let client = connect(config, group)
+    let (client, executor) = Client::new(config)
+    let task = group.spawn(no_wait=true, () => executor.run())
+    client.ready()
     let current_user : String = client
       .query_one("select current_user::text as current_user")
       .get_name("current_user")
     ignore(current_user)
     client.close()
+    task.wait()
   })
 }
 ```
 
-`connect(config, group)` opens the session and starts its socket driver in the
-provided task group. There is no separate `Connection` handle and callers do
-not start a driver task themselves. `Client::close()` is asynchronous: it stops
+`Client::new(config)` only allocates state. Spawn the single-use executor and
+await `ready()` to observe connection and authentication errors. Any number of
+tasks may await the same readiness result. Async database operations also wait
+for readiness. Before startup finishes, `parameter()` and `cancel_token()`
+raise `ClientError::NotReady`. A repeated `run()` raises
+`ClientError::ExecutorAlreadyStarted`. `Client::close()` is asynchronous: it stops
 new work, waits for already queued work, sends PostgreSQL `Terminate`, and waits
 for the driver to finish.
 
@@ -70,11 +76,10 @@ An unfinished stream intentionally blocks later work on that client. Call
 calling `finish()` afterwards waits for that drain to complete.
 
 If the connection closes or is aborted during a detached drain, the drain saves
-`ClientError::Closed` for an explicit `finish()` call. This expected closure does
-not fail the supplied task group or cancel other connections in it. Database
-errors also remain observable through `finish()`; unexpected protocol failures
-still fail the task group. If the background group is no longer available,
-`finish()` drains the remaining responses itself or reports their closure.
+`ClientError::Closed` for an explicit `finish()` call. Database errors also
+remain observable through `finish()`; unexpected protocol failures fail the
+executor. If the executor has stopped, `finish()` drains the remaining
+responses itself or reports their closure.
 
 ## Query APIs
 

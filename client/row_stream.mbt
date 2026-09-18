@@ -22,7 +22,7 @@ pub struct RowStream {
   /// The latest resolved column metadata. This becomes available after the
   /// driver sees a `RowDescription`.
   mut columns : Array[Column]
-  priv background_group : @ref.Ref[@async.TaskGroup[Unit]?]
+  priv control : DrainControl
   priv responses : @async.Queue[@backend.Message]
   priv cleanup : StreamCleanup?
   priv permit : OperationPermit?
@@ -31,7 +31,7 @@ pub struct RowStream {
   priv mut suspended : Bool
   priv mut database_error : DatabaseError?
   priv mut detached : Bool
-  priv mut detached_task : @async.Task[Result[Unit, ClientError]]?
+  priv mut detached_done : Completion?
   priv mut summary : QuerySummary?
 }
 
@@ -173,12 +173,8 @@ pub async fn RowStream::opt(self : RowStream) -> Row? {
 /// closure or database error. If no background task could start, it drains here.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
   if self.detached {
-    match self.detached_task {
-      Some(task) =>
-        match task.wait() {
-          Ok(_) => ()
-          Err(err) => raise err
-        }
+    match self.detached_done {
+      Some(done) => done.wait()
       None => {
         defer self.release_permit()
         self.drain_discard()
@@ -211,11 +207,11 @@ pub fn RowStream::detach(self : RowStream) -> Unit {
 ///|
 fn RowStream::start_detached_drain(self : RowStream) -> Unit {
   self.detached = true
-  self.detached_task = spawn_detached_drain(self.background_group, () => {
+  self.detached_done = spawn_detached_drain(self.control, () => {
     defer self.release_permit()
     self.drain_discard()
   })
-  if self.detached_task is None {
+  if self.detached_done is None {
     self.release_permit()
   }
 }

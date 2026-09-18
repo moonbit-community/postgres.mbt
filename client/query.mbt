@@ -17,7 +17,7 @@ pub async fn Client::simple_query(
   let (_context, permit) = self.begin_stream_operation()
   errdefer permit.release()
   let responses = self.send_request(Messages, simple_query_bytes(sql))
-  new_simple_query_stream(self.shared.background_group, responses, Some(permit))
+  new_simple_query_stream(self.shared.control, responses, Some(permit))
 }
 
 ///|
@@ -157,7 +157,7 @@ async fn OpContext::query(
   // Cleanup is deferred onto the returned stream because closing the temporary
   // statement early would interleave a second request before this one finishes.
   new_row_stream(
-    self.client.shared.background_group,
+    self.client.shared.control,
     responses,
     permit,
     initial_columns=columns,
@@ -238,7 +238,7 @@ async fn OpContext::query_typed(
     execute_statement_bytes(name[:], param_types, params),
   )
   new_row_stream(
-    self.client.shared.background_group,
+    self.client.shared.control,
     responses,
     permit,
     initial_columns=columns,
@@ -281,7 +281,7 @@ fn OpContext::query_statement(
     execute_statement_bytes(statement.name[:], statement.params, params),
   )
   new_row_stream(
-    self.client.shared.background_group,
+    self.client.shared.control,
     responses,
     permit,
     initial_columns=statement.columns,
@@ -345,9 +345,9 @@ async fn OpContext::execute_raw(
   let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
     // A decoding failure may already have started a detached drain.
-    match stream.detached_task {
-      Some(task) => {
-        let _ = ignore(task.wait()) catch { _ => () }
+    match stream.detached_done {
+      Some(done) => {
+        let _ = done.wait() catch { _ => () }
       }
       None => {
         let _ = stream.drain_discard() catch { _ => () }
@@ -482,7 +482,7 @@ fn OpContext::query_portal(
     execute_portal_bytes(portal.name[:], max_rows),
   )
   new_row_stream(
-    self.client.shared.background_group,
+    self.client.shared.control,
     responses,
     permit,
     initial_columns=portal.columns,
