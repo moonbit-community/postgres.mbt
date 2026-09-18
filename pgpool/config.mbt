@@ -533,7 +533,7 @@ fn make_client_config(
   normalized : NormalizedConfig,
   index : Int,
 ) -> @client.Config {
-  @client.Config::from_parts(
+  @client.Config::new_internal(
     normalized.hosts[index].unwrap_or(""),
     normalized.hostaddrs[index],
     normalized.ports[index],
