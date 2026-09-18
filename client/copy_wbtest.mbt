@@ -149,8 +149,16 @@ fn copy_test_shared(
 ) -> Shared {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
+  let ready = Completion::new()
+  ready.complete(None)
+  let control = DrainControl::new()
+  match background_group.val {
+    Some(group) =>
+      group.spawn_bg(no_wait=true, () => run_control_queue(control, group))
+    None => control.close()
+  }
   {
-    config: Config::new(
+    config: Config::Config(
       "127.0.0.1",
       user="moon",
       database="moondb",
@@ -161,7 +169,11 @@ fn copy_test_shared(
     ),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
-    background_group,
+    control,
+    ready,
+    done: Completion::new(),
+    started: @ref.new(true),
+    runtime_error: @ref.new(None),
     parameters: {},
     types,
     process_id: @ref.new(11),
@@ -169,6 +181,10 @@ fn copy_test_shared(
     transaction_status: @ref.new(b'I'),
     closed: @ref.new(false),
     closing: @ref.new(false),
+    close_requested: @ref.new(false),
+    aborted: @ref.new(false),
+    operation_gate: OperationGate::new(),
+    driver_task: @ref.new(None),
     next_id: @ref.new(0),
   }
 }
@@ -210,6 +226,70 @@ async test "client copy in streams input and returns affected rows" {
       fail("expected closed sink error")
     }
     assert_eq(message, "copy sink already finished")
+  })
+}
+
+///|
+async test "copy in input is bounded and abandoned COPY eventually queues Fail" {
+  @async.with_task_group(group => {
+    let input : @async.Queue[CopyInAction] = Queue(kind=Blocking(8))
+    let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
+    let gate = OperationGate::new()
+    let permit = gate.acquire()
+    for i in 0..<8 {
+      assert_true(input.try_put(Data(Bytes::make(1, i.to_byte()))))
+    }
+    assert_false(input.try_put(Data(b"overflow")))
+
+    start_abandoned_copy_in(test_control(Some(group)), input, responses, permit)
+    @async.pause()
+    for i in 0..<8 {
+      guard input.get() is Data(data) else { fail("expected buffered data") }
+      assert_eq(data, Bytes::make(1, i.to_byte()))
+    }
+    guard input.get() is Fail(message) else {
+      fail("expected abandoned COPY failure")
+    }
+    assert_eq(message, "COPY abandoned")
+    responses.put(copy_test_ready_for_query_message())
+
+    let next = gate.acquire()
+    next.release()
+  })
+}
+
+///|
+async test "copy in send drains an early database error before releasing permit" {
+  @async.with_task_group(group => {
+    let shared = copy_test_shared(@ref.new(Some(group)))
+    let client : Client = { shared, }
+
+    group.spawn_bg(() => {
+      let request = shared.requests.get()
+      guard request.copy_input is Some(input) else {
+        fail("expected copy input queue")
+      }
+      request.responses.put(copy_test_copy_in_response_message([]))
+      guard input.get() is Data(_) else { fail("expected copy data") }
+      let database_error = copy_test_database_error("invalid copy row")
+      request.responses.put(
+        copy_test_error_response_message("invalid copy row"),
+      )
+      input.close(error=ClientError::Database(database_error), clear=true)
+      request.responses.put(copy_test_ready_for_query_message())
+    })
+
+    let sink = client.copy_in("COPY early_error FROM STDIN")
+    sink.send(b"invalid\n")
+    @async.pause()
+    let result = expect_error_async(() => sink.send(b"later\n"))
+    guard result is ClientError::Database(database_error) else {
+      fail("expected early COPY database error")
+    }
+    assert_eq(database_error.message, "invalid copy row")
+
+    let next = shared.operation_gate.acquire()
+    next.release()
   })
 }
 
@@ -284,6 +364,43 @@ async test "copy in abort is best effort and idempotent" {
       fail("expected closed sink after abort")
     }
     assert_eq(message, "copy sink already finished")
+  })
+}
+
+///|
+async test "copy in startup cancellation aborts and releases its permit" {
+  @async.with_task_group(group => {
+    let shared = copy_test_shared(@ref.new(Some(group)))
+    let client : Client = { shared, }
+    let request_started : @async.Queue[Unit] = Queue(kind=Unbounded)
+    let release_response : @async.Queue[Unit] = Queue(kind=Unbounded)
+
+    group.spawn_bg(() => {
+      let request = shared.requests.get()
+      guard request.copy_input is Some(input) else {
+        fail("expected copy input queue")
+      }
+      request_started.put(())
+      release_response.get()
+      request.responses.put(copy_test_copy_in_response_message([]))
+      match input.get() {
+        Fail(message) => assert_eq(message, "COPY abandoned")
+        _ => fail("expected cancellation to abort COPY")
+      }
+      request.responses.put(copy_test_error_response_message("copy abandoned"))
+      request.responses.put(copy_test_ready_for_query_message())
+    })
+
+    let copier = group.spawn(allow_failure=true, () => {
+      ignore(client.copy_in("COPY cancelled FROM STDIN"))
+    })
+    request_started.get()
+    copier.cancel()
+    let _ = copier.wait() catch { _ => () }
+    release_response.put(())
+
+    let next = shared.operation_gate.acquire()
+    next.release()
   })
 }
 
@@ -382,11 +499,13 @@ async test "client copy helpers reject unexpected messages and finish empty stre
   finish_responses.put(copy_test_command_complete_message("COPY 0"))
   finish_responses.put(copy_test_ready_for_query_message())
   let finished_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: finish_responses,
+    permit: None,
     formats: [],
     database_error: None,
     detached: false,
+    detached_done: None,
     finished: false,
   }
   finished_stream.finish()
@@ -397,21 +516,25 @@ async test "client copy helpers reject unexpected messages and finish empty stre
 ///|
 async test "client copy out drain_discard covers finished error and unexpected paths" {
   let completed_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: Queue(kind=Unbounded),
+    permit: None,
     formats: [],
     database_error: None,
     detached: false,
+    detached_done: None,
     finished: true,
   }
   completed_stream.drain_discard()
 
   let finished_error_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: Queue(kind=Unbounded),
+    permit: None,
     formats: [],
     database_error: Some(copy_test_database_error("copy already failed")),
     detached: false,
+    detached_done: None,
     finished: true,
   }
   let finished_error = expect_error_async(() => {
@@ -428,11 +551,13 @@ async test "client copy out drain_discard covers finished error and unexpected p
   draining_responses.put(copy_test_error_response_message("copy drain failed"))
   draining_responses.put(copy_test_ready_for_query_message())
   let draining_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: draining_responses,
+    permit: None,
     formats: [],
     database_error: None,
     detached: false,
+    detached_done: None,
     finished: false,
   }
   let draining_error = expect_error_async(() => draining_stream.drain_discard())
@@ -445,11 +570,13 @@ async test "client copy out drain_discard covers finished error and unexpected p
   let next_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   next_responses.put(copy_test_row_description_message())
   let next_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: next_responses,
+    permit: None,
     formats: [],
     database_error: None,
     detached: false,
+    detached_done: None,
     finished: false,
   }
   let next_error = expect_error_async(() => next_stream.next())
@@ -461,11 +588,13 @@ async test "client copy out drain_discard covers finished error and unexpected p
   let discard_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   discard_responses.put(copy_test_row_description_message())
   let discard_stream : CopyOutStream = {
-    background_group: @ref.new(None),
+    control: test_control(None),
     responses: discard_responses,
+    permit: None,
     formats: [],
     database_error: None,
     detached: false,
+    detached_done: None,
     finished: false,
   }
   let discard_error = expect_error_async(() => discard_stream.drain_discard())

@@ -8,10 +8,11 @@ async fn serve_recycle_test_connection(socket : @socket.Tcp) -> Unit {
   )
   socket.write(b"R\x00\x00\x00\x08\x00\x00\x00\x00Z\x00\x00\x00\x05I")
   while true {
-    let header = socket.read_exactly(5)
-    let length = @proto.ByteReader::new(header[1:]).read_i32_be()
+    guard socket.read_some(max_len=1) is Some(tag) else { return }
+    let header = socket.read_exactly(4)
+    let length = @proto.ByteReader::new(header[:]).read_i32_be()
     ignore(socket.read_exactly(length - 4))
-    match header[0] {
+    match tag[0] {
       b'P' => socket.write(b"1\x00\x00\x00\x04")
       b'D' => socket.write(b"t\x00\x00\x00\x06\x00\x00n\x00\x00\x00\x04")
       b'S' => socket.write(b"Z\x00\x00\x00\x05I")
@@ -52,7 +53,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     } else {
       PoolOptions::new(pre_recycle=hook)
     }
-    let pool = Pool::new(
+    let pool = start_test_pool(
       Config::new(
         "127.0.0.1",
         port=server.addr.port(),
@@ -68,21 +69,23 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       // Also close any checked-out connection if an assertion fails early.
       for connection in pool.shared.connections {
         if connection.client.val is Some(client) {
-          client.close()
+          client.abort()
         }
       }
       pool.close()
     }
     @async.with_timeout(3000, () => {
-      let first = pool.get()
-      first.with_prepared_cached("select 1", _ => ())
+      let first = pool.checkout_session()
+      first.with_prepared("select 1", _ => ())
       first.release()
       let retired = pool.shared.connections[0]
       assert_eq(retired.statement_cache.length(), 1)
       assert_eq(pool.status().size, 1)
       assert_eq(pool.status().available, 1)
 
-      let checkout = group.spawn(allow_failure=true, () => pool.get())
+      let checkout = group.spawn(allow_failure=true, () => {
+        pool.checkout_session()
+      })
       entered.get()
       assert_eq(pool.status().available, 0)
       assert_true(pool.shared.slots.try_get() is None)
@@ -101,18 +104,18 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       assert_eq(pool.shared.connections.length(), 0)
       assert_true(retired.client.val is None)
       assert_eq(retired.statement_cache.length(), 0)
-      // Exactly one slot is restored by timeout_get, never by run_recycle.
+      // Exactly one slot is restored by checkout, never by run_recycle.
       assert_true(pool.shared.slots.try_get() is Some(_))
       assert_true(pool.shared.slots.try_get() is None)
       assert_true(pool.shared.slots.try_put(()))
       disconnected.get()
 
-      let replacement = pool.get()
+      let replacement = pool.checkout_session()
       assert_true(replacement.state.connection.id != retired.id)
       assert_eq(pool.status().size, 1)
       replacement.release()
       assert_eq(pool.status().available, 1)
-      let reused = pool.get()
+      let reused = pool.checkout_session()
       assert_eq(reused.state.connection.id, replacement.state.connection.id)
       reused.release()
       assert_eq(pool.status().size, 1)

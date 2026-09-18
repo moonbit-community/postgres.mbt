@@ -15,11 +15,10 @@ fn isolation_level_sql(level : IsolationLevel) -> String {
 /// Start one transaction using PostgreSQL's default `BEGIN` settings or the
 /// given `BEGIN` options.
 ///
-/// Preconditions: no exclusive scope may already be active on this lease. The
-/// returned `Transaction` keeps the connection checked out until it is
-/// committed or rolled back.
-pub async fn Client::transaction(
-  self : Client,
+/// The call waits in FIFO order for earlier session work. The returned
+/// `Transaction` keeps the connection checked out until commit or rollback.
+async fn Session::transaction(
+  self : Session,
   options? : TransactionOptions = TransactionOptions::new(),
 ) -> Transaction {
   let (client, connection) = self.state.begin_transaction_scope()
@@ -39,8 +38,8 @@ pub async fn Client::transaction(
 /// On normal return, the transaction is committed if the callback did not
 /// already finish it explicitly. If the callback raises or is cancelled, the
 /// transaction is rolled back best-effort unless it was already finished.
-pub async fn[T] Client::with_transaction(
-  self : Client,
+pub async fn[T] Session::with_transaction(
+  self : Session,
   f : async (Transaction) -> T,
   options? : TransactionOptions = TransactionOptions::new(),
 ) -> T {
@@ -49,6 +48,7 @@ pub async fn[T] Client::with_transaction(
     transaction.rollback_best_effort()
   })
   let result = f(transaction)
+  check_pending_cancellation()
   if !transaction.state.finished.val {
     transaction.commit_internal()
   }
@@ -66,58 +66,72 @@ fn TransactionOwner::finish_scope(self : TransactionOwner) -> Unit {
 
 ///|
 /// Start one transaction operation or reject work after completion begins.
-fn TransactionState::begin_operation(
+async fn TransactionState::begin_operation(
   self : TransactionState,
-) -> @client.Transaction raise {
-  if self.closing.val || self.finished.val {
-    raise PoolError::LeaseReleased
+) -> @client.Transaction {
+  if self.finished.val {
+    raise PoolError::ScopeExpired
   }
-  if self.scope_active.val {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if self.finished.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   match self.transaction.val {
-    Some(transaction) => {
-      self.active_ops.val += 1
-      transaction
+    Some(transaction) => transaction
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
     }
-    None => raise PoolError::LeaseReleased
   }
 }
 
 ///|
 /// Finish one transaction operation.
 fn TransactionState::finish_operation(self : TransactionState) -> Unit {
-  if self.active_ops.val > 0 {
-    self.active_ops.val -= 1
-  }
+  self.gate.release()
 }
 
 ///|
 /// Start one nested transaction or savepoint scope on this transaction.
-fn TransactionState::begin_nested_scope(
+async fn TransactionState::begin_nested_scope(
   self : TransactionState,
-) -> (@client.Transaction, ConnectionState) raise {
-  if self.closing.val || self.finished.val {
-    raise PoolError::LeaseReleased
+) -> (@client.Transaction, ConnectionState) {
+  if self.finished.val {
+    raise PoolError::ScopeExpired
   }
-  if self.scope_active.val || self.active_ops.val > 0 {
-    raise PoolError::OperationInProgress
+  self.gate.acquire()
+  if self.finished.val {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
   match self.transaction.val {
-    Some(transaction) => {
-      self.scope_active.val = true
-      self.active_ops.val += 1
-      (transaction, self.connection)
+    Some(transaction) => (transaction, self.connection)
+    None => {
+      self.gate.release()
+      raise PoolError::ScopeExpired
     }
-    None => raise PoolError::LeaseReleased
   }
 }
 
 ///|
 /// Finish one nested transaction or savepoint scope on this transaction.
 fn TransactionState::finish_nested_scope(self : TransactionState) -> Unit {
-  self.scope_active.val = false
   self.finish_operation()
+}
+
+///|
+/// Access the raw transaction while an outer transaction scope owns the gate.
+fn TransactionState::scoped_transaction(
+  self : TransactionState,
+) -> @client.Transaction raise {
+  if self.finished.val {
+    raise PoolError::ScopeExpired
+  }
+  match self.transaction.val {
+    Some(transaction) => transaction
+    None => raise PoolError::ScopeExpired
+  }
 }
 
 ///|
@@ -136,22 +150,22 @@ async fn Transaction::take_for_completion(
   self : Transaction,
 ) -> @client.Transaction {
   if self.state.finished.val {
-    raise PoolError::LeaseReleased
+    raise PoolError::ScopeExpired
   }
-  if self.state.scope_active.val {
-    raise PoolError::OperationInProgress
+  self.state.gate.acquire()
+  errdefer self.state.gate.release()
+  if self.state.finished.val {
+    raise PoolError::ScopeExpired
   }
-  self.state.closing.val = true
-  while self.state.active_ops.val > 0 {
-    @async.pause()
-  }
+  check_pending_cancellation()
   self.state.finished.val = true
   match self.state.transaction.val {
     Some(transaction) => {
       self.state.transaction.val = None
+      self.state.gate.release()
       transaction
     }
-    None => raise PoolError::LeaseReleased
+    None => raise PoolError::ScopeExpired
   }
 }
 
@@ -160,6 +174,7 @@ async fn Transaction::take_for_completion(
 async fn Transaction::commit_internal(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => transaction.commit())
 }
 
@@ -187,6 +202,8 @@ async fn[T] Transaction::run_operation(
 ) -> T {
   let transaction = self.state.begin_operation()
   defer self.state.finish_operation()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => op(transaction))
 }
 
@@ -208,6 +225,7 @@ pub async fn Transaction::commit(self : Transaction) -> Unit {
 pub async fn Transaction::rollback(self : Transaction) -> Unit {
   let transaction = self.take_for_completion()
   defer self.state.release_owner_scope()
+  defer check_pending_cancellation()
   @async.protect_from_cancel(() => transaction.rollback())
 }
 
@@ -217,7 +235,7 @@ pub async fn Transaction::rollback(self : Transaction) -> Unit {
 /// Preconditions: the parent transaction must still be active and must not
 /// already be inside another nested transaction scope. The returned nested
 /// transaction must also be committed or rolled back.
-pub async fn Transaction::transaction(self : Transaction) -> Transaction {
+async fn Transaction::transaction(self : Transaction) -> Transaction {
   let (transaction, connection) = self.state.begin_nested_scope()
   errdefer self.state.finish_nested_scope()
   let nested = transaction.transaction()
@@ -228,7 +246,7 @@ pub async fn Transaction::transaction(self : Transaction) -> Transaction {
 /// Start one nested transaction backed by a named savepoint.
 ///
 /// `name` is passed directly to the underlying client savepoint API.
-pub async fn Transaction::savepoint(
+async fn Transaction::savepoint(
   self : Transaction,
   name : String,
 ) -> Transaction {
@@ -250,6 +268,7 @@ pub async fn[T] Transaction::with_transaction(
   let nested = self.transaction()
   errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
   let result = f(nested)
+  check_pending_cancellation()
   if !nested.state.finished.val {
     nested.commit_internal()
   }
@@ -269,6 +288,7 @@ pub async fn[T] Transaction::with_savepoint(
   let nested = self.savepoint(name)
   errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
   let result = f(nested)
+  check_pending_cancellation()
   if !nested.state.finished.val {
     nested.commit_internal()
   }
@@ -282,57 +302,40 @@ pub async fn Transaction::query_all(
   sql : String,
   params? : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
-  self.run_operation(txn => txn.query(sql, params~).collect())
+  self.with_prepared(sql, prepared => prepared.query_all(params~))
 }
 
 ///|
 /// Run one query inside this transaction and require exactly one row.
 ///
 /// Edge behavior: this helper materializes all rows first and raises
-/// `PoolError::RowCount` when PostgreSQL returned anything other than exactly
-/// one row.
+/// `@client.ClientError::RowCount` when PostgreSQL returned anything other than
+/// exactly one row.
 pub async fn Transaction::query_one(
   self : Transaction,
   sql : String,
   params? : Array[&@client.ToSql] = [],
 ) -> @client.Row {
-  let rows = self.query_all(sql, params~)
-  guard rows.length() == 1 else {
-    raise PoolError::RowCount(
-      "expected exactly one row, got \{rows.length().to_string()}",
-    )
-  }
-  rows[0]
+  self.with_prepared(sql, prepared => prepared.query_one(params~))
 }
 
 ///|
 /// Run one query inside this transaction and allow zero or one rows.
 ///
-/// Edge behavior: raises `PoolError::RowCount` when more than one row is
+/// Edge behavior: raises `@client.ClientError::RowCount` when more than one row is
 /// returned.
 pub async fn Transaction::query_opt(
   self : Transaction,
   sql : String,
   params? : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
-  let rows = self.query_all(sql, params~)
-  guard rows.length() <= 1 else {
-    raise PoolError::RowCount(
-      "expected zero or one row, got \{rows.length().to_string()}",
-    )
-  }
-  if rows.length() == 0 {
-    None
-  } else {
-    Some(rows[0])
-  }
+  self.with_prepared(sql, prepared => prepared.query_opt(params~))
 }
 
 ///|
 /// Run one typed query inside the transaction and collect all rows.
 ///
-/// Side effects: prepares a temporary typed statement for this call and closes
-/// it before returning.
+/// The connection-local statement cache is used unless caching is disabled.
 pub async fn Transaction::query_typed_all(
   self : Transaction,
   sql : String,
@@ -351,7 +354,7 @@ pub async fn Transaction::execute(
   sql : String,
   params? : Array[&@client.ToSql] = [],
 ) -> Int {
-  self.run_operation(txn => txn.execute(sql, params~))
+  self.with_prepared(sql, prepared => prepared.execute(params~))
 }
 
 ///|

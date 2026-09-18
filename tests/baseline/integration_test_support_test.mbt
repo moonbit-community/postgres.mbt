@@ -51,7 +51,7 @@ fn as_client_config(
   channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
-  @client.Config::new(
+  @client.Config::Config(
     host,
     hostaddr?,
     user=config.user,
@@ -78,7 +78,7 @@ fn auth_client_config(
 ) -> @client.Config {
   match password {
     Some(password) =>
-      @client.Config::new(
+      @client.Config::Config(
         config.host,
         user~,
         database=config.database,
@@ -89,7 +89,7 @@ fn auth_client_config(
         application_name~,
       )
     None =>
-      @client.Config::new(
+      @client.Config::Config(
         config.host,
         user~,
         database=config.database,
@@ -128,7 +128,20 @@ fn make_pool(
     load_balance_hosts=Disable,
     pool=pool_config,
   )
-  @pgpool.Pool::new(config, group)
+  let (pool, executor) = @pgpool.Pool::new(config)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  pool
+}
+
+///|
+async fn start_client(
+  config : @client.Config,
+  group : @async.TaskGroup[Unit],
+) -> @client.Client {
+  let (client, executor) = @client.Client::new(config)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  client.ready()
+  client
 }
 
 ///|
@@ -202,24 +215,4 @@ async fn[T, E : Error] expect_error_async(
         loc~,
       )
   }
-}
-
-///|
-/// Wait until the pool reaches the expected physical connection count.
-/// This lets multi-connection tests warm up the pool before asserting on session isolation.
-async fn wait_for_pool_size_or_fail(
-  pool : @pgpool.Pool,
-  expected : Int,
-  message : String,
-  polls? : Int = 500,
-) -> Unit {
-  let mut remaining = polls
-  while remaining > 0 {
-    if pool.status().size == expected {
-      return
-    }
-    remaining -= 1
-    @async.sleep(10)
-  }
-  fail(message)
 }

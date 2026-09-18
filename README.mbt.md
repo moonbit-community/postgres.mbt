@@ -4,12 +4,33 @@ A secure, easy-to-use PostgreSQL client library for MoonBit with an included con
 
 ### Packages
 
-- `moonbit-community/postgres/client`: low-level PostgreSQL client
-- `moonbit-community/postgres/pgpool`: single-event-loop connection pool built on top of `client`
+- `moonbit-community/postgres/client`: one FIFO single-flight
+  PostgreSQL session
+- `moonbit-community/postgres/pgpool`: a connection pool that provides
+  concurrency across independent sessions
 
-The `pgpool` package is meant for connection reuse and PostgreSQL session
-isolation. It is useful when multiple async tasks share one MoonBit event loop
-but should not all queue behind the same database connection.
+The `client`, `pgpool`, and PostgreSQL integration-test packages support the
+`native` and classic `wasm` targets. They intentionally exclude WasmGC because
+the socket/TLS runtime used by live PostgreSQL connections is not available
+there. The packages under `protocol` remain backend-independent.
+
+Calls sharing one `client.Client` execute one complete logical operation at a
+time. Streams and transactions retain the session until they finish. Use
+`pgpool.Pool` when multiple async tasks should run database work concurrently;
+ordinary pool methods checkout and return sessions automatically, while
+`Pool::with_session` provides callback-scoped session affinity.
+
+In `0.1.0`, `Client::new(config)` returns a handle and a single-use
+`ClientExecutor`. Spawn `executor.run()` in a task group, then await
+`client.ready()` to observe connection and authentication errors. `Pool::new`
+likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
+physical connection executors. Async database calls wait for readiness.
+
+`Client::close()` remains graceful. `Client::abort()` is the synchronous,
+idempotent hard-stop for deadlines and emergency teardown: it immediately marks
+the runtime closed, asks the driver to discard the physical connection, and
+fails active or queued work with `ClientError::Closed("connection aborted")`.
+The driver completes physical transport cleanup while cancellation unwinds.
 
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)
@@ -22,7 +43,7 @@ The client and pool now keep three explicit TLS modes:
 - `verify-ca`: TLS with certificate-chain validation but without hostname/IP validation
 - `verify-full`: TLS with certificate-chain validation and hostname/IP validation
 
-`verify-full` is the default for both `client.Config::new` and
+`verify-full` is the default for both `client.Config::Config` and
 `pgpool.Config::new`. The removed `prefer` and `require` aliases are not part
 of either config API.
 

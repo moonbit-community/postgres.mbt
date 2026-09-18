@@ -17,6 +17,8 @@ import {
   "moonbitlang/async/tls",
 }
 
+supported_targets = "native+wasm"
+
 import {
   "moonbitlang/core/debug",
   "moonbitlang/core/test",

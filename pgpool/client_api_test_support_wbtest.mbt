@@ -1,14 +1,18 @@
 ///|
 fn expect_pool_lease_released(error : Error) -> Unit raise {
-  guard error is PoolError::LeaseReleased else {
+  guard error is PoolError::ScopeExpired else {
     fail("expected lease released error")
   }
 }
 
 ///|
-fn expect_pool_operation_in_progress(error : Error) -> Unit raise {
-  guard error is PoolError::OperationInProgress else {
-    fail("expected operation in progress error")
+async fn[T, E : Error] expect_pgpool_error_async(
+  f : async () -> T raise E,
+) -> E {
+  try f() catch {
+    error => error
+  } noraise {
+    _ => fail("expected async operation to raise")
   }
 }
 
@@ -21,13 +25,40 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
     application_name="pgpool-client-api-wbtest",
     pool=PoolConfig::new(1),
   )
-  Pool::new(config, group)
+  start_test_pool(config, group)
+}
+
+///|
+fn start_test_pool(
+  config : Config,
+  group : @async.TaskGroup[Unit],
+  options? : PoolOptions = PoolOptions::new(),
+) -> Pool raise {
+  let (pool, executor) = Pool::new(config, options~)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  pool
+}
+
+///|
+async fn start_test_client(
+  config : @client.Config,
+  group : @async.TaskGroup[Unit],
+) -> @client.Client {
+  let (client, executor) = @client.Client::new(config)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  client.ready()
+  client
 }
 
 ///|
 fn client_api_test_connection(
-  group : @async.TaskGroup[Unit],
+  _group : @async.TaskGroup[Unit],
   id? : Int = 1,
 ) -> ConnectionState {
-  { id, group, client: @ref.new(None), statement_cache: [], }
+  {
+    id,
+    client: @ref.new(None),
+    statement_cache_capacity: 100,
+    statement_cache: [],
+  }
 }

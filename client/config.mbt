@@ -100,7 +100,7 @@ pub struct Config {
 /// Defaults are chosen to keep secure TLS on the main path: port `5432`,
 /// `ssl_mode = SslMode::VerifyFull`, and database name equal to the user name.
 /// Callers pass `application_name` explicitly.
-pub fn Config::new(
+pub fn Config::Config(
   host : String,
   hostaddr? : String,
   port? : Int = 5432,
@@ -135,8 +135,12 @@ pub fn Config::new(
 }
 
 ///|
-/// Construct a fully resolved single-target config from explicit parts.
-pub fn Config::from_parts(
+/// Internal constructor for a single PostgreSQL connection target.
+///
+/// Used by pgpool after expanding its multi-target configuration. Callers
+/// supply every field explicitly; no defaults or validation are applied here.
+#internal(internal, "for internal use only")
+pub fn Config::new_internal(
   host : String,
   hostaddr : String?,
   port : Int,

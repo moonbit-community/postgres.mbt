@@ -14,7 +14,7 @@ fn assert_no_execute_request(
 /// Model the driver's bounded response queue, with the test acting as backend.
 async fn check_execute_cancellation(raw~ : Bool) -> Unit {
   @async.with_task_group(group => {
-    let shared = make_shared()
+    let shared = make_shared(group~)
     let client : Client = { shared, }
     let requests : Array[Request] = []
     // A failed assertion or timeout must also release protected cleanup.

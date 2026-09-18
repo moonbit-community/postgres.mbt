@@ -1,6 +1,70 @@
 // Shared helpers used by the higher-level client APIs.
 
 ///|
+fn OperationGate::new() -> OperationGate {
+  { mutex: Mutex(), }
+}
+
+///|
+async fn OperationGate::acquire(self : OperationGate) -> OperationPermit {
+  self.mutex.acquire()
+  { gate: self, released: @ref.new(false), }
+}
+
+///|
+fn OperationPermit::release(self : OperationPermit) -> Unit {
+  if self.released.val {
+    return
+  }
+  self.released.val = true
+  self.gate.mutex.release()
+}
+
+///|
+fn Client::operation_context(self : Client) -> OpContext {
+  { client: self, }
+}
+
+///|
+/// async 0.22 does not rethrow cancellation on leaving a protected block.
+/// Check at ownership boundaries, while error cleanup still owns the permit.
+/// An enclosing protection deliberately defers this check to its own boundary.
+async fn check_pending_cancellation() -> Unit noraise {
+  if @async.is_being_cancelled() {
+    @async.pause()
+  }
+}
+
+///|
+/// Run a fully consumed logical operation under the client's FIFO gate.
+async fn[T] Client::run_operation(
+  self : Client,
+  f : async (OpContext) -> T,
+) -> T {
+  self.ready()
+  let permit = self.shared.operation_gate.acquire()
+  defer permit.release()
+  ensure_open(self.shared)
+  check_pending_cancellation()
+  // Finish protocol cleanup, then propagate cancellation at this public boundary.
+  defer check_pending_cancellation()
+  @async.protect_from_cancel(() => f(self.operation_context()))
+}
+
+///|
+/// Acquire the client for an operation whose returned handle owns the permit.
+async fn Client::begin_stream_operation(
+  self : Client,
+) -> (OpContext, OperationPermit) {
+  self.ready()
+  let permit = self.shared.operation_gate.acquire()
+  errdefer permit.release()
+  ensure_open(self.shared)
+  check_pending_cancellation()
+  (self.operation_context(), permit)
+}
+
+///|
 /// Queue a request for the connection loop and return its response stream.
 ///
 /// The caller chooses the response queue kind. Most requests use the bounded
@@ -16,7 +80,13 @@ fn Client::send_request(
   // `false` for "queue full". The only failure mode here is a closed queue,
   // which still raises and propagates out of this helper.
   ignore(
-    self.shared.requests.try_put({ kind, bytes, responses, copy_input: None, }),
+    self.shared.requests.try_put({
+      kind,
+      bytes,
+      responses,
+      copy_input: None,
+      copy_error: None,
+    }),
   )
   responses
 }
@@ -37,6 +107,7 @@ fn Client::send_request_with_copy(
       bytes,
       responses,
       copy_input: Some(input),
+      copy_error: Some(@ref.new(None)),
     }),
   )
   responses
@@ -45,6 +116,9 @@ fn Client::send_request_with_copy(
 ///|
 /// Fail if the shared runtime is already closed or shutting down.
 fn ensure_open(shared : Shared) -> Unit raise {
+  if shared.aborted.val {
+    raise ClientError::Closed("connection aborted")
+  }
   if shared.closed.val || shared.closing.val {
     // `closing` flips before the socket is fully torn down so new work stops
     // racing against a connection that is already converging toward shutdown.
@@ -53,27 +127,62 @@ fn ensure_open(shared : Shared) -> Unit raise {
 }
 
 ///|
-/// Spawn one detached stream drain on the connection task group.
+/// Schedule one detached stream drain on the executor's control queue.
 ///
-/// Terminal database errors are intentionally swallowed for detached streams,
-/// but any other failure still tears down the task group so protocol bugs or
-/// runtime failures are not silently ignored.
+/// Terminal database errors remain in the stream. Expected connection closure
+/// is saved for finish() without failing sibling tasks. Other failures still
+/// tear down the task group so protocol bugs are not silently ignored.
 fn spawn_detached_drain(
-  background_group : @ref.Ref[@async.TaskGroup[Unit]?],
+  control : DrainControl,
   drain : async () -> Unit,
-) -> Unit {
-  match background_group.val {
-    Some(group) =>
-      group.spawn_bg(no_wait=true, () => {
-        try drain() catch {
-          // Detached callers gave up synchronous handling of database failures,
-          // but protocol bugs and runtime errors should still surface.
-          err => if err is ClientError::Database(_) { () } else { raise err }
-        } noraise {
-          _ => ()
-        }
-      })
-    None => ()
+) -> Completion? {
+  if control.closed.val {
+    return None
+  }
+  let completion = Completion::new()
+  control.next_id.val += 1
+  let id = control.next_id.val
+  control.pending.push({ id, completion, })
+  let queued = control.queue.try_put(() => {
+    let settled = @ref.new(false)
+    defer (if !settled.val {
+      control.finish(
+        id,
+        completion,
+        Some(ClientError::Closed("connection is closed")),
+      )
+    })
+    try {
+      drain()
+      control.finish(id, completion, None)
+      settled.val = true
+    } catch {
+      ClientError::Database(_) => {
+        control.finish(id, completion, None)
+        settled.val = true
+      }
+      ClientError::Closed(_) as error => {
+        control.finish(id, completion, Some(error))
+        settled.val = true
+      }
+      error => {
+        control.finish(id, completion, Some(error))
+        settled.val = true
+        raise error
+      }
+    }
+  }) catch {
+    _ => false
+  }
+  if queued {
+    Some(completion)
+  } else {
+    control.finish(
+      id,
+      completion,
+      Some(ClientError::Closed("connection is closed")),
+    )
+    None
   }
 }
 
@@ -83,6 +192,14 @@ fn Transaction::assert_open(self : Transaction) -> Unit raise {
   if self.finished.val {
     raise ClientError::Closed("transaction is already finished")
   }
+  if self.client.shared.closed.val {
+    self.finished.val = true
+    self.release_owner_permit()
+    if self.client.shared.aborted.val {
+      raise ClientError::Closed("connection aborted")
+    }
+    raise ClientError::Closed("connection is closed")
+  }
 }
 
 ///|
@@ -91,8 +208,8 @@ fn Transaction::assert_open(self : Transaction) -> Unit raise {
 /// This is the central place where shutdown semantics are normalized for
 /// graceful termination, error-driven teardown, and cancellation.
 fn close_runtime(shared : Shared, error? : Error) -> Unit {
-  // Close the queues even if Client::close already marked the runtime closed
-  // after failing to enqueue Terminate.
+  // Abort marks the runtime closed before the driver drains queued requests.
+  // Queue closure must still run when the driver finishes unwinding.
   // Flip the visible shutdown flags first so concurrent submitters observe a
   // consistent "no new work" state even if queue closure races with them.
   shared.closed.val = true
