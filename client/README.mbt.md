@@ -12,7 +12,7 @@ Use `pgpool` when independent tasks need database concurrency.
 ///|
 async fn _quick_start() -> Unit {
   @async.with_task_group(group => {
-    let config = Config::new(
+    let config = Config::Config(
       "localhost",
       user="postgres",
       database="app",
@@ -226,7 +226,7 @@ does not try to preserve the session, send `Terminate`, or perform a TLS
 
 ## Configuration And TLS
 
-`Config::new` accepts the host, optional concrete `hostaddr`, user, database,
+`Config::Config` accepts the host, optional concrete `hostaddr`, user, database,
 password, port, TLS settings, channel-binding policy, application name,
 startup options, connect timeout, and TCP keepalive settings.
 

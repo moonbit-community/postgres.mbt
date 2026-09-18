@@ -100,7 +100,7 @@ pub struct Config {
 /// Defaults are chosen to keep secure TLS on the main path: port `5432`,
 /// `ssl_mode = SslMode::VerifyFull`, and database name equal to the user name.
 /// Callers pass `application_name` explicitly.
-pub fn Config::new(
+pub fn Config::Config(
   host : String,
   hostaddr? : String,
   port? : Int = 5432,
