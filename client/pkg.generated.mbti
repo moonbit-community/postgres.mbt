@@ -3,13 +3,11 @@ package "moonbit-community/postgres/client"
 
 import {
   "moonbit-community/postgres/protocol",
-  "moonbitlang/async",
   "moonbitlang/core/buffer",
   "moonbitlang/core/debug",
 }
 
 // Values
-pub async fn connect(Config, @async.TaskGroup[Unit]) -> Client
 
 // Errors
 pub suberror ClientError {

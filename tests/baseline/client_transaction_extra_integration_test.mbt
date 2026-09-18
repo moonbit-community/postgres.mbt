@@ -13,7 +13,7 @@ fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int] raise {
 async test "integration transaction options savepoints and raw statement helpers" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-tx-extra",
@@ -136,7 +136,7 @@ async test "integration transaction options savepoints and raw statement helpers
 async test "integration transaction default path and named savepoint commit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-tx-default",
@@ -204,7 +204,7 @@ async test "integration transaction default path and named savepoint commit" {
 async test "integration transaction blocks outer client FIFO" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-tx-single-flight",

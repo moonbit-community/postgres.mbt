@@ -495,12 +495,12 @@ async test "integration cancel request uses protocol frontend" {
   guard integration_config() is Some(config) else { return }
 
   let result = @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres-cancel-main"),
       group,
     )
 
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-cancel-observer",

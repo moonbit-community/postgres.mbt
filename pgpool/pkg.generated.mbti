@@ -3,7 +3,6 @@ package "moonbit-community/postgres/pgpool"
 
 import {
   "moonbit-community/postgres/client",
-  "moonbitlang/async",
   "moonbitlang/core/debug",
 }
 
@@ -19,6 +18,7 @@ pub suberror ConfigError {
 
 pub suberror PoolError {
   Closed
+  ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
   InvalidConfig(String)
@@ -52,7 +52,7 @@ pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self
 
 type Connector
-pub fn Connector::new(async (@client.Config, @async.TaskGroup[Unit]) -> @client.Client) -> Self
+pub fn Connector::new(async (@client.Config) -> (@client.Client, @client.ClientExecutor)) -> Self
 
 pub enum IsolationLevel {
   ReadUncommitted
@@ -89,11 +89,12 @@ pub fn Pool::close(Self) -> Unit
 pub fn Pool::config(Self) -> PoolConfig
 pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
 pub fn Pool::is_closed(Self) -> Bool
-pub fn Pool::new(Config, @async.TaskGroup[Unit], options? : PoolOptions) -> Self raise
+pub fn Pool::new(Config, options? : PoolOptions) -> (Self, PoolExecutor) raise
 pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
 pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
+pub async fn Pool::ready(Self) -> Unit
 pub fn Pool::resize(Self, Int) -> Unit raise
 pub fn Pool::status(Self) -> Status
 pub fn Pool::timeouts(Self) -> Timeouts
@@ -109,6 +110,11 @@ pub struct PoolConfig {
   statement_cache_capacity : Int
 } derive(Eq, @debug.Debug)
 pub fn PoolConfig::new(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int) -> Self raise
+
+pub struct PoolExecutor {
+  // private fields
+}
+pub async fn PoolExecutor::run(Self) -> Unit
 
 pub struct PoolOptions {
   connector : Connector?

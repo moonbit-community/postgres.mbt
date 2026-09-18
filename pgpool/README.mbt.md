@@ -32,12 +32,15 @@ async fn _pool_quick_start(
       application_name="my-service",
       pool=PoolConfig::new(4),
     )
-    let pool = Pool::new(config, group)
+    let (pool, executor) = Pool::new(config)
+    let task = group.spawn(no_wait=true, () => executor.run())
+    pool.ready()
     let value : Int = pool
       .query_one("select 1::int4 as value")
       .get_name("value")
     ignore(value)
     pool.close()
+    task.wait()
   })
 }
 ```
@@ -226,14 +229,19 @@ If checkout is cancelled during recycling, including either recycle hook, the
 pool discards that connection and its statement cache and restores the reserved
 capacity slot. A later checkout can open a replacement connection.
 
-A custom `Connector` receives `(Config, TaskGroup[Unit])` and returns an
-already-driven `@client.Client`.
+A custom `Connector` receives a `@client.Config` and returns a
+`(@client.Client, @client.ClientExecutor)` pair. The pool executor starts the
+physical executor and checkout waits for `client.ready()`.
 
 ## Lifecycle And Errors
 
-`Pool::close()` rejects new operations and closes idle connections. Active
-callbacks are allowed to clean up; their physical connections close instead of
-returning to the idle set.
+`Pool::new()` does not open a socket. Spawn the single-use `PoolExecutor::run()`
+and await `pool.ready()` before use. A repeated `run()` raises
+`PoolError::ExecutorAlreadyStarted`. `Pool::close()` rejects new operations and
+closes idle connections. Active callbacks are allowed to finish; their physical
+connections close instead of returning to the idle set. Await the executor task
+to know that all connections have stopped. Cancellation or an unexpected
+background connection failure closes the whole pool.
 
 `Pool::resize()` never interrupts checked-out sessions. When shrinking cannot
 remove enough currently available capacity tokens, the pool records resize
@@ -244,6 +252,7 @@ capacity, preventing shrink/expand races from exceeding the configured maximum.
 `PoolError` is limited to pool lifecycle:
 
 - `Closed`
+- `ExecutorAlreadyStarted`
 - `Timeout`
 - `ScopeExpired`
 - `InvalidConfig`

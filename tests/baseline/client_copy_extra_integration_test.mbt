@@ -21,7 +21,7 @@ async fn assert_copy_in_early_error_reuses_connection(
   ssl_mode : @client.SslMode,
   application_name : String,
 ) -> Unit {
-  let client = @client.connect(
+  let client = start_client(
     as_client_config(config, ssl_mode~, application_name~),
     group,
   )
@@ -67,7 +67,7 @@ async test "integration copy in early error before finish keeps plain and tls co
 async test "integration copy in startup error keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -94,7 +94,7 @@ async test "integration copy in startup error keeps connection reusable" {
 async test "integration copy in finish closes sink and commits rows" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -129,7 +129,7 @@ async test "integration copy in finish closes sink and commits rows" {
 async test "integration copy out collect keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -154,7 +154,7 @@ async test "integration copy out collect keeps connection reusable" {
 async test "integration copy out finish drains large payload and keeps connection reusable" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )

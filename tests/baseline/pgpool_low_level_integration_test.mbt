@@ -25,7 +25,9 @@ fn make_decl_pool(
       statement_cache_capacity~,
     ),
   )
-  @pgpool.Pool::new(declarative, group, options~)
+  let (pool, executor) = @pgpool.Pool::new(declarative, options~)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  pool
 }
 
 ///|
@@ -90,8 +92,8 @@ async test "integration pool recycle timeout replaces blocked connection" {
 }
 
 ///|
-/// Runtime hooks and a custom connector receive an already-owned task group and
-/// operate on auto-driven raw clients.
+/// Runtime hooks operate on ready raw clients while the custom connector
+/// constructs each client and executor pair.
 async test "integration pool connector and lifecycle hooks" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
@@ -100,9 +102,9 @@ async test "integration pool connector and lifecycle hooks" {
     let pre_recycle_calls : Array[Int] = []
     let post_recycle_calls : Array[Int] = []
 
-    let connector = @pgpool.Connector::new((target, driver_group) => {
+    let connector = @pgpool.Connector::new(target => {
       connect_calls.push(1)
-      @client.connect(target, driver_group)
+      @client.Client::new(target)
     })
     let options = @pgpool.PoolOptions::new(
       connector~,

@@ -4,7 +4,7 @@ A secure, easy-to-use PostgreSQL client library for MoonBit with an included con
 
 ### Packages
 
-- `moonbit-community/postgres/client`: one auto-driven, FIFO single-flight
+- `moonbit-community/postgres/client`: one FIFO single-flight
   PostgreSQL session
 - `moonbit-community/postgres/pgpool`: a connection pool that provides
   concurrency across independent sessions
@@ -20,10 +20,11 @@ time. Streams and transactions retain the session until they finish. Use
 ordinary pool methods checkout and return sessions automatically, while
 `Pool::with_session` provides callback-scoped session affinity.
 
-Starting with `0.0.8`, `client.connect(config, group)` returns a `Client` and
-starts its driver automatically. The old public `Connection` handle,
-single-connection pipelining, manual pool leases, and public statement-cache
-manager APIs have been removed.
+In `0.1.0`, `Client::new(config)` returns a handle and a single-use
+`ClientExecutor`. Spawn `executor.run()` in a task group, then await
+`client.ready()` to observe connection and authentication errors. `Pool::new`
+likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
+physical connection executors. Async database calls wait for readiness.
 
 `Client::close()` remains graceful. `Client::abort()` is the synchronous,
 idempotent hard-stop for deadlines and emergency teardown: it immediately marks

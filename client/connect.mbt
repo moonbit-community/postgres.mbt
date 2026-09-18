@@ -32,16 +32,6 @@ pub fn Client::new(config : Config) -> (Client, ClientExecutor) {
 }
 
 ///|
-/// Keep existing pool and integration callers working while the pool executor
-/// migrates to the explicit client lifecycle in the next commit.
-pub async fn connect(config : Config, group : @async.TaskGroup[Unit]) -> Client {
-  let (client, executor) = Client::new(config)
-  ignore(group.spawn(no_wait=true, allow_failure=true, () => executor.run()))
-  client.ready()
-  client
-}
-
-///|
 /// Connect, authenticate, and drive the socket until shutdown.
 /// A second invocation fails even after the first has returned.
 pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {

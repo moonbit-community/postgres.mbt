@@ -103,13 +103,13 @@ test "integration pool config validation rejects invalid settings" {
 }
 
 ///|
-/// A custom Connector receives the TaskGroup that must own the auto-driven
-/// client. Multi-target checkout continues after a failed first target.
+/// A custom Connector returns each client and executor pair. Multi-target
+/// checkout continues after a failed first target.
 async test "integration pool custom connector supports target failover" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let attempts : Array[Int] = []
-    let connector = @pgpool.Connector::new((target, driver_group) => {
+    let connector = @pgpool.Connector::new(target => {
       if attempts.length() == 0 {
         attempts.push(1)
         let bad_target = @client.Config::from_parts(
@@ -128,9 +128,9 @@ async test "integration pool custom connector supports target failover" {
           target.keepalives,
           target.keepalives_idle_s,
         )
-        @client.connect(bad_target, driver_group)
+        @client.Client::new(bad_target)
       } else {
-        @client.connect(target, driver_group)
+        @client.Client::new(target)
       }
     })
     let declarative = @pgpool.Config::new(
@@ -144,11 +144,11 @@ async test "integration pool custom connector supports target failover" {
       ports=[config.port, config.port],
       pool=@pgpool.PoolConfig::new(1),
     )
-    let pool = @pgpool.Pool::new(
+    let (pool, executor) = @pgpool.Pool::new(
       declarative,
-      group,
       options=@pgpool.PoolOptions::new(connector~),
     )
+    group.spawn_bg(allow_failure=true, () => executor.run())
 
     let value : Int = pool
       .query_one("select 29::int4 as value")

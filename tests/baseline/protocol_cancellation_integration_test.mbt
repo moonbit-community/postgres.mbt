@@ -49,12 +49,12 @@ async fn cancel_during_locked_sql(
 async test "integration client transaction cancellation during SQL rolls back writes" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="client-sql-cancel"),
       group,
     )
     defer client.abort()
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(config, application_name="client-sql-cancel-observer"),
       group,
     )
@@ -98,7 +98,7 @@ async test "integration pooled transaction cancellation during SQL rolls back wr
       @pgpool.PoolConfig::new(1),
     )
     defer pool.close()
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(config, application_name="pool-sql-cancel-observer"),
       group,
     )
@@ -151,7 +151,7 @@ async test "integration savepoint cancellation during SQL preserves outer writes
       @pgpool.PoolConfig::new(1),
     )
     defer pool.close()
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(config, application_name="savepoint-sql-cancel-observer"),
       group,
     )
@@ -194,12 +194,12 @@ async test "integration savepoint cancellation during SQL preserves outer writes
 async test "integration prepare timeout behind a table lock does not leak the operation permit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="prepare-lock-timeout"),
       group,
     )
     defer client.abort()
-    let blocker = @client.connect(
+    let blocker = start_client(
       as_client_config(config, application_name="prepare-lock-holder"),
       group,
     )

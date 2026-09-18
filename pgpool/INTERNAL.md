@@ -1,5 +1,16 @@
 # Pool Cancellation Invariants
 
+`Pool::new` allocates bookkeeping and returns a `PoolExecutor` without opening
+connections. The executor keeps its task group local to `run()`. A creation
+queue asks it to construct and start physical `ClientExecutor`s; the original
+checkout then awaits `client.ready()` under the create deadline and runs target
+checks and hooks. This preserves concurrent connection attempts and target
+failover. A separate close queue owns retirement cleanup. `Pool::close()` seals
+checkout immediately, while borrowed sessions may finish. The executor exits
+after the last session is retired and all connection tasks have stopped.
+Cancellation or unexpected failure aborts every physical client and wakes
+checkout waiters.
+
 Session, transaction, and cancellable-operation gates own the connection until
 their protected work and cleanup finish. Check cancellation before entering
 protection and after leaving it, while scope release is still guaranteed.
@@ -23,7 +34,7 @@ The waiter rechecks scope expiry and releases the gate on cancellation or error;
 only then may it allocate a request ID and mark a new request active.
 
 Streaming callbacks finish or abandon their raw handles before returning the
-connection. Detached drains save expected connection closure for `finish()`
-without failing the shared task group; database errors remain in stream state,
-and unexpected protocol errors still fail the group. Ordinary task cancellation
+connection. Detached drains save expected connection closure for `finish()`;
+database errors remain in stream state, and unexpected protocol errors fail the
+owning client executor and then the pool executor. Ordinary task cancellation
 does not imply a PostgreSQL cancel packet, automatic retry, or physical abort.

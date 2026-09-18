@@ -25,7 +25,29 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
     application_name="pgpool-client-api-wbtest",
     pool=PoolConfig::new(1),
   )
-  Pool::new(config, group)
+  start_test_pool(config, group)
+}
+
+///|
+fn start_test_pool(
+  config : Config,
+  group : @async.TaskGroup[Unit],
+  options? : PoolOptions = PoolOptions::new(),
+) -> Pool raise {
+  let (pool, executor) = Pool::new(config, options~)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  pool
+}
+
+///|
+async fn start_test_client(
+  config : @client.Config,
+  group : @async.TaskGroup[Unit],
+) -> @client.Client {
+  let (client, executor) = @client.Client::new(config)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  client.ready()
+  client
 }
 
 ///|
