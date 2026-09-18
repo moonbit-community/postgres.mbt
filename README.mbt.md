@@ -43,7 +43,7 @@ The client and pool now keep three explicit TLS modes:
 - `verify-ca`: TLS with certificate-chain validation but without hostname/IP validation
 - `verify-full`: TLS with certificate-chain validation and hostname/IP validation
 
-`verify-full` is the default for both `client.Config::new` and
+`verify-full` is the default for both `client.Config::Config` and
 `pgpool.Config::new`. The removed `prefer` and `require` aliases are not part
 of either config API.
 

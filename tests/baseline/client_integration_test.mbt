@@ -500,7 +500,7 @@ async test "integration tls verify_full requires explicit host or hostaddr" {
   guard integration_config() is Some(config) else { return }
   let message = expect_ssl_error(
     connect_error(
-      @client.Config::new(
+      @client.Config::Config(
         "",
         user=config.user,
         database=config.database,

@@ -104,7 +104,7 @@ pub struct Config {
   keepalives : Bool?
   keepalives_idle_s : Int?
 } derive(Eq, @debug.Debug)
-pub fn Config::new(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
+pub fn Config::Config(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
 pub fn Config::new_internal(String, String?, Int, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int?, Bool?, Int?) -> Self
 
 type CopyInSink

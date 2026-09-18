@@ -61,7 +61,7 @@ fn make_shared(
   ready.complete(None)
   let control = test_control(group)
   {
-    config: Config::new(
+    config: Config::Config(
       "127.0.0.1",
       user="moon",
       database="moondb",
@@ -127,7 +127,7 @@ async test "connect captures startup state and close waits for the driver" {
     })
 
     let client = start_test_client(
-      Config::new(
+      Config::Config(
         "127.0.0.1",
         user="moon",
         database="moondb",
@@ -181,7 +181,7 @@ async test "abort closes plaintext transport without terminate" {
     })
 
     let client = start_test_client(
-      Config::new(
+      Config::Config(
         "127.0.0.1",
         user="moon",
         database="moondb",
@@ -219,7 +219,7 @@ async test "connect timeout surfaces protocol timeout" {
 
     let result = expect_error_async(() => {
       start_test_client(
-        Config::new(
+        Config::Config(
           "127.0.0.1",
           user="moon",
           database="moondb",
