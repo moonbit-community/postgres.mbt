@@ -1,61 +1,181 @@
 // Connection establishment and top-level client lifecycle APIs.
 
 ///|
-/// Open a PostgreSQL connection and start its private I/O driver.
-///
-/// The driver is attached to `group`, so structured concurrency guarantees that
-/// it cannot outlive the caller's task scope. Call `Client::close` before the
-/// group exits to shut the PostgreSQL session down gracefully.
-pub async fn connect(config : Config, group : @async.TaskGroup[Unit]) -> Client {
-  match config.connect_timeout_ms {
-    Some(timeout_ms) =>
-      @async.with_timeout(
-        timeout_ms,
-        () => connect_inner(config, group),
-        error=ClientError::Protocol("connection timed out"),
-      )
-    None => connect_inner(config, group)
-  }
-}
-
-///|
-/// Establish a fully initialized client runtime for one concrete target.
-async fn connect_inner(
-  config : Config,
-  group : @async.TaskGroup[Unit],
-) -> Client {
-  let setup = connect_stream(config)
-  let transferred = @ref.new(false)
-  defer (if !transferred.val { setup.stream.close() })
-  let startup = startup(setup, config)
+/// Construct a client handle and its single-use executor without network I/O.
+/// Spawn `executor.run()` and await `client.ready()` before reading startup data.
+pub fn Client::new(config : Config) -> (Client, ClientExecutor) {
   let types : Map[@proto.Oid, Type] = Map([])
-  let background_group : @ref.Ref[@async.TaskGroup[Unit]?] = @ref.new(
-    Some(group),
-  )
   seed_builtin_types(types)
   let shared = {
     config,
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
-    background_group,
-    parameters: startup.parameters,
+    control: DrainControl::new(),
+    ready: Completion::new(),
+    done: Completion::new(),
+    started: @ref.new(false),
+    runtime_error: @ref.new(None),
+    parameters: Map([]),
     types,
-    process_id: @ref.new(startup.process_id),
-    secret_key: @ref.new(startup.secret_key),
-    transaction_status: @ref.new(startup.transaction_status),
+    process_id: @ref.new(0),
+    secret_key: @ref.new(0),
+    transaction_status: @ref.new(b'I'),
     closed: @ref.new(false),
     closing: @ref.new(false),
+    close_requested: @ref.new(false),
     aborted: @ref.new(false),
     operation_gate: OperationGate::new(),
     driver_task: @ref.new(None),
-    driver_done: Queue(kind=Unbounded),
     next_id: @ref.new(0),
   }
-  let client : Client = { shared, }
-  let driver : Driver = { shared, stream: setup.stream, }
-  shared.driver_task.val = Some(group.spawn(no_wait=true, () => driver.run()))
-  transferred.val = true
+  ({ shared, }, { shared, })
+}
+
+///|
+/// Keep existing pool and integration callers working while the pool executor
+/// migrates to the explicit client lifecycle in the next commit.
+pub async fn connect(config : Config, group : @async.TaskGroup[Unit]) -> Client {
+  let (client, executor) = Client::new(config)
+  ignore(group.spawn(no_wait=true, allow_failure=true, () => executor.run()))
+  client.ready()
   client
+}
+
+///|
+/// Connect, authenticate, and drive the socket until shutdown.
+/// A second invocation fails even after the first has returned.
+pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {
+  if self.shared.started.val {
+    raise ClientError::ExecutorAlreadyStarted
+  }
+  self.shared.started.val = true
+  if self.shared.closed.val {
+    self.shared.ready.complete(
+      Some(ClientError::Closed("connection is closed")),
+    )
+    self.shared.done.complete(None)
+    return
+  }
+  let mut failure : Error? = None
+  defer {
+    let terminal_error : Error? = if !self.shared.ready.done.val {
+      if self.shared.aborted.val {
+        Some(ClientError::Closed("connection aborted"))
+      } else {
+        match failure {
+          Some(error) => Some(error)
+          None => Some(ClientError::Closed("executor stopped before startup"))
+        }
+      }
+    } else {
+      failure
+    }
+    let runtime_close_error : Error? = if self.shared.aborted.val {
+      Some(ClientError::Closed("connection aborted"))
+    } else {
+      terminal_error
+    }
+    self.shared.driver_task.val = None
+    self.shared.ready.complete(terminal_error)
+    close_runtime(self.shared, error?=runtime_close_error)
+    if self.shared.aborted.val {
+      self.shared.control.close(error=ClientError::Closed("connection aborted"))
+    } else {
+      self.shared.control.close()
+    }
+    self.shared.done.complete(failure)
+  }
+  @async.with_task_group(group => {
+    let task = group.spawn(no_wait=true, allow_failure=true, () => {
+      self.run_connection(group)
+    })
+    self.shared.driver_task.val = Some(task)
+    task.wait()
+  }) catch {
+    error =>
+      if !self.shared.aborted.val &&
+        !(self.shared.close_requested.val && error is @async.TaskCancelled) {
+        failure = Some(error)
+      }
+  }
+  match failure {
+    Some(error) => raise error
+    None => ()
+  }
+}
+
+///|
+async fn ClientExecutor::run_connection(
+  self : ClientExecutor,
+  group : @async.TaskGroup[Unit],
+) -> Unit {
+  if self.shared.closing.val {
+    return
+  }
+  defer (if self.shared.aborted.val {
+    self.shared.control.close(error=ClientError::Closed("connection aborted"))
+  } else {
+    self.shared.control.close()
+  })
+  group.spawn_bg(() => run_control_queue(self.shared.control, group))
+  let config = self.shared.config
+  let (setup, state) = match config.connect_timeout_ms {
+    Some(timeout_ms) =>
+      @async.with_timeout(
+        timeout_ms,
+        () => connect_authenticated(config),
+        error=ClientError::Protocol("connection timed out"),
+      )
+    None => connect_authenticated(config)
+  }
+  let transferred = @ref.new(false)
+  defer (if !transferred.val { setup.stream.close() })
+  if self.shared.closing.val {
+    return
+  }
+  for name, value in state.parameters {
+    self.shared.parameters[name] = value
+  }
+  self.shared.process_id.val = state.process_id
+  self.shared.secret_key.val = state.secret_key
+  self.shared.transaction_status.val = state.transaction_status
+  self.shared.ready.complete(None)
+  transferred.val = true
+  let driver : Driver = { shared: self.shared, stream: setup.stream, }
+  driver.run(group)
+  match self.shared.runtime_error.val {
+    Some(error) if !self.shared.aborted.val => raise error
+    _ => ()
+  }
+}
+
+///|
+async fn connect_authenticated(
+  config : Config,
+) -> (ConnectionSetup, StartupState) {
+  let setup = connect_stream(config)
+  let transferred = @ref.new(false)
+  defer (if !transferred.val { setup.stream.close() })
+  let state = startup(setup, config)
+  transferred.val = true
+  (setup, state)
+}
+
+///|
+async fn run_control_queue(
+  control : DrainControl,
+  group : @async.TaskGroup[Unit],
+) -> Unit {
+  while true {
+    let work = control.queue.get() catch { _ => return }
+    group.spawn_bg(work)
+  }
+}
+
+///|
+/// Wait for startup. All waiters observe the same result.
+pub async fn Client::ready(self : Client) -> Unit {
+  self.shared.ready.wait()
 }
 
 ///|
@@ -76,14 +196,31 @@ pub fn Client::is_closed(self : Client) -> Bool {
 pub async fn Client::close(self : Client) -> Unit {
   let permit = self.shared.operation_gate.acquire()
   defer permit.release()
-  if self.shared.closed.val {
-    return
-  }
   if self.shared.closing.val {
-    let _ = self.shared.driver_done.get() catch { _ => () }
+    self.shared.done.wait() catch {
+      _ => ()
+    }
     return
   }
+  self.shared.close_requested.val = true
   self.shared.closing.val = true
+  if !self.shared.ready.done.val {
+    match self.shared.driver_task.val {
+      Some(task) => task.cancel()
+      None => {
+        self.shared.ready.complete(
+          Some(ClientError::Closed("connection is closed")),
+        )
+        close_runtime(self.shared)
+        self.shared.control.close()
+        self.shared.done.complete(None)
+      }
+    }
+    self.shared.done.wait() catch {
+      _ => ()
+    }
+    return
+  }
   let responses = @async.Queue(kind=Unbounded)
   let submitted = self.shared.requests.try_put({
     kind: Terminate,
@@ -101,7 +238,9 @@ pub async fn Client::close(self : Client) -> Unit {
     responses.close()
     return
   }
-  let _ = self.shared.driver_done.get() catch { _ => () }
+  self.shared.done.wait() catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -126,7 +265,11 @@ pub fn Client::abort(self : Client) -> Unit {
   self.shared.async_messages.close()
   match self.shared.driver_task.val {
     Some(task) => task.cancel()
-    None => ()
+    None => {
+      self.shared.ready.complete(Some(error))
+      self.shared.control.close(error~)
+      self.shared.done.complete(None)
+    }
   }
 }
 
@@ -136,7 +279,10 @@ pub fn Client::abort(self : Client) -> Unit {
 /// The token stays valid until the underlying connection closes. It can be
 /// stored and used from another task or timeout handler when a long-running
 /// query should be interrupted.
-pub fn Client::cancel_token(self : Client) -> CancelToken {
+pub fn Client::cancel_token(self : Client) -> CancelToken raise {
+  if !self.shared.ready.done.val || self.shared.ready.error.val is Some(_) {
+    raise ClientError::NotReady
+  }
   {
     config: self.shared.config,
     process_id: self.shared.process_id,
@@ -169,7 +315,10 @@ pub fn Client::clear_type_cache(self : Client) -> Unit {
 
 ///|
 /// Look up a server parameter learned during startup or later async updates.
-pub fn Client::parameter(self : Client, name : String) -> String? {
+pub fn Client::parameter(self : Client, name : String) -> String? raise {
+  if !self.shared.ready.done.val || self.shared.ready.error.val is Some(_) {
+    raise ClientError::NotReady
+  }
   self.shared.parameters.get(name)
 }
 

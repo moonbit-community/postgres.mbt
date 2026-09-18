@@ -5,17 +5,18 @@ usage belongs in `README.mbt.md`.
 
 ## Ownership Model
 
-`Client` is the only public connection handle. `connect(config, group)`:
+`Client::new(config)` allocates shared queues, built-in type metadata, and a
+repeatable readiness result without opening a socket. It returns a cloneable
+`Client` and a single-use `ClientExecutor`. The caller spawns `run()` in its task
+group. That task connects, authenticates, publishes startup state, and then
+runs the socket driver. `Client::ready()` and async database operations wait for
+startup; synchronous startup metadata access raises `NotReady` until it succeeds.
+A second `run()` call raises `ExecutorAlreadyStarted`.
 
-1. performs PostgreSQL startup and authentication
-2. creates shared queues and session state
-3. spawns the socket-owning driver in the supplied task group
-4. returns a cloneable `Client`
-
-Transport ownership stays with connection setup until startup and driver spawn
-both succeed. Any TLS negotiation, authentication, startup-protocol, spawn, or
-connection-timeout failure closes the established transport before propagating
-the error.
+Transport ownership stays with connection setup until startup succeeds. TLS
+negotiation, authentication, startup-protocol, and connection-timeout failures
+close the established transport before publishing the same readiness error to
+all waiters. Closing or aborting before the executor starts opens no socket.
 
 The secure `Stream` variant retains both `Tls` and the original `Tcp`. TLS reads
 and writes use `Tls`, but teardown calls `Tls::close()` first and then
@@ -24,11 +25,11 @@ underlying transport. Teardown intentionally does not call the asynchronous TLS
 shutdown exchange, so cancellation and error unwinding can always release the
 transport synchronously.
 
-The driver is private and its task handle is stored in shared state so
-`Client::abort()` can request cancellation synchronously. The driver owns all
-socket reads, writes ordinary frontend messages, and publishes notices,
-notifications, and parameter-status updates. Closing the task group cannot
-leave an orphan driver.
+The driver is private. Its task handle is the only background task handle
+stored in shared state, so `Client::abort()` can request cancellation
+synchronously, including during startup. The executor keeps its task group
+local to `run()`. The driver owns all socket reads, writes ordinary frontend
+messages, and publishes notices, notifications, and parameter-status updates.
 
 ## Single-Flight Invariant
 
@@ -84,8 +85,8 @@ Row, simple-query, and COPY OUT streams own the operation permit.
 
 - natural EOF releases it
 - `finish()` drains to the operation boundary and releases it
-- `detach()` transfers both the queue and permit to a driver-managed background
-  drain
+- `detach()` queues a drain job on the executor control queue, transferring
+  both the response queue and permit
 - `finish()` after detach waits for that drain's completion
 
 Cleanup is idempotent. A consumer cancellation must not leak the permit or
@@ -98,11 +99,14 @@ scope. Before a stream exists, that scope releases the permit on failure. Once
 it exists, cancellation hands the stream and permit to a detached drain instead
 of returning an unowned handle or releasing the connection prematurely.
 
-Detached tasks return `Result[Unit, ClientError]`: `Closed` is an expected
-shutdown outcome saved as `Err`, not a task-group failure. Database errors stay
-in stream state; other errors still fail the group. `finish()` checks the task
-result before reading a terminal summary. If no background task could start,
-it drains synchronously to obtain a terminal result or error.
+Each detached stream holds a repeatable completion result rather than a task
+handle. The executor's control worker receives drain jobs independently of the
+socket driver, so a full eight-message response queue cannot block scheduling.
+`Closed` is saved for `finish()` without failing the executor. Database errors
+stay in stream state; unexpected errors fail the executor. If the control queue
+has closed, `finish()` drains synchronously to obtain a terminal result. The
+control queue completes jobs that were queued but never started when the
+executor stops, so `finish()` cannot wait forever for an abandoned drain.
 
 MoonBit task cancellation has separate lifecycle rules. Once `execute_raw`
 owns a result stream, its error cleanup drains to `ReadyForQuery` under
@@ -118,9 +122,9 @@ ordinary errors, and cancellation. It closes the active and queued request
 responses, COPY inputs, the submission and notification queues, and the socket,
 and marks the runtime closed. Ordinary driver errors reach waiting requests;
 cancellation gives them `ClientError::Closed` while preserving the driver's
-cancellation. The driver's exit defer wakes even cancellation-protected
-consumers before publishing `driver_done`, without overwriting an earlier
-failure.
+cancellation. The driver's exit defer wakes even cancellation-protected consumers. The
+executor then publishes its repeatable completion result after all local tasks
+and transport cleanup finish, without overwriting an earlier failure.
 
 ## Transactions
 

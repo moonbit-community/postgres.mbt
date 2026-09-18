@@ -9,7 +9,7 @@
 /// those stages under one exclusive capability.
 /// Every exit, including cancellation, closes active and queued requests before
 /// notifying waiters that the driver has stopped.
-async fn Driver::run(self : Driver) -> Unit {
+async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
   let mut active : Request? = None
   let mut cleaned_up = false
   fn cleanup(error : Error?) {
@@ -17,6 +17,11 @@ async fn Driver::run(self : Driver) -> Unit {
       return
     }
     cleaned_up = true
+    match error {
+      Some(err) if !self.shared.aborted.val =>
+        self.shared.runtime_error.val = Some(err)
+      _ => ()
+    }
     let error : Error = if self.shared.aborted.val {
       ClientError::Closed("connection aborted")
     } else {
@@ -28,16 +33,15 @@ async fn Driver::run(self : Driver) -> Unit {
     }
     self.drain_queued_requests(Some(error))
     close_runtime(self.shared, error~)
-    self.shared.background_group.val = None
   }
   defer {
     cleanup(None)
     self.stream.close()
-    self.shared.driver_task.val = None
-    ignore(self.shared.driver_done.try_put(())) catch {
-      _ => ()
+    if self.shared.aborted.val {
+      self.shared.control.close(error=ClientError::Closed("connection aborted"))
+    } else {
+      self.shared.control.close()
     }
-    self.shared.driver_done.close()
   }
   try {
     while true {
@@ -52,7 +56,7 @@ async fn Driver::run(self : Driver) -> Unit {
         }
         Messages | CopyIn => {
           self.stream.write(request.bytes)
-          self.drain_request(request)
+          self.drain_request(request, group)
           self.close_request(request, None)
           active = None
         }
@@ -68,6 +72,7 @@ async fn Driver::run(self : Driver) -> Unit {
 ///
 /// Returns `None` after the connection closes.
 pub async fn Client::next_message(self : Client) -> AsyncMessage? {
+  self.ready()
   Some(self.shared.async_messages.get()) catch {
     _ => None
   }
@@ -75,9 +80,13 @@ pub async fn Client::next_message(self : Client) -> AsyncMessage? {
 
 ///|
 /// Drain all backend messages belonging to one request.
-async fn Driver::drain_request(self : Driver, request : Request) -> Unit {
+async fn Driver::drain_request(
+  self : Driver,
+  request : Request,
+  group : @async.TaskGroup[Unit],
+) -> Unit {
   if request.kind is CopyIn {
-    self.drain_copy_in_request(request)
+    self.drain_copy_in_request(request, group)
     return
   }
   while true {
@@ -122,6 +131,7 @@ async fn Driver::forward_message_to_request(
 async fn Driver::drain_copy_in_request(
   self : Driver,
   request : Request,
+  group : @async.TaskGroup[Unit],
 ) -> Unit {
   let copy_input = request.copy_input.unwrap()
   let copy_error = request.copy_error.unwrap()
@@ -138,7 +148,7 @@ async fn Driver::drain_copy_in_request(
           raise ClientError::UnexpectedMessage("duplicate CopyInResponse")
         }
         request.responses.put(message)
-        writer = Some(self.spawn_copy_writer(copy_input, writer_stopped))
+        writer = Some(self.spawn_copy_writer(group, copy_input, writer_stopped))
       }
       ErrorResponse(body) => {
         let database_error = parse_database_error(body.fields())
@@ -170,16 +180,13 @@ async fn Driver::drain_copy_in_request(
 /// Start the unique writer paired with one COPY IN request.
 fn Driver::spawn_copy_writer(
   self : Driver,
+  group : @async.TaskGroup[Unit],
   input : @async.Queue[CopyInAction],
   stopped : @ref.Ref[Bool],
-) -> @async.Task[Unit] raise {
-  match self.shared.background_group.val {
-    Some(group) =>
-      group.spawn(no_wait=true, allow_failure=true, () => {
-        self.drain_copy_input(input, stopped)
-      })
-    None => raise ClientError::Closed("connection driver is unavailable")
-  }
+) -> @async.Task[Unit] {
+  group.spawn(no_wait=true, allow_failure=true, () => {
+    self.drain_copy_input(input, stopped)
+  })
 }
 
 ///|

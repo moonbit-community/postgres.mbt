@@ -46,6 +46,10 @@ pub suberror ClientError {
   Database(DatabaseError)
   /// Startup authentication could not be completed.
   Authentication(String)
+  /// The executor has not completed connection startup.
+  NotReady
+  /// `ClientExecutor::run` was called more than once.
+  ExecutorAlreadyStarted
   /// The client, statement, portal, or transaction is already closed.
   Closed(String)
   /// A server reply violated driver expectations.

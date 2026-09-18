@@ -50,12 +50,16 @@ fn ready_for_query_packet(status : Byte) -> Bytes raise @proto.ProtocolError {
 
 ///|
 fn make_shared(
+  group? : @async.TaskGroup[Unit],
   parameters? : Map[String, String] = {},
   closed? : Bool = false,
   closing? : Bool = false,
 ) -> Shared {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
+  let ready = Completion::new()
+  ready.complete(None)
+  let control = test_control(group)
   {
     config: Config::new(
       "127.0.0.1",
@@ -68,7 +72,11 @@ fn make_shared(
     ),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
-    background_group: @ref.new(None),
+    control,
+    ready,
+    done: Completion::new(),
+    started: @ref.new(true),
+    runtime_error: @ref.new(None),
     parameters,
     types,
     process_id: @ref.new(321),
@@ -76,12 +84,23 @@ fn make_shared(
     transaction_status: @ref.new(b'I'),
     closed: @ref.new(closed),
     closing: @ref.new(closing),
+    close_requested: @ref.new(false),
     aborted: @ref.new(false),
     operation_gate: OperationGate::new(),
     driver_task: @ref.new(None),
-    driver_done: Queue(kind=Unbounded),
     next_id: @ref.new(0),
   }
+}
+
+///|
+async fn start_test_client(
+  config : Config,
+  group : @async.TaskGroup[Unit],
+) -> Client {
+  let (client, executor) = Client::new(config)
+  group.spawn_bg(allow_failure=true, () => executor.run())
+  client.ready()
+  client
 }
 
 ///|
@@ -103,11 +122,11 @@ async test "connect captures startup state and close waits for the driver" {
       )
       conn.write(backend_key_data_packet(321, 654))
       conn.write(ready_for_query_packet(b'I'))
-      // The auto-started driver sends a five-byte Terminate frame on close.
+      // The executor-owned driver sends a five-byte Terminate frame on close.
       ignore(conn.read_exactly(5))
     })
 
-    let client = connect(
+    let client = start_test_client(
       Config::new(
         "127.0.0.1",
         user="moon",
@@ -161,7 +180,7 @@ async test "abort closes plaintext transport without terminate" {
       conn.read_some(max_len=5)
     })
 
-    let client = connect(
+    let client = start_test_client(
       Config::new(
         "127.0.0.1",
         user="moon",
@@ -199,7 +218,7 @@ async test "connect timeout surfaces protocol timeout" {
     })
 
     let result = expect_error_async(() => {
-      connect(
+      start_test_client(
         Config::new(
           "127.0.0.1",
           user="moon",
@@ -274,7 +293,7 @@ async test "a cancelled close can be resumed without queuing another terminate" 
     assert_true(extra is None)
 
     close_runtime(shared)
-    shared.driver_done.put(())
+    shared.done.complete(None)
     ignore(resumed_close.wait())
     assert_true(client.is_closed())
   })
