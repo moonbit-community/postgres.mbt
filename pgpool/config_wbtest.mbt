@@ -184,7 +184,7 @@ async test "pool new updates status and config without connecting" {
         statement_cache_capacity=7,
       ),
     )
-    let pool = Pool::new(config, group)
+    let pool = start_test_pool(config, group)
     let timeouts = pool.timeouts()
     @debug.assert_eq(pool.status().max_size, 3)
     @debug.assert_eq(timeouts.wait_ms, Some(11))
@@ -201,7 +201,7 @@ async test "pool new updates status and config without connecting" {
 ///|
 async test "pool resize shrinks unopened checkout capacity" {
   @async.with_task_group(group => {
-    let pool = Pool::new(
+    let pool = start_test_pool(
       Config::new(
         "db.example",
         user="moon",
@@ -221,7 +221,7 @@ async test "pool resize shrinks unopened checkout capacity" {
 ///|
 async test "pool resize debt prevents capacity from reappearing during expansion" {
   @async.with_task_group(group => {
-    let pool = Pool::new(
+    let pool = start_test_pool(
       Config::new(
         "db.example",
         user="moon",
@@ -257,7 +257,7 @@ async test "pool resize debt prevents capacity from reappearing during expansion
 ///|
 async test "pool expansion adds only capacity beyond resize debt" {
   @async.with_task_group(group => {
-    let pool = Pool::new(
+    let pool = start_test_pool(
       Config::new(
         "db.example",
         user="moon",

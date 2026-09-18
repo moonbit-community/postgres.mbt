@@ -369,6 +369,7 @@ pub struct Status {
 /// phase that expired.
 pub suberror PoolError {
   Closed
+  ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
   InvalidConfig(String)

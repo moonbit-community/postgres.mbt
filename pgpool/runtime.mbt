@@ -11,7 +11,15 @@ let clean_recycle_sql = "CLOSE ALL; SET SESSION AUTHORIZATION DEFAULT; RESET ALL
 /// until checkout succeeds or retirement removes it. Cancelled recycling must
 /// retire it; the checkout owner separately restores its reserved `slots` entry.
 priv struct Shared {
-  group : @async.TaskGroup[Unit]
+  ready : Completion
+  done : Completion
+  shutdown : Completion
+  started : @ref.Ref[Bool]
+  create_requests : @async.Queue[CreateRequest]
+  close_requests : @async.Queue[@client.Client]
+  pending_creations : @ref.Ref[Int]
+  active_creations : Array[CreateRequest]
+  next_creation_id : @ref.Ref[Int]
   targets : Array[@client.Config]
   connector : Connector
   post_create : (async (@client.Client) -> Unit)?
@@ -40,12 +48,27 @@ struct Pool {
 }
 
 ///|
+/// Owns all physical connection executors and pool maintenance tasks.
+pub struct PoolExecutor {
+  priv shared : Shared
+}
+
+///|
+priv struct CreateRequest {
+  id : Int
+  target : @client.Config
+  result : @async.Queue[@client.Client]
+  cancelled : @ref.Ref[Bool]
+  task : @ref.Ref[@async.Task[Unit]?]
+}
+
+///|
 /// Wrapper around the callback that opens one physical PostgreSQL connection.
 ///
-/// Pool options can replace the default `@client.connect` path during tests or
+/// Pool options can replace the default `@client.Client::new` path during tests or
 /// custom integration.
 struct Connector {
-  run : async (@client.Config, @async.TaskGroup[Unit]) -> @client.Client
+  run : async (@client.Config) -> (@client.Client, @client.ClientExecutor)
 }
 
 ///|
@@ -293,9 +316,9 @@ fn make_pooled_transaction(
 }
 
 ///|
-/// Build the default connector around `@client.connect`.
+/// Build the default connector around `Client::new`.
 fn default_connector() -> Connector {
-  { run: (config, group) => @client.connect(config, group), }
+  { run: config => @client.Client::new(config), }
 }
 
 ///|
@@ -303,9 +326,8 @@ fn default_connector() -> Connector {
 async fn Connector::connect(
   self : Connector,
   config : @client.Config,
-  group : @async.TaskGroup[Unit],
-) -> @client.Client {
-  (self.run)(config, group)
+) -> (@client.Client, @client.ClientExecutor) {
+  (self.run)(config)
 }
 
 ///|

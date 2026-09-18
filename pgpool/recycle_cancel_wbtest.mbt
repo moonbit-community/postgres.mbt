@@ -53,7 +53,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     } else {
       PoolOptions::new(pre_recycle=hook)
     }
-    let pool = Pool::new(
+    let pool = start_test_pool(
       Config::new(
         "127.0.0.1",
         port=server.addr.port(),

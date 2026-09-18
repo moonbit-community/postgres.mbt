@@ -33,7 +33,7 @@ impl @client.ToSql for TextOnlyParam with fn to_sql(_, _, _) {
 async test "integration wrong type errors on read and write" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )

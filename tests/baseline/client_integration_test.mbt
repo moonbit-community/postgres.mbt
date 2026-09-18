@@ -10,7 +10,7 @@ async fn assert_auth_ok(
   application_name? : String = "moonbit-postgres",
 ) -> Unit {
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       auth_client_config(
         config,
         user,
@@ -72,13 +72,13 @@ async fn assert_wrong_password(
 ///|
 /// Connect for a test that expects startup to fail.
 ///
-/// If startup unexpectedly succeeds, close the auto-driven client so the
+/// If startup unexpectedly succeeds, close the executor-driven client so the
 /// structured task group can still terminate and `expect_error_async` can
 /// report the missing error.
 async fn connect_error(config : @client.Config) -> Error {
   expect_error_async(() => {
     @async.with_task_group(group => {
-      let client = @client.connect(config, group)
+      let client = start_client(config, group)
       client.close()
     })
   })
@@ -171,7 +171,7 @@ async fn wait_for_backend_session_exit(
 /// The check looks at both the client's cached startup parameters and `pg_stat_ssl` on the server side to confirm the session is really using TLS.
 async fn assert_tls_query_ok(config : @client.Config) -> Unit {
   @async.with_task_group(group => {
-    let client = @client.connect(config, group)
+    let client = start_client(config, group)
 
     @debug.assert_eq(
       client.parameter("application_name"),
@@ -361,7 +361,7 @@ async fn assert_double_nan_roundtrip(client : @client.Client) -> Unit {
 async test "integration connect and typed query" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -666,7 +666,7 @@ async test "integration channel binding require rejects plain password auth" {
 async test "integration check connection" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -682,11 +682,11 @@ async test "integration check connection" {
 }
 
 ///|
-/// Startup parameters are cached on the auto-driven Client.
+/// Startup parameters are cached on the executor-driven Client.
 async test "integration exposes startup parameters" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -707,7 +707,7 @@ async test "integration exposes startup parameters" {
 async test "integration prepare and parameterized execute" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -740,7 +740,7 @@ async test "integration prepare and parameterized execute" {
 async test "integration raw query closes temporary prepared statements" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -770,7 +770,7 @@ async test "integration raw query closes temporary prepared statements" {
 async test "integration row stream detach closes temporary prepared statements" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -813,7 +813,7 @@ async test "integration row stream detach closes temporary prepared statements" 
 async test "integration simple query supports multiple result sets" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -859,7 +859,7 @@ async test "integration simple query supports multiple result sets" {
 async test "integration simple query is FIFO single-flight" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -902,7 +902,7 @@ async test "integration simple query is FIFO single-flight" {
 async test "integration simple query detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -953,7 +953,7 @@ async test "integration simple query detach unblocks later requests" {
 async test "integration simple query detach swallows trailing database error" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -983,7 +983,7 @@ async test "integration simple query detach swallows trailing database error" {
 async test "integration portal pagination" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1033,7 +1033,7 @@ async test "integration portal pagination" {
 async test "integration row stream is FIFO single-flight" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1078,7 +1078,7 @@ async test "integration row stream is FIFO single-flight" {
 async test "integration row stream backpressures after bounded buffering" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1116,7 +1116,7 @@ async test "integration row stream backpressures after bounded buffering" {
 async test "integration row stream detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1164,7 +1164,7 @@ async test "integration row stream detach unblocks later requests" {
 async test "integration transaction commit" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1201,7 +1201,7 @@ async test "integration transaction commit" {
 async test "integration transaction rollback" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1236,7 +1236,7 @@ async test "integration transaction rollback" {
 async test "integration transaction options" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1290,7 +1290,7 @@ async test "integration cancel token cancels running query" {
   guard integration_config() is Some(config) else { return }
 
   let result = @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-cancel-main",
@@ -1298,7 +1298,7 @@ async test "integration cancel token cancels running query" {
       group,
     )
 
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-cancel-observer",
@@ -1338,14 +1338,14 @@ async test "integration client abort interrupts running query and is idempotent"
   guard integration_config() is Some(config) else { return }
 
   let result = @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-abort-main",
       ),
       group,
     )
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-abort-observer",
@@ -1392,7 +1392,7 @@ async test "integration tls client abort closes backend session" {
   guard !integration_tls_failure_expected() else { return }
 
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(
         config,
         ssl_mode=VerifyFull,
@@ -1400,7 +1400,7 @@ async test "integration tls client abort closes backend session" {
       ),
       group,
     )
-    let observer = @client.connect(
+    let observer = start_client(
       as_client_config(
         config,
         application_name="moonbit-postgres-client-abort-tls-observer",
@@ -1431,7 +1431,7 @@ async test "integration tls client abort closes backend session" {
 async test "integration notice and notification surface as async messages" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1478,7 +1478,7 @@ async test "integration notice and notification surface as async messages" {
 async test "integration copy out" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1517,7 +1517,7 @@ async test "integration copy out" {
 async test "integration copy out is FIFO single-flight" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1563,7 +1563,7 @@ async test "integration copy out is FIFO single-flight" {
 async test "integration copy out detach unblocks later requests" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1610,7 +1610,7 @@ async test "integration copy out detach unblocks later requests" {
 async test "integration copy in" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1646,7 +1646,7 @@ async test "integration copy in" {
 async test "integration copy in large" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1691,7 +1691,7 @@ async test "integration copy in large" {
 async test "integration copy in abort rolls back copy" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1720,7 +1720,7 @@ async test "integration copy in abort rolls back copy" {
 async test "integration query one" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1762,7 +1762,7 @@ async test "integration query one" {
 async test "integration query opt" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1803,7 +1803,7 @@ async test "integration query opt" {
 async test "integration deferred constraint" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1839,7 +1839,7 @@ async test "integration deferred constraint" {
 async test "integration query typed without transaction" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1898,7 +1898,7 @@ async test "integration query typed without transaction" {
 async test "integration scalar type roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -1983,7 +1983,7 @@ async test "integration scalar type roundtrips" {
 async test "integration float roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -2044,7 +2044,7 @@ async test "integration float roundtrips" {
 async test "integration bytea and bpchar roundtrips" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -2115,7 +2115,7 @@ async test "integration bytea and bpchar roundtrips" {
 async test "integration resolves custom type metadata" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )
@@ -2185,7 +2185,7 @@ async test "integration resolves custom type metadata" {
 async test "integration database errors surface" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-postgres"),
       group,
     )

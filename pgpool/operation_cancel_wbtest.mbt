@@ -9,7 +9,7 @@ async fn with_operation_test_state(
       let (socket, _) = server.accept()
       serve_recycle_test_connection(socket)
     })
-    let client = @client.connect(
+    let client = start_test_client(
       @client.Config::new(
         "127.0.0.1",
         port=server.addr.port(),

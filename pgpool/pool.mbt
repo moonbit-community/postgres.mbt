@@ -3,10 +3,9 @@
 ///|
 /// Wrap a custom connection-opening callback for pool construction.
 ///
-/// The callback returns an auto-driven client and is invoked whenever the pool
-/// must open a new physical connection.
+/// The callback constructs a client and its executor for each physical session.
 pub fn Connector::new(
-  f : async (@client.Config, @async.TaskGroup[Unit]) -> @client.Client,
+  f : async (@client.Config) -> (@client.Client, @client.ClientExecutor),
 ) -> Connector {
   { run: f, }
 }
@@ -30,36 +29,229 @@ pub fn PoolOptions::new(
 /// during checkout.
 pub fn Pool::new(
   config : Config,
-  group : @async.TaskGroup[Unit],
   options? : PoolOptions = PoolOptions::new(),
-) -> Pool raise {
+) -> (Pool, PoolExecutor) raise {
   let normalized = normalize_config(config)
   let pool_config = config.get_pool_config()
   let slots : @async.Queue[Unit] = Queue(kind=Unbounded)
   for _ in 0..<pool_config.max_size {
     ignore(slots.try_put(()))
   }
-  {
-    shared: {
-      group,
-      targets: config.get_connection_targets(),
-      connector: options.connector.unwrap_or(default_connector()),
-      post_create: options.post_create,
-      pre_recycle: options.pre_recycle,
-      post_recycle: options.post_recycle,
-      target_session_attrs: normalized.target_session_attrs,
-      load_balance_hosts: normalized.load_balance_hosts,
-      pool_config: @ref.new(pool_config),
-      slots,
-      resize_debt: @ref.new(0),
-      idle: [],
-      connections: [],
-      next_connection_id: @ref.new(0),
-      size: @ref.new(0),
-      waiting: @ref.new(0),
-      closed: @ref.new(false),
-    },
+  let shared = {
+    ready: Completion::new(),
+    done: Completion::new(),
+    shutdown: Completion::new(),
+    started: @ref.new(false),
+    create_requests: Queue(kind=Unbounded),
+    close_requests: Queue(kind=Unbounded),
+    pending_creations: @ref.new(0),
+    active_creations: [],
+    next_creation_id: @ref.new(0),
+    targets: config.get_connection_targets(),
+    connector: options.connector.unwrap_or(default_connector()),
+    post_create: options.post_create,
+    pre_recycle: options.pre_recycle,
+    post_recycle: options.post_recycle,
+    target_session_attrs: normalized.target_session_attrs,
+    load_balance_hosts: normalized.load_balance_hosts,
+    pool_config: @ref.new(pool_config),
+    slots,
+    resize_debt: @ref.new(0),
+    idle: [],
+    connections: [],
+    next_connection_id: @ref.new(0),
+    size: @ref.new(0),
+    waiting: @ref.new(0),
+    closed: @ref.new(false),
   }
+  ({ shared, }, { shared, })
+}
+
+///|
+/// Run pool maintenance and all physical client executors until close completes.
+pub async fn PoolExecutor::run(self : PoolExecutor) -> Unit {
+  if self.shared.started.val {
+    raise PoolError::ExecutorAlreadyStarted
+  }
+  self.shared.started.val = true
+  if self.shared.closed.val {
+    self.shared.done.complete(None)
+    return
+  }
+  let finished = @ref.new(false)
+  let mut failure : Error? = None
+  defer (if !finished.val {
+    fail_pool(self.shared, failure.unwrap_or(PoolError::Closed))
+  })
+  @async.with_task_group(group => {
+    group.spawn_bg(() => serve_creations(self.shared, group))
+    group.spawn_bg(() => serve_closes(self.shared, group))
+    if self.shared.closed.val {
+      self.shared.ready.complete(Some(PoolError::Closed))
+    }
+    self.shared.ready.complete(None)
+    self.shared.shutdown.wait()
+    self.shared.create_requests.close()
+    self.shared.close_requests.close()
+  }) catch {
+    error => failure = Some(error)
+  }
+  match failure {
+    Some(error) => {
+      fail_pool(self.shared, error)
+      finished.val = true
+      raise error
+    }
+    None => {
+      self.shared.done.complete(None)
+      finished.val = true
+    }
+  }
+}
+
+///|
+/// Wait until the pool's maintenance workers can accept requests.
+pub async fn Pool::ready(self : Pool) -> Unit {
+  self.shared.ready.wait()
+}
+
+///|
+async fn serve_creations(
+  shared : Shared,
+  group : @async.TaskGroup[Unit],
+) -> Unit {
+  while true {
+    let request = shared.create_requests.get() catch { _ => return }
+    if request.cancelled.val || shared.closed.val {
+      request.result.close(error=PoolError::Closed)
+      finish_creation(shared, request)
+      continue
+    }
+    let task = group.spawn(allow_failure=true, () => {
+      defer {
+        request.result.close(error=PoolError::Closed)
+        finish_creation(shared, request)
+      }
+      let (client, executor) = shared.connector.connect(request.target) catch {
+        error => {
+          request.result.close(error~)
+          return
+        }
+      }
+      if request.cancelled.val || shared.closed.val {
+        client.abort()
+        return
+      }
+      group.spawn_bg(() => run_physical_executor(client, executor))
+      if request.cancelled.val || shared.closed.val {
+        client.abort()
+      } else {
+        ignore(request.result.try_put(client)) catch {
+          _ => client.abort()
+        }
+      }
+    })
+    request.task.val = Some(task)
+    if request.cancelled.val {
+      task.cancel()
+    }
+  }
+}
+
+///|
+/// Startup errors belong to checkout; failures after readiness fail the pool.
+async fn run_physical_executor(
+  client : @client.Client,
+  executor : @client.ClientExecutor,
+) -> Unit {
+  let mut failure : Error? = None
+  executor.run() catch {
+    error => failure = Some(error)
+  }
+  match failure {
+    Some(error) => {
+      client.ready() catch {
+        _ => return
+      }
+      raise error
+    }
+    None => ()
+  }
+}
+
+///|
+async fn serve_closes(shared : Shared, group : @async.TaskGroup[Unit]) -> Unit {
+  while true {
+    let client = shared.close_requests.get() catch { _ => return }
+    group.spawn_bg(allow_failure=true, () => {
+      client.close() catch {
+        _ => client.abort()
+      }
+    })
+  }
+}
+
+///|
+fn finish_creation(shared : Shared, request : CreateRequest) -> Unit {
+  for i in 0..<shared.active_creations.length() {
+    if shared.active_creations[i].id == request.id {
+      ignore(shared.active_creations.remove(i))
+      break
+    }
+  }
+  shared.pending_creations.val -= 1
+  maybe_finish_shutdown(shared)
+}
+
+///|
+fn maybe_finish_shutdown(shared : Shared) -> Unit {
+  if shared.closed.val &&
+    shared.size.val == 0 &&
+    shared.pending_creations.val == 0 {
+    shared.shutdown.complete(None)
+  }
+}
+
+///|
+fn fail_pool(shared : Shared, error : Error) -> Unit {
+  shared.closed.val = true
+  shared.ready.complete(Some(error))
+  shared.slots.close(error=PoolError::Closed, clear=true)
+  for request in shared.active_creations {
+    request.cancelled.val = true
+    match request.task.val {
+      Some(task) => task.cancel()
+      None => ()
+    }
+    request.result.close(error~, clear=true)
+  }
+  while shared.idle.length() > 0 {
+    ignore(shared.idle.remove(shared.idle.length() - 1))
+  }
+  while shared.connections.length() > 0 {
+    let connection = shared.connections.remove(shared.connections.length() - 1)
+    while connection.statement_cache.length() > 0 {
+      ignore(
+        connection.statement_cache.remove(
+          connection.statement_cache.length() - 1,
+        ),
+      )
+    }
+    match connection.client.val {
+      Some(client) => {
+        connection.client.val = None
+        client.abort()
+        if shared.size.val > 0 {
+          shared.size.val -= 1
+        }
+      }
+      None => ()
+    }
+  }
+  shared.create_requests.close(error~, clear=true)
+  shared.close_requests.close(clear=true)
+  shared.shutdown.complete(Some(error))
+  shared.done.complete(Some(error))
 }
 
 ///|
@@ -89,6 +281,8 @@ async fn Pool::checkout_session_with_timeouts(
     recycling_method: self.shared.pool_config.val.recycling_method,
     statement_cache_capacity: self.shared.pool_config.val.statement_cache_capacity,
   })
+  self.assert_open()
+  self.ready()
   self.assert_open()
   self.acquire_slot(timeouts.wait_ms)
   let mut handoff_complete = false
@@ -196,7 +390,7 @@ pub fn Pool::resize(self : Pool, max_size : Int) -> Unit raise {
 }
 
 ///|
-/// Stop accepting new checkouts and close every idle connection immediately.
+/// Stop accepting new checkouts and schedule every idle connection for closure.
 ///
 /// Existing checked-out clients are not revoked. They can keep running until
 /// released, at which point their physical connections are closed instead of
@@ -207,10 +401,21 @@ pub fn Pool::close(self : Pool) -> Unit {
   }
   self.shared.closed.val = true
   self.shared.slots.close(error=PoolError::Closed, clear=true)
+  for request in self.shared.active_creations {
+    request.cancelled.val = true
+    match request.task.val {
+      Some(task) => task.cancel()
+      None => ()
+    }
+  }
   while self.shared.idle.length() > 0 {
     let connection = self.shared.idle.remove(self.shared.idle.length() - 1)
     retire_connection(self.shared, connection, close_client=true)
   }
+  if !self.shared.ready.done.val {
+    self.shared.ready.complete(Some(PoolError::Closed))
+  }
+  maybe_finish_shutdown(self.shared)
 }
 
 ///|
@@ -397,7 +602,7 @@ async fn Pool::run_recycle(
 }
 
 ///|
-/// Establish a new connection and start its background driver task.
+/// Establish a new connection and await the executor's startup result.
 async fn Pool::create_client(self : Pool, create_ms : Int?) -> ConnectionState {
   self.assert_open()
   let candidate : @ref.Ref[@client.Client?] = @ref.new(None)
@@ -448,9 +653,10 @@ async fn Pool::connect_target(
   target : @client.Config,
   candidate : @ref.Ref[@client.Client?],
 ) -> ConnectionState {
-  let client = self.shared.connector.connect(target, self.shared.group)
+  let client = self.schedule_connection(target)
   candidate.val = Some(client)
   errdefer client.abort()
+  client.ready()
   if self.shared.closed.val {
     raise PoolError::Closed
   }
@@ -458,6 +664,34 @@ async fn Pool::connect_target(
   run_client_hook(self.shared.post_create, client)
   self.shared.size.val += 1
   make_connection_state(self.shared, client)
+}
+
+///|
+/// Ask the pool executor to construct and start one physical connection.
+async fn Pool::schedule_connection(
+  self : Pool,
+  target : @client.Config,
+) -> @client.Client {
+  self.assert_open()
+  self.shared.next_creation_id.val += 1
+  let request : CreateRequest = {
+    id: self.shared.next_creation_id.val,
+    target,
+    result: Queue(kind=Unbounded),
+    cancelled: @ref.new(false),
+    task: @ref.new(None),
+  }
+  self.shared.pending_creations.val += 1
+  self.shared.active_creations.push(request)
+  errdefer {
+    request.cancelled.val = true
+    match request.task.val {
+      Some(task) => task.cancel()
+      None => ()
+    }
+  }
+  ignore(self.shared.create_requests.try_put(request))
+  request.result.get()
 }
 
 ///|
@@ -537,11 +771,14 @@ fn retire_connection(
         shared.size.val -= 1
       }
       if close_client {
-        shared.group.spawn_bg(no_wait=true, () => client.close())
+        ignore(shared.close_requests.try_put(client)) catch {
+          _ => client.abort()
+        }
       }
     }
     None => ()
   }
+  maybe_finish_shutdown(shared)
 }
 
 ///|

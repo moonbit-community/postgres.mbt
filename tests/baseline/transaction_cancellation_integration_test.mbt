@@ -26,7 +26,7 @@ async fn cancel_transaction_callback(
 async test "integration client transaction cancellation rolls back" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let client = @client.connect(
+    let client = start_client(
       as_client_config(config, application_name="moonbit-client-tx-cancel"),
       group,
     )
