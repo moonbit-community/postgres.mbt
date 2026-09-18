@@ -112,7 +112,7 @@ async test "integration pool custom connector supports target failover" {
     let connector = @pgpool.Connector::new(target => {
       if attempts.length() == 0 {
         attempts.push(1)
-        let bad_target = @client.Config::from_parts(
+        let bad_target = @client.Config::new_internal(
           target.host,
           target.hostaddr,
           0,
