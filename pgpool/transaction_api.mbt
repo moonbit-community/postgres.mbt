@@ -19,17 +19,17 @@ fn isolation_level_sql(level : IsolationLevel) -> String {
 /// `Transaction` keeps the connection checked out until commit or rollback.
 async fn Session::transaction(
   self : Session,
-  options? : TransactionOptions = TransactionOptions::new(),
+  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
 ) -> Transaction {
   let (client, connection) = self.state.begin_transaction_scope()
   errdefer self.state.finish_transaction_scope()
-  let client_options = @client.TransactionOptions::new(
+  let client_options = @client.TransactionOptions::TransactionOptions(
     isolation_level?=options.isolation_level.map(isolation_level_sql),
     read_only?=options.read_only,
     deferrable?=options.deferrable,
   )
   let transaction = client.transaction(options=client_options)
-  make_pooled_transaction(connection, transaction, ClientLease(self.state))
+  Transaction::new(connection, transaction, ClientLease(self.state))
 }
 
 ///|
@@ -41,7 +41,7 @@ async fn Session::transaction(
 pub async fn[T] Session::with_transaction(
   self : Session,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions::new(),
+  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer (if !transaction.state.finished.val {
@@ -239,7 +239,7 @@ async fn Transaction::transaction(self : Transaction) -> Transaction {
   let (transaction, connection) = self.state.begin_nested_scope()
   errdefer self.state.finish_nested_scope()
   let nested = transaction.transaction()
-  make_pooled_transaction(connection, nested, ParentTransaction(self.state))
+  Transaction::new(connection, nested, ParentTransaction(self.state))
 }
 
 ///|
@@ -253,7 +253,7 @@ async fn Transaction::savepoint(
   let (transaction, connection) = self.state.begin_nested_scope()
   errdefer self.state.finish_nested_scope()
   let nested = transaction.savepoint(name)
-  make_pooled_transaction(connection, nested, ParentTransaction(self.state))
+  Transaction::new(connection, nested, ParentTransaction(self.state))
 }
 
 ///|

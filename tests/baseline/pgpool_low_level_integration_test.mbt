@@ -8,9 +8,9 @@ fn make_decl_pool(
   recycle_ms? : Int? = None,
   recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
   statement_cache_capacity? : Int = 100,
-  options? : @pgpool.PoolOptions = @pgpool.PoolOptions::new(),
+  options? : @pgpool.PoolOptions = @pgpool.PoolOptions::PoolOptions(),
 ) -> @pgpool.Pool raise {
-  let declarative = @pgpool.Config::new(
+  let declarative = @pgpool.Config::Config(
     config.host,
     user=config.user,
     dbname=config.database,
@@ -25,7 +25,7 @@ fn make_decl_pool(
       statement_cache_capacity~,
     ),
   )
-  let (pool, executor) = @pgpool.Pool::new(declarative, options~)
+  let (pool, executor) = @pgpool.Pool::create(declarative, options~)
   group.spawn_bg(allow_failure=true, () => executor.run())
   pool
 }
@@ -36,7 +36,7 @@ fn make_decl_pool(
 async test "integration pool create timeout aborts post-create client I/O" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let options = @pgpool.PoolOptions::new(post_create=client => {
+    let options = @pgpool.PoolOptions::PoolOptions(post_create=client => {
       client.batch_execute("select pg_sleep(30)")
     })
     let pool = make_decl_pool(
@@ -66,7 +66,7 @@ async test "integration pool create timeout aborts post-create client I/O" {
 async test "integration pool recycle timeout replaces blocked connection" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let options = @pgpool.PoolOptions::new(pre_recycle=client => {
+    let options = @pgpool.PoolOptions::PoolOptions(pre_recycle=client => {
       client.batch_execute("select pg_sleep(30)")
     })
     let pool = make_decl_pool(
@@ -102,11 +102,11 @@ async test "integration pool connector and lifecycle hooks" {
     let pre_recycle_calls : Array[Int] = []
     let post_recycle_calls : Array[Int] = []
 
-    let connector = @pgpool.Connector::new(target => {
+    let connector = @pgpool.Connector::Connector(target => {
       connect_calls.push(1)
-      @client.Client::new(target)
+      @client.Client::create(target)
     })
-    let options = @pgpool.PoolOptions::new(
+    let options = @pgpool.PoolOptions::PoolOptions(
       connector~,
       post_create=client => {
         post_create_calls.push(1)

@@ -167,8 +167,8 @@ struct Client {
 ///|
 /// Owns the socket and all background work for a single client.
 /// Spawn `run` once, then await `Client::ready` before using startup metadata.
-pub struct ClientExecutor {
-  priv shared : Shared
+struct ClientExecutor {
+  shared : Shared
 }
 
 ///|

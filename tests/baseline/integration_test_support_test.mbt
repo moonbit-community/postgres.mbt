@@ -109,7 +109,7 @@ fn make_pool(
   config : @client.Config,
   pool_config : @pgpool.PoolConfig,
 ) -> @pgpool.Pool raise {
-  let config = @pgpool.Config::new(
+  let config = @pgpool.Config::Config(
     config.host,
     hostaddr?=config.hostaddr,
     user=config.user,
@@ -128,7 +128,7 @@ fn make_pool(
     load_balance_hosts=Disable,
     pool=pool_config,
   )
-  let (pool, executor) = @pgpool.Pool::new(config)
+  let (pool, executor) = @pgpool.Pool::create(config)
   group.spawn_bg(allow_failure=true, () => executor.run())
   pool
 }
@@ -138,7 +138,7 @@ async fn start_client(
   config : @client.Config,
   group : @async.TaskGroup[Unit],
 ) -> @client.Client {
-  let (client, executor) = @client.Client::new(config)
+  let (client, executor) = @client.Client::create(config)
   group.spawn_bg(allow_failure=true, () => executor.run())
   client.ready()
   client

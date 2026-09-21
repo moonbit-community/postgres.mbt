@@ -4,7 +4,7 @@
 /// Wrap a custom connection-opening callback for pool construction.
 ///
 /// The callback constructs a client and its executor for each physical session.
-pub fn Connector::new(
+pub fn Connector::Connector(
   f : async (@client.Config) -> (@client.Client, @client.ClientExecutor),
 ) -> Connector {
   { run: f, }
@@ -12,7 +12,7 @@ pub fn Connector::new(
 
 ///|
 /// Build runtime options for pool construction.
-pub fn PoolOptions::new(
+pub fn PoolOptions::PoolOptions(
   connector? : Connector,
   post_create? : async (@client.Client) -> Unit,
   pre_recycle? : async (@client.Client) -> Unit,
@@ -27,9 +27,9 @@ pub fn PoolOptions::new(
 /// This allocates bookkeeping state and checkout slots only. It does not open
 /// any physical PostgreSQL connection, so network failures still happen later
 /// during checkout.
-pub fn Pool::new(
+pub fn Pool::create(
   config : Config,
-  options? : PoolOptions = PoolOptions::new(),
+  options? : PoolOptions = PoolOptions::PoolOptions(),
 ) -> (Pool, PoolExecutor) raise {
   let normalized = normalize_config(config)
   let pool_config = config.get_pool_config()
@@ -289,7 +289,7 @@ async fn Pool::checkout_session_with_timeouts(
   defer (if !handoff_complete { self.restore_slot() })
   let connection = self.checkout_client(timeouts)
   handoff_complete = true
-  make_session(self.shared, connection)
+  Session::new(self.shared, connection)
 }
 
 ///|
@@ -663,7 +663,7 @@ async fn Pool::connect_target(
   check_target_session_attrs(self.shared.target_session_attrs, client)
   run_client_hook(self.shared.post_create, client)
   self.shared.size.val += 1
-  make_connection_state(self.shared, client)
+  ConnectionState::new(self.shared, client)
 }
 
 ///|
@@ -736,7 +736,7 @@ fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
 
 ///|
 /// Create and register one new physical connection state.
-fn make_connection_state(
+fn ConnectionState::new(
   shared : Shared,
   client : @client.Client,
 ) -> ConnectionState {

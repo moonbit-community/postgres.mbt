@@ -147,7 +147,7 @@ async test "session boundaries recheck cancellation outside their outer protecti
     with_operation_test_state((group, state) => {
       let pool = client_api_test_pool(group)
       defer pool.close()
-      let session = make_session(pool.shared, state.connection)
+      let session = Session::new(pool.shared, state.connection)
       let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
       let release_work : @async.Queue[Unit] = Queue(kind=Unbounded)
       defer release_work.close()

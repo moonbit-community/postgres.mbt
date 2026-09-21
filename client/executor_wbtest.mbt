@@ -1,6 +1,6 @@
 ///|
 async test "client executor does not connect before run and rejects a second run" {
-  let (client, executor) = Client::new(
+  let (client, executor) = Client::create(
     Config::Config(
       "127.0.0.1",
       user="moon",
@@ -56,7 +56,7 @@ async test "several client ready waiters observe the same startup result" {
       conn.write(ready_for_query_packet(b'I'))
       assert_eq(conn.read_exactly(5), terminate_bytes())
     })
-    let (client, executor) = Client::new(
+    let (client, executor) = Client::create(
       Config::Config(
         "127.0.0.1",
         user="moon",
@@ -97,7 +97,7 @@ async test "close during client startup cancels authentication and waits for cle
       accepted.put(())
       conn.read_some(max_len=1)
     })
-    let (client, executor) = Client::new(
+    let (client, executor) = Client::create(
       Config::Config(
         "127.0.0.1",
         user="moon",
@@ -132,7 +132,7 @@ async test "cancelling a running client executor closes the socket" {
       conn.write(ready_for_query_packet(b'I'))
       conn.read_some(max_len=1)
     })
-    let (client, executor) = Client::new(
+    let (client, executor) = Client::create(
       Config::Config(
         "127.0.0.1",
         user="moon",

@@ -98,7 +98,7 @@ async test "row stream owns its operation permit through terminal ready" {
 
   let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   responses.put(copy_test_ready_for_query_message())
-  let stream = new_row_stream(test_control(None), responses, Some(permit))
+  let stream = RowStream::new(test_control(None), responses, Some(permit))
   let summary = stream.finish()
   assert_eq(summary.row_count, 0)
 
@@ -112,7 +112,7 @@ async test "finish waits for a detached row stream to release its permit" {
     let gate = OperationGate::new()
     let permit = gate.acquire()
     let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
-    let stream = new_row_stream(
+    let stream = RowStream::new(
       test_control(Some(group)),
       responses,
       Some(permit),
@@ -138,7 +138,7 @@ async test "cancelling a row reader hands draining and permit release to backgro
     let gate = OperationGate::new()
     let permit = gate.acquire()
     let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
-    let stream = new_row_stream(
+    let stream = RowStream::new(
       test_control(Some(group)),
       responses,
       Some(permit),

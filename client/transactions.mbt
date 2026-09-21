@@ -13,7 +13,7 @@ pub struct TransactionOptions {
 
 ///|
 /// Build transaction options for a future `BEGIN` command.
-pub fn TransactionOptions::new(
+pub fn TransactionOptions::TransactionOptions(
   isolation_level? : String,
   read_only? : Bool,
   deferrable? : Bool,
@@ -26,7 +26,7 @@ pub fn TransactionOptions::new(
 /// `BEGIN` options.
 pub async fn Client::transaction(
   self : Client,
-  options? : TransactionOptions = TransactionOptions::new(),
+  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
 ) -> Transaction {
   let (context, permit) = self.begin_stream_operation()
   let started = @ref.new(false)
@@ -94,7 +94,7 @@ async fn OpContext::begin_transaction(
 pub async fn[T] Client::with_transaction(
   self : Client,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions::new(),
+  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer @async.protect_from_cancel(() => {
