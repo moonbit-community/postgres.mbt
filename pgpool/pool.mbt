@@ -556,10 +556,7 @@ async fn Pool::try_recycle_client(
     match self.shared.pool_config.val.recycling_method {
       Fast => ()
       Verified => client.check_connection()
-      Clean => {
-        client.batch_execute(clean_recycle_sql)
-        discard_connection_statement_cache_metadata(connection)
-      }
+      Clean => client.batch_execute(clean_recycle_sql)
       Custom(sql) => client.batch_execute(sql)
     }
     run_client_hook(self.shared.post_recycle, client)
