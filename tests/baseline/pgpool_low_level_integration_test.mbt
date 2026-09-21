@@ -152,8 +152,9 @@ async test "integration pool connector and lifecycle hooks" {
 }
 
 ///|
-/// Clean recycling resets session state before the same backend is reused.
-async test "integration pool clean recycle resets session state" {
+/// Clean recycling resets session state while retaining prepared statements on
+/// the same backend so the connection-local cache remains reusable.
+async test "integration pool clean recycle retains statement cache" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_decl_pool(
@@ -164,20 +165,32 @@ async test "integration pool clean recycle resets session state" {
       recycling_method=@pgpool.RecyclingMethod::clean(),
     )
 
-    let before_pid : Int = pool.with_session(session => {
+    let statement_count_sql = "select count(*)::int4 as count from pg_prepared_statements"
+    let (before_pid, before_statement_count) : (Int, Int) = pool.with_session(session => {
       session.batch_execute("set search_path to pg_catalog")
-      session.query_one("select pg_backend_pid()::int4 as pid").get_name("pid")
-    })
-    let (after_pid, path) : (Int, String) = pool.with_session(session => {
       let pid : Int = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
-      let path : String = session
-        .query_one("show search_path")
-        .get_name("search_path")
-      (pid, path)
+      let statement_count : Int = session
+        .query_one(statement_count_sql)
+        .get_name("count")
+      (pid, statement_count)
     })
+    let (after_pid, after_statement_count, path) : (Int, Int, String) = pool.with_session(session => {
+        let pid : Int = session
+          .query_one("select pg_backend_pid()::int4 as pid")
+          .get_name("pid")
+        let statement_count : Int = session
+          .query_one(statement_count_sql)
+          .get_name("count")
+        let path : String = session
+          .query_one("show search_path")
+          .get_name("search_path")
+        (pid, statement_count, path)
+      },
+    )
     assert_eq(before_pid, after_pid)
+    assert_eq(before_statement_count, after_statement_count)
     assert_true(path != "pg_catalog")
     pool.close()
   })
