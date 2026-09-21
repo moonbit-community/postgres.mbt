@@ -81,6 +81,79 @@ test "pool config broadcasts hostaddr to every host" {
 }
 
 ///|
+test "pool config broadcasts one host across per-target ports" {
+  let targets = Config::Config(
+    "db.example",
+    user="moon",
+    dbname="moondb",
+    application_name="pool-host-broadcast",
+    ports=[5432, 5433],
+    pool=PoolConfig(1),
+  ).get_connection_targets()
+  @debug.assert_eq(targets.length(), 2)
+  @debug.assert_eq(targets[0].host, "db.example")
+  @debug.assert_eq(targets[1].host, "db.example")
+  @debug.assert_eq(targets[0].port, 5432)
+  @debug.assert_eq(targets[1].port, 5433)
+}
+
+///|
+test "pool config rejects mismatched multi-target arrays" {
+  let result = @test.expect_error(() => {
+    Config::Config(
+      "one.db",
+      user="moon",
+      dbname="moondb",
+      application_name="pool-target-arity",
+      hosts=["two.db"],
+      ports=[5432, 5433, 5434],
+      pool=PoolConfig(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::HostPortArityMismatch else {
+    fail("expected host/port arity mismatch")
+  }
+}
+
+///|
+test "pool config validates verify_full identity for every target" {
+  let result = @test.expect_error(() => {
+    Config::Config(
+      "valid.db",
+      user="moon",
+      dbname="moondb",
+      application_name="pool-target-identity",
+      hosts=[""],
+      pool=PoolConfig(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::InvalidConfig(message) else {
+    fail("expected per-target verify-full identity error")
+  }
+  @debug.assert_eq(
+    message, "sslmode=verify-full requires explicit host or hostaddr",
+  )
+}
+
+///|
+test "pool config validates every target port" {
+  let result = @test.expect_error(() => {
+    Config::Config(
+      "db.example",
+      user="moon",
+      dbname="moondb",
+      application_name="pool-target-port",
+      ports=[5432, 0],
+      pool=PoolConfig(1),
+    ).get_connection_targets()
+  })
+  guard result is ConfigError::InvalidConfig(message) else {
+    fail("expected per-target port validation error")
+  }
+  @debug.assert_eq(message, "port must be between 1 and 65535")
+}
+
+///|
 test "pool config constructor still reports empty user name" {
   let result = @test.expect_error(() => {
     Config::Config(
