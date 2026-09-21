@@ -12,7 +12,7 @@ Use `pgpool` when independent tasks need database concurrency.
 ///|
 async fn _quick_start() -> Unit {
   @async.with_task_group(group => {
-    let config = Config::Config(
+    let config = @client.Config::Config(
       "localhost",
       user="postgres",
       database="app",
@@ -21,7 +21,7 @@ async fn _quick_start() -> Unit {
       ssl_mode=Disable,
       application_name="my-service",
     )
-    let (client, executor) = Client::create(config)
+    let (client, executor) = @client.Client::create(config)
     let task = group.spawn(no_wait=true, () => executor.run())
     client.ready()
     let current_user : String = client
@@ -104,7 +104,7 @@ Rows decode by index or PostgreSQL column name:
 
 ```mbt check
 ///|
-async fn _query_example(client : Client) -> Int {
+async fn _query_example(client : @client.Client) -> Int {
   let input = 41
   let row = client.query_one("select $1::int4 + 1 as value", params=[
     input as &ToSql,
@@ -122,7 +122,7 @@ Use `prepare` when a named server-side statement should be reused:
 
 ```mbt check
 ///|
-async fn _prepared_example(client : Client) -> Int {
+async fn _prepared_example(client : @client.Client) -> Int {
   let statement = client.prepare("select $1::int4 as value")
   let value = 7
   let stream = client.query_statement(statement, params=[value as &ToSql])
@@ -148,7 +148,7 @@ Rollback cleanup is protected from task cancellation:
 
 ```mbt check
 ///|
-async fn _transaction_example(client : Client) -> Unit {
+async fn _transaction_example(client : @client.Client) -> Unit {
   client.with_transaction(tx => {
     ignore(tx.execute("update accounts set active = true"))
     ()
@@ -186,7 +186,7 @@ from ordinary query responses:
 
 ```mbt check
 ///|
-async fn _read_async_message(client : Client) -> AsyncMessage? {
+async fn _read_async_message(client : @client.Client) -> @client.AsyncMessage? {
   client.next_message()
 }
 ```

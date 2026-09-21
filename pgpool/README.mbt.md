@@ -24,15 +24,15 @@ async fn _pool_quick_start(
   password : String,
 ) -> Unit {
   @async.with_task_group(group => {
-    let config = Config::Config(
+    let config = @pgpool.Config::Config(
       host,
       user~,
       dbname=database,
       password~,
       application_name="my-service",
-      pool=PoolConfig::PoolConfig(4),
+      pool=PoolConfig(4),
     )
-    let (pool, executor) = Pool::create(config)
+    let (pool, executor) = @pgpool.Pool::create(config)
     let task = group.spawn(no_wait=true, () => executor.run())
     pool.ready()
     let value : Int = pool
@@ -61,7 +61,7 @@ session:
 
 ```mbt check
 ///|
-async fn _session_example(pool : Pool) -> Int {
+async fn _session_example(pool : @pgpool.Pool) -> Int {
   pool.with_session(session => {
     session.batch_execute("set application_name = 'pool-example'")
     session.query_one("select 42::int4 as value").get_name("value")
@@ -84,7 +84,7 @@ callback:
 
 ```mbt check
 ///|
-async fn _pool_transaction(pool : Pool) -> Unit {
+async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
   pool.with_transaction(tx => {
     ignore(tx.execute("update accounts set active = true"))
     ()
@@ -134,13 +134,13 @@ automatically per physical connection. Configure the LRU capacity through
 
 ```mbt check
 ///|
-fn _pool_config() -> PoolConfig raise {
-  PoolConfig::PoolConfig(
+fn _pool_config() -> @pgpool.PoolConfig raise {
+  PoolConfig(
     8,
     statement_cache_capacity=100,
-    timeouts=Timeouts::Timeouts(wait_ms=Some(500)),
-    queue_mode=QueueMode::fifo(),
-    recycling_method=RecyclingMethod::verified(),
+    timeouts=Timeouts(wait_ms=Some(500)),
+    queue_mode=@pgpool.QueueMode::fifo(),
+    recycling_method=@pgpool.RecyclingMethod::verified(),
   )
 }
 ```
@@ -162,7 +162,7 @@ operation:
 
 ```mbt check
 ///|
-async fn _cancellable(pool : Pool) -> Unit {
+async fn _cancellable(pool : @pgpool.Pool) -> Unit {
   @async.with_task_group(group => {
     ignore(
       pool.with_session(session => {
