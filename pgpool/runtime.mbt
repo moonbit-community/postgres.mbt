@@ -2,6 +2,9 @@
 
 ///|
 /// SQL sequence matching `deadpool-postgres` clean recycling semantics.
+///
+/// Prepared statements and their cached plans are deliberately preserved so
+/// the connection-local statement cache remains reusable across checkouts.
 let clean_recycle_sql = "CLOSE ALL; SET SESSION AUTHORIZATION DEFAULT; RESET ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); DISCARD TEMP; DISCARD SEQUENCES;"
 
 ///|

@@ -149,7 +149,8 @@ The default capacity is `100`. Set it to `0` to disable caching; negative
 values raise `PoolError::InvalidConfig`. Cache entries are local to one
 physical connection. Typed parameter arrays are copied when inserted, so later
 caller mutation cannot rewrite a cache key. There are no public cache-manager
-or cache-handle APIs.
+or cache-handle APIs. Clean recycling preserves prepared statements and their
+cached plans, keeping the connection-local cache reusable across checkouts.
 
 Invalid-statement SQLSTATE `26000` and unsupported-plan SQLSTATE `0A000`
 invalidate the affected entry and propagate the original database error. The
