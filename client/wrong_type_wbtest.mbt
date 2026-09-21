@@ -1,7 +1,7 @@
 ///|
 struct OnlyInt8Value {
-  value : Int64
-} derive(Debug, Eq)
+  _value : Int64
+}
 
 ///|
 impl FromSql for OnlyInt8Value with fn accepts(type_) {
@@ -15,7 +15,7 @@ impl FromSql for OnlyInt8Value with fn moonbit_type_name() {
 
 ///|
 impl FromSql for OnlyInt8Value with fn from_sql(_, _, _) {
-  { value: 0L, }
+  { _value: 0L, }
 }
 
 ///|

@@ -1,6 +1,7 @@
 import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbitlang/core/buffer",
+  "moonbitlang/core/debug",
 }
 
 import {
