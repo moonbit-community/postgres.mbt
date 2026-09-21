@@ -1,4 +1,5 @@
 import {
   "moonbit-community/postgres/protocol" @proto,
+  "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",
 }
