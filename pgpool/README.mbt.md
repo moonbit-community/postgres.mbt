@@ -207,6 +207,11 @@ on a raw client when the physical connection must be stopped immediately.
 `TargetSessionAttrs`, host load balancing, TLS, authentication, startup
 parameters, and `PoolConfig`.
 
+A single host, hostaddr, or port is broadcast across the inferred target count.
+Multi-value arrays must have matching lengths. Normalization rejects ports
+outside the inclusive range from `1` through `65535` and, under `VerifyFull`,
+any target without a non-empty host or hostaddr before opening a socket.
+
 `PoolConfig` controls:
 
 - `max_size`
