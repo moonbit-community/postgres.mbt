@@ -95,7 +95,7 @@ async test "integration pooled transaction cancellation during SQL rolls back wr
     let pool = make_pool(
       group,
       as_client_config(config, application_name="pool-sql-cancel"),
-      @pgpool.PoolConfig::PoolConfig(1),
+      PoolConfig(1),
     )
     defer pool.close()
     let observer = start_client(
@@ -148,7 +148,7 @@ async test "integration savepoint cancellation during SQL preserves outer writes
     let pool = make_pool(
       group,
       as_client_config(config, application_name="savepoint-sql-cancel"),
-      @pgpool.PoolConfig::PoolConfig(1),
+      PoolConfig(1),
     )
     defer pool.close()
     let observer = start_client(

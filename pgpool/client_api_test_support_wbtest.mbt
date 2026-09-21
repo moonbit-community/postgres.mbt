@@ -23,7 +23,7 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
     user="moon",
     dbname="moondb",
     application_name="pgpool-client-api-wbtest",
-    pool=PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   start_test_pool(config, group)
 }
@@ -32,7 +32,7 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
 fn start_test_pool(
   config : Config,
   group : @async.TaskGroup[Unit],
-  options? : PoolOptions = PoolOptions::PoolOptions(),
+  options? : PoolOptions = PoolOptions(),
 ) -> Pool raise {
   let (pool, executor) = Pool::create(config, options~)
   group.spawn_bg(allow_failure=true, () => executor.run())

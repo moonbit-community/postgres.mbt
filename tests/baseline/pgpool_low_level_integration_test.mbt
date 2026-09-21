@@ -8,7 +8,7 @@ fn make_decl_pool(
   recycle_ms? : Int? = None,
   recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
   statement_cache_capacity? : Int = 100,
-  options? : @pgpool.PoolOptions = @pgpool.PoolOptions::PoolOptions(),
+  options? : @pgpool.PoolOptions = PoolOptions(),
 ) -> @pgpool.Pool raise {
   let declarative = @pgpool.Config::Config(
     config.host,

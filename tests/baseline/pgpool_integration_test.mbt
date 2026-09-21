@@ -9,9 +9,9 @@ fn make_pool_config(
   recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
   statement_cache_capacity? : Int = 100,
 ) -> @pgpool.PoolConfig raise {
-  @pgpool.PoolConfig::PoolConfig(
+  PoolConfig(
     max_size,
-    timeouts=@pgpool.Timeouts::Timeouts(wait_ms~, create_ms~, recycle_ms~),
+    timeouts=Timeouts(wait_ms~, create_ms~, recycle_ms~),
     queue_mode~,
     recycling_method~,
     statement_cache_capacity~,

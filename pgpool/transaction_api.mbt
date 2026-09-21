@@ -19,7 +19,7 @@ fn isolation_level_sql(level : IsolationLevel) -> String {
 /// `Transaction` keeps the connection checked out until commit or rollback.
 async fn Session::transaction(
   self : Session,
-  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
+  options? : TransactionOptions = TransactionOptions(),
 ) -> Transaction {
   let (client, connection) = self.state.begin_transaction_scope()
   errdefer self.state.finish_transaction_scope()
@@ -41,7 +41,7 @@ async fn Session::transaction(
 pub async fn[T] Session::with_transaction(
   self : Session,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
+  options? : TransactionOptions = TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer (if !transaction.state.finished.val {

@@ -66,7 +66,7 @@ async test "connect rejects deprecated md5 authentication" {
 
     let result = expect_error_async(() => {
       start_test_client(
-        Config::Config(
+        Config(
           "127.0.0.1",
           user="moon",
           database="moondb",
@@ -102,7 +102,7 @@ async test "connect rejects cleartext password when channel binding is required"
 
     let result = expect_error_async(() => {
       start_test_client(
-        Config::Config(
+        Config(
           "127.0.0.1",
           user="moon",
           database="moondb",
@@ -137,7 +137,7 @@ async test "connect rejects authentication ok when channel binding is required" 
 
     let result = expect_error_async(() => {
       start_test_client(
-        Config::Config(
+        Config(
           "127.0.0.1",
           user="moon",
           database="moondb",

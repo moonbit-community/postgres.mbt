@@ -51,16 +51,16 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     let options = if post {
       PoolOptions::PoolOptions(post_recycle=hook)
     } else {
-      PoolOptions::PoolOptions(pre_recycle=hook)
+      PoolOptions(pre_recycle=hook)
     }
     let pool = start_test_pool(
-      Config::Config(
+      Config(
         "127.0.0.1",
         port=server.addr.port(),
         user="moon",
         ssl_mode=Disable,
         application_name="recycle-cancel-test",
-        pool=PoolConfig::PoolConfig(1, recycling_method=Verified),
+        pool=PoolConfig(1, recycling_method=Verified),
       ),
       group,
       options~,

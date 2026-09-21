@@ -500,7 +500,7 @@ async test "integration tls verify_full requires explicit host or hostaddr" {
   guard integration_config() is Some(config) else { return }
   let message = expect_ssl_error(
     connect_error(
-      @client.Config::Config(
+      Config(
         "",
         user=config.user,
         database=config.database,
@@ -1245,7 +1245,7 @@ async test "integration transaction options" {
       "create temp table moon_driver_tx_builder (id serial, name text)",
     )
     let tx = client.transaction(
-      options=@client.TransactionOptions::TransactionOptions(
+      options=TransactionOptions(
         isolation_level="SERIALIZABLE",
         read_only=true,
         deferrable=true,

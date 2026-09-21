@@ -70,7 +70,7 @@ pub async fn Pool::check_connection(self : Pool) -> Unit {
 pub async fn[T] Pool::with_transaction(
   self : Pool,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
+  options? : TransactionOptions = TransactionOptions(),
 ) -> T {
   self.with_session(session => session.with_transaction(f, options~))
 }

@@ -158,7 +158,7 @@ fn copy_test_shared(
     None => control.close()
   }
   {
-    config: Config::Config(
+    config: Config(
       "127.0.0.1",
       user="moon",
       database="moondb",
