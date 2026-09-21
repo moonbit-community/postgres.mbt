@@ -49,8 +49,8 @@ struct Pool {
 
 ///|
 /// Owns all physical connection executors and pool maintenance tasks.
-pub struct PoolExecutor {
-  priv shared : Shared
+struct PoolExecutor {
+  shared : Shared
 }
 
 ///|
@@ -65,7 +65,7 @@ priv struct CreateRequest {
 ///|
 /// Wrapper around the callback that opens one physical PostgreSQL connection.
 ///
-/// Pool options can replace the default `@client.Client::new` path during tests or
+/// Pool options can replace the default `@client.Client::create` path during tests or
 /// custom integration.
 struct Connector {
   run : async (@client.Config) -> (@client.Client, @client.ClientExecutor)
@@ -259,7 +259,7 @@ struct Transaction {
 
 ///|
 /// Create a pooled client wrapper around one checked-out client.
-fn make_session(pool : Shared, connection : ConnectionState) -> Session {
+fn Session::new(pool : Shared, connection : ConnectionState) -> Session {
   {
     state: {
       pool,
@@ -298,7 +298,7 @@ fn make_pooled_operation(
 
 ///|
 /// Create a pooled transaction wrapper around one live transaction.
-fn make_pooled_transaction(
+fn Transaction::new(
   connection : ConnectionState,
   transaction : @client.Transaction,
   owner : TransactionOwner,
@@ -316,9 +316,9 @@ fn make_pooled_transaction(
 }
 
 ///|
-/// Build the default connector around `Client::new`.
+/// Build the default connector around `Client::create`.
 fn default_connector() -> Connector {
-  { run: config => @client.Client::new(config), }
+  { run: config => @client.Client::create(config), }
 }
 
 ///|
@@ -332,7 +332,7 @@ async fn Connector::connect(
 
 ///|
 /// Create a scoped prepared-statement wrapper around a raw statement handle.
-fn make_prepared_statement(
+fn PreparedStatement::new(
   scope : PreparedStatementScope,
   handle : PreparedStatementHandle,
   statement : @client.Statement,

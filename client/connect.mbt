@@ -3,7 +3,7 @@
 ///|
 /// Construct a client handle and its single-use executor without network I/O.
 /// Spawn `executor.run()` and await `client.ready()` before reading startup data.
-pub fn Client::new(config : Config) -> (Client, ClientExecutor) {
+pub fn Client::create(config : Config) -> (Client, ClientExecutor) {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
   let shared = {

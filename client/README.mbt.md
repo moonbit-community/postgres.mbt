@@ -21,7 +21,7 @@ async fn _quick_start() -> Unit {
       ssl_mode=Disable,
       application_name="my-service",
     )
-    let (client, executor) = Client::new(config)
+    let (client, executor) = Client::create(config)
     let task = group.spawn(no_wait=true, () => executor.run())
     client.ready()
     let current_user : String = client
@@ -34,7 +34,7 @@ async fn _quick_start() -> Unit {
 }
 ```
 
-`Client::new(config)` only allocates state. Spawn the single-use executor and
+`Client::create(config)` only allocates state. Spawn the single-use executor and
 await `ready()` to observe connection and authentication errors. Any number of
 tasks may await the same readiness result. Async database operations also wait
 for readiness. Before startup finishes, `parameter()` and `cancel_token()`

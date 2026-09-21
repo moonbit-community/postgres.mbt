@@ -398,7 +398,7 @@ pub async fn[T] Session::with_prepared(
       () => client.prepare(sql),
       statement => statement.close(),
     )
-    let prepared = make_prepared_statement(
+    let prepared = PreparedStatement::new(
       ClientScope(self.state),
       handle,
       statement,
@@ -423,7 +423,7 @@ pub async fn[T] Session::with_prepared_typed(
       () => client.prepare_typed(sql, param_types),
       statement => statement.close(),
     )
-    let prepared = make_prepared_statement(
+    let prepared = PreparedStatement::new(
       ClientScope(self.state),
       handle,
       statement,
@@ -447,7 +447,7 @@ pub async fn[T] Transaction::with_prepared(
       () => transaction.prepare(sql),
       statement => transaction.close_statement(statement),
     )
-    let prepared = make_prepared_statement(
+    let prepared = PreparedStatement::new(
       TransactionScope(self.state),
       handle,
       statement,
@@ -472,7 +472,7 @@ pub async fn[T] Transaction::with_prepared_typed(
       () => transaction.prepare_typed(sql, param_types),
       statement => transaction.close_statement(statement),
     )
-    let prepared = make_prepared_statement(
+    let prepared = PreparedStatement::new(
       TransactionScope(self.state),
       handle,
       statement,

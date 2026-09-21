@@ -1,6 +1,6 @@
 # Pool Cancellation Invariants
 
-`Pool::new` allocates bookkeeping and returns a `PoolExecutor` without opening
+`Pool::create` allocates bookkeeping and returns a `PoolExecutor` without opening
 connections. The executor keeps its task group local to `run()`. A creation
 queue asks it to construct and start physical `ClientExecutor`s; the original
 checkout then awaits `client.ready()` under the create deadline and runs target

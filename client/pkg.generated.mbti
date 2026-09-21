@@ -54,10 +54,10 @@ pub fn Client::clear_type_cache(Self) -> Unit
 pub async fn Client::close(Self) -> Unit
 pub async fn Client::copy_in(Self, String) -> CopyInSink
 pub async fn Client::copy_out(Self, String) -> CopyOutStream
+pub fn Client::create(Config) -> (Self, ClientExecutor)
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
 pub fn Client::is_closed(Self) -> Bool
-pub fn Client::new(Config) -> (Self, ClientExecutor)
 pub async fn Client::next_message(Self) -> AsyncMessage?
 pub fn Client::parameter(Self, String) -> String? raise
 pub async fn Client::prepare(Self, String) -> Statement
@@ -73,9 +73,7 @@ pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
 pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
 pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 
-pub struct ClientExecutor {
-  // private fields
-}
+type ClientExecutor
 pub async fn ClientExecutor::run(Self) -> Unit
 
 pub struct Column {
@@ -245,7 +243,7 @@ pub struct TransactionOptions {
   read_only : Bool?
   deferrable : Bool?
 } derive(Eq, @debug.Debug)
-pub fn TransactionOptions::new(isolation_level? : String, read_only? : Bool, deferrable? : Bool) -> Self
+pub fn TransactionOptions::TransactionOptions(isolation_level? : String, read_only? : Bool, deferrable? : Bool) -> Self
 
 pub struct Type {
   oid : UInt

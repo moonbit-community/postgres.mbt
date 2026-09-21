@@ -4,7 +4,7 @@ async test "row stream detach does not swallow non-database drain failures" {
     @async.with_task_group(group => {
       let control : DrainControl = test_control(Some(group))
       let responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
-      let stream = new_row_stream(control, responses, None)
+      let stream = RowStream::new(control, responses, None)
       responses.close(error=ClientError::UnexpectedMessage("boom"), clear=true)
       stream.detach()
     })
@@ -19,7 +19,7 @@ async test "row stream detach does not swallow non-database drain failures" {
 async test "queued detached drain receives closure before its worker starts" {
   let control = DrainControl::new()
   let responses : @async.Queue[@backend.Message] = Queue(kind=Blocking(8))
-  let stream = new_row_stream(control, responses, None)
+  let stream = RowStream::new(control, responses, None)
   stream.detach()
   assert_eq(control.pending.length(), 1)
   responses.close(error=ClientError::Closed("connection aborted"))
@@ -41,11 +41,11 @@ fn detach_test_stream(
 ) -> (async () -> Unit, () -> Unit) {
   match kind {
     0 => {
-      let stream = new_row_stream(control, responses, permit)
+      let stream = RowStream::new(control, responses, permit)
       (() => ignore(stream.finish()), () => stream.detach())
     }
     1 => {
-      let stream = new_simple_query_stream(control, responses, permit)
+      let stream = SimpleQueryStream::new(control, responses, permit)
       (() => stream.finish(), () => stream.detach())
     }
     _ => {

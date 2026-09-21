@@ -5,7 +5,7 @@ usage belongs in `README.mbt.md`.
 
 ## Ownership Model
 
-`Client::new(config)` allocates shared queues, built-in type metadata, and a
+`Client::create(config)` allocates shared queues, built-in type metadata, and a
 repeatable readiness result without opening a socket. It returns a cloneable
 `Client` and a single-use `ClientExecutor`. The caller spawns `run()` in its task
 group. That task connects, authenticates, publishes startup state, and then

@@ -97,7 +97,7 @@ async fn start_test_client(
   config : Config,
   group : @async.TaskGroup[Unit],
 ) -> Client {
-  let (client, executor) = Client::new(config)
+  let (client, executor) = Client::create(config)
   group.spawn_bg(allow_failure=true, () => executor.run())
   client.ready()
   client

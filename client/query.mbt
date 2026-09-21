@@ -17,7 +17,7 @@ pub async fn Client::simple_query(
   let (_context, permit) = self.begin_stream_operation()
   errdefer permit.release()
   let responses = self.send_request(Messages, simple_query_bytes(sql))
-  new_simple_query_stream(self.shared.control, responses, Some(permit))
+  SimpleQueryStream::new(self.shared.control, responses, Some(permit))
 }
 
 ///|
@@ -156,12 +156,12 @@ async fn OpContext::query(
   )
   // Cleanup is deferred onto the returned stream because closing the temporary
   // statement early would interleave a second request before this one finishes.
-  new_row_stream(
+  RowStream::new(
     self.client.shared.control,
     responses,
     permit,
     initial_columns=columns,
-    cleanup=Some(make_statement_cleanup(self, name)),
+    cleanup=Some(StreamCleanup::new(self, name)),
   )
 }
 
@@ -237,12 +237,12 @@ async fn OpContext::query_typed(
     Messages,
     execute_statement_bytes(name[:], param_types, params),
   )
-  new_row_stream(
+  RowStream::new(
     self.client.shared.control,
     responses,
     permit,
     initial_columns=columns,
-    cleanup=Some(make_statement_cleanup(self, name)),
+    cleanup=Some(StreamCleanup::new(self, name)),
   )
 }
 
@@ -280,7 +280,7 @@ fn OpContext::query_statement(
     Messages,
     execute_statement_bytes(statement.name[:], statement.params, params),
   )
-  new_row_stream(
+  RowStream::new(
     self.client.shared.control,
     responses,
     permit,
@@ -481,7 +481,7 @@ fn OpContext::query_portal(
     Messages,
     execute_portal_bytes(portal.name[:], max_rows),
   )
-  new_row_stream(
+  RowStream::new(
     self.client.shared.control,
     responses,
     permit,

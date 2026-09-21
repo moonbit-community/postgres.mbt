@@ -85,7 +85,7 @@ pub struct TransactionOptions {
 
 ///|
 /// Build transaction options for a future `BEGIN` command.
-pub fn TransactionOptions::new(
+pub fn TransactionOptions::TransactionOptions(
   isolation_level? : IsolationLevel,
   read_only? : Bool,
   deferrable? : Bool,
@@ -98,7 +98,7 @@ pub fn TransactionOptions::new(
 ///
 /// These values control how long the pool waits for capacity, creates a new
 /// connection, or recycles an idle connection. `None` leaves the phase
-/// unbounded. Negative values are rejected by `PoolConfig::new` or checkout.
+/// unbounded. Negative values are rejected by `PoolConfig::PoolConfig` or checkout.
 pub struct Timeouts {
   /// Maximum wait for a checkout slot before raising `PoolError::Timeout(Wait)`.
   wait_ms : Int?
@@ -113,7 +113,7 @@ pub struct Timeouts {
 ///
 /// This constructor stores the values as-is and does not validate them yet.
 /// `None` disables the corresponding timeout.
-pub fn Timeouts::new(
+pub fn Timeouts::Timeouts(
   wait_ms? : Int? = None,
   create_ms? : Int? = None,
   recycle_ms? : Int? = None,
@@ -192,9 +192,9 @@ pub struct PoolConfig {
 ///
 /// `max_size` must be at least `1`, and each configured timeout must be
 /// non-negative when present. On success this function has no side effects.
-pub fn PoolConfig::new(
+pub fn PoolConfig::PoolConfig(
   max_size : Int,
-  timeouts? : Timeouts = Timeouts::new(),
+  timeouts? : Timeouts = Timeouts::Timeouts(),
   queue_mode? : QueueMode = Fifo,
   recycling_method? : RecyclingMethod = Fast,
   statement_cache_capacity? : Int = 100,
@@ -266,7 +266,7 @@ pub(all) enum LoadBalanceHosts {
 /// connection targets.
 ///
 /// All fields are explicit. Validation is deferred until callers ask for
-/// normalized output via `Pool::new`, `get_pool_config`, or
+/// normalized output via `Pool::create`, `get_pool_config`, or
 /// `get_connection_targets`.
 pub struct Config {
   user : String
@@ -300,7 +300,7 @@ pub struct Config {
 /// then optional pool-specific multi-target settings can be added on top.
 /// Defaults keep the secure client path: port `5432`, `ssl_mode = VerifyFull`,
 /// and `dbname = user`.
-pub fn Config::new(
+pub fn Config::Config(
   host : String,
   hostaddr? : String,
   port? : Int = 5432,

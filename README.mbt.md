@@ -20,9 +20,9 @@ time. Streams and transactions retain the session until they finish. Use
 ordinary pool methods checkout and return sessions automatically, while
 `Pool::with_session` provides callback-scoped session affinity.
 
-In `0.1.0`, `Client::new(config)` returns a handle and a single-use
+In `0.1.0`, `Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await
-`client.ready()` to observe connection and authentication errors. `Pool::new`
+`client.ready()` to observe connection and authentication errors. `Pool::create`
 likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
 physical connection executors. Async database calls wait for readiness.
 
@@ -44,7 +44,7 @@ The client and pool now keep three explicit TLS modes:
 - `verify-full`: TLS with certificate-chain validation and hostname/IP validation
 
 `verify-full` is the default for both `client.Config::Config` and
-`pgpool.Config::new`. The removed `prefer` and `require` aliases are not part
+`pgpool.Config::Config`. The removed `prefer` and `require` aliases are not part
 of either config API.
 
 Supported libpq-style TLS parameters:
@@ -67,7 +67,7 @@ Migration summary:
 ```mbt check
 ///|
 fn _upgrade_examples() -> @pgpool.Config {
-  @pgpool.Config::new(
+  @pgpool.Config::Config(
     "db.example",
     hostaddr="10.0.0.15",
     user="moon",
@@ -76,7 +76,7 @@ fn _upgrade_examples() -> @pgpool.Config {
     ssl_mode=@client.SslMode::VerifyFull,
     ssl_root_cert="/etc/postgres/root.crt",
     application_name="my-service",
-    pool=@pgpool.PoolConfig::new(4),
+    pool=@pgpool.PoolConfig::PoolConfig(4),
   )
 }
 ```

@@ -24,15 +24,15 @@ async fn _pool_quick_start(
   password : String,
 ) -> Unit {
   @async.with_task_group(group => {
-    let config = Config::new(
+    let config = Config::Config(
       host,
       user~,
       dbname=database,
       password~,
       application_name="my-service",
-      pool=PoolConfig::new(4),
+      pool=PoolConfig::PoolConfig(4),
     )
-    let (pool, executor) = Pool::new(config)
+    let (pool, executor) = Pool::create(config)
     let task = group.spawn(no_wait=true, () => executor.run())
     pool.ready()
     let value : Int = pool
@@ -130,15 +130,15 @@ in the same task group; unexpected protocol errors still propagate.
 
 Ordinary query, execute, and streaming helpers use prepared statements cached
 automatically per physical connection. Configure the LRU capacity through
-`PoolConfig::new`:
+`PoolConfig::PoolConfig`:
 
 ```mbt check
 ///|
 fn _pool_config() -> PoolConfig raise {
-  PoolConfig::new(
+  PoolConfig::PoolConfig(
     8,
     statement_cache_capacity=100,
-    timeouts=Timeouts::new(wait_ms=Some(500)),
+    timeouts=Timeouts::Timeouts(wait_ms=Some(500)),
     queue_mode=QueueMode::fifo(),
     recycling_method=RecyclingMethod::verified(),
   )
@@ -235,7 +235,7 @@ physical executor and checkout waits for `client.ready()`.
 
 ## Lifecycle And Errors
 
-`Pool::new()` does not open a socket. Spawn the single-use `PoolExecutor::run()`
+`Pool::create()` does not open a socket. Spawn the single-use `PoolExecutor::run()`
 and await `pool.ready()` before use. A repeated `run()` raises
 `PoolError::ExecutorAlreadyStarted`. `Pool::close()` rejects new operations and
 closes idle connections. Active callbacks are allowed to finish; their physical

@@ -2,7 +2,7 @@
 
 ///|
 /// Construct a `RowStream` over one backend response queue.
-fn new_row_stream(
+fn RowStream::new(
   control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
@@ -27,7 +27,7 @@ fn new_row_stream(
 
 ///|
 /// Construct a `SimpleQueryStream` over one backend response queue.
-fn new_simple_query_stream(
+fn SimpleQueryStream::new(
   control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
@@ -46,10 +46,7 @@ fn new_simple_query_stream(
 
 ///|
 /// Build the deferred cleanup object for a temporary prepared statement.
-fn make_statement_cleanup(
-  context : OpContext,
-  name : Bytes,
-) -> StreamCleanup raise {
+fn StreamCleanup::new(context : OpContext, name : Bytes) -> StreamCleanup raise {
   { context, bytes: close_bytes(b'S', name[:]), done: false, }
 }
 

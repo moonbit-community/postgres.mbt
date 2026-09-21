@@ -1245,7 +1245,7 @@ async test "integration transaction options" {
       "create temp table moon_driver_tx_builder (id serial, name text)",
     )
     let tx = client.transaction(
-      options=@client.TransactionOptions::new(
+      options=@client.TransactionOptions::TransactionOptions(
         isolation_level="SERIALIZABLE",
         read_only=true,
         deferrable=true,

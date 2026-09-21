@@ -18,9 +18,9 @@ test "integration pool config constructors and normalization" {
   }
   assert_eq(sql, "reset all")
 
-  let pool_config = @pgpool.PoolConfig::new(
+  let pool_config = @pgpool.PoolConfig::PoolConfig(
     2,
-    timeouts=@pgpool.Timeouts::new(
+    timeouts=@pgpool.Timeouts::Timeouts(
       wait_ms=Some(10),
       create_ms=Some(20),
       recycle_ms=Some(30),
@@ -33,7 +33,7 @@ test "integration pool config constructors and normalization" {
   assert_eq(pool_config.statement_cache_capacity, 7)
   @debug.assert_eq(pool_config.timeouts.wait_ms, Some(10))
 
-  let config = @pgpool.Config::new(
+  let config = @pgpool.Config::Config(
     "one.db",
     hostaddrs=["10.0.0.1", "10.0.0.2"],
     ports=[1111, 2222],
@@ -60,25 +60,33 @@ test "integration pool config constructors and normalization" {
 ///|
 /// Invalid capacity, timeout, and TLS settings fail before a pool starts.
 test "integration pool config validation rejects invalid settings" {
-  let invalid_max_size = @test.expect_error(() => @pgpool.PoolConfig::new(0))
+  let invalid_max_size = @test.expect_error(() => {
+    @pgpool.PoolConfig::PoolConfig(0)
+  })
   guard invalid_max_size is @pgpool.PoolError::InvalidConfig(message) else {
     fail("expected invalid max size")
   }
   assert_eq(message, "pool max_size must be at least 1")
 
   let invalid_cache = @test.expect_error(() => {
-    @pgpool.PoolConfig::new(1, statement_cache_capacity=-1)
+    @pgpool.PoolConfig::PoolConfig(1, statement_cache_capacity=-1)
   })
   guard invalid_cache is @pgpool.PoolError::InvalidConfig(cache_message) else {
     fail("expected invalid cache capacity")
   }
   assert_eq(cache_message, "statement_cache_capacity must be non-negative")
 
-  let disabled_cache = @pgpool.PoolConfig::new(1, statement_cache_capacity=0)
+  let disabled_cache = @pgpool.PoolConfig::PoolConfig(
+    1,
+    statement_cache_capacity=0,
+  )
   assert_eq(disabled_cache.statement_cache_capacity, 0)
 
   let invalid_timeout = @test.expect_error(() => {
-    @pgpool.PoolConfig::new(1, timeouts=@pgpool.Timeouts::new(wait_ms=Some(-1)))
+    @pgpool.PoolConfig::PoolConfig(
+      1,
+      timeouts=@pgpool.Timeouts::Timeouts(wait_ms=Some(-1)),
+    )
   })
   guard invalid_timeout is @pgpool.PoolError::InvalidConfig(timeout_message) else {
     fail("expected invalid timeout")
@@ -86,14 +94,14 @@ test "integration pool config validation rejects invalid settings" {
   assert_eq(timeout_message, "pool wait_ms must be non-negative")
 
   let invalid_tls = @test.expect_error(() => {
-    @pgpool.Config::new(
+    @pgpool.Config::Config(
       "db.example",
       user="moon",
       dbname="moondb",
       ssl_mode=VerifyCa,
       ssl_root_cert="system",
       application_name="pool-system-root-extra",
-      pool=@pgpool.PoolConfig::new(1),
+      pool=@pgpool.PoolConfig::PoolConfig(1),
     ).get_connection_targets()
   })
   guard invalid_tls is @pgpool.ConfigError::InvalidConfig(tls_message) else {
@@ -109,7 +117,7 @@ async test "integration pool custom connector supports target failover" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let attempts : Array[Int] = []
-    let connector = @pgpool.Connector::new(target => {
+    let connector = @pgpool.Connector::Connector(target => {
       if attempts.length() == 0 {
         attempts.push(1)
         let bad_target = @client.Config::new_internal(
@@ -128,12 +136,12 @@ async test "integration pool custom connector supports target failover" {
           target.keepalives,
           target.keepalives_idle_s,
         )
-        @client.Client::new(bad_target)
+        @client.Client::create(bad_target)
       } else {
-        @client.Client::new(target)
+        @client.Client::create(target)
       }
     })
-    let declarative = @pgpool.Config::new(
+    let declarative = @pgpool.Config::Config(
       config.host,
       user=config.user,
       dbname=config.database,
@@ -142,11 +150,11 @@ async test "integration pool custom connector supports target failover" {
       application_name="moonbit-postgres-pool-failover",
       hosts=[config.host],
       ports=[config.port, config.port],
-      pool=@pgpool.PoolConfig::new(1),
+      pool=@pgpool.PoolConfig::PoolConfig(1),
     )
-    let (pool, executor) = @pgpool.Pool::new(
+    let (pool, executor) = @pgpool.Pool::create(
       declarative,
-      options=@pgpool.PoolOptions::new(connector~),
+      options=@pgpool.PoolOptions::PoolOptions(connector~),
     )
     group.spawn_bg(allow_failure=true, () => executor.run())
 

@@ -22,7 +22,7 @@ async test "integration transaction options savepoints and raw statement helpers
     )
 
     let tx = client.transaction(
-      options=@client.TransactionOptions::new(
+      options=@client.TransactionOptions::TransactionOptions(
         isolation_level="SERIALIZABLE",
         read_only=false,
         deferrable=false,

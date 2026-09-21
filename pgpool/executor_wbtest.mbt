@@ -1,13 +1,13 @@
 ///|
 fn executor_test_pool() -> (Pool, PoolExecutor) raise {
-  Pool::new(
-    Config::new(
+  Pool::create(
+    Config::Config(
       "127.0.0.1",
       user="moon",
       dbname="moondb",
       ssl_mode=Disable,
       application_name="pool-executor-wbtest",
-      pool=PoolConfig::new(1),
+      pool=PoolConfig::PoolConfig(1),
     ),
   )
 }
@@ -37,8 +37,8 @@ async test "pool executor waits for a borrowed connection after close" {
     let (pool, executor) = executor_test_pool()
     let task = group.spawn(no_wait=true, () => executor.run())
     pool.ready()
-    let (client, _unused) = @client.Client::new(pool.shared.targets[0])
-    let connection = make_connection_state(pool.shared, client)
+    let (client, _unused) = @client.Client::create(pool.shared.targets[0])
+    let connection = ConnectionState::new(pool.shared, client)
     pool.shared.size.val += 1
     pool.close()
     assert_true(pool.is_closed())
@@ -69,15 +69,15 @@ async test "borrowed session can finish after pool close before executor returns
       socket.write(b"Z\x00\x00\x00\x05I")
       assert_eq(socket.read_exactly(5), b"X\x00\x00\x00\x04")
     })
-    let (pool, executor) = Pool::new(
-      Config::new(
+    let (pool, executor) = Pool::create(
+      Config::Config(
         "127.0.0.1",
         port=server.addr.port(),
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-borrowed-close-wbtest",
-        pool=PoolConfig::new(1),
+        pool=PoolConfig::PoolConfig(1),
       ),
     )
     let task = group.spawn(no_wait=true, () => executor.run())
@@ -131,15 +131,15 @@ async test "unexpected physical driver failure fails the whole pool" {
       socket.write(b"R\x00\x00\x00\x08\x00\x00\x00\x00Z\x00\x00\x00\x05I")
       disconnect.get()
     })
-    let (pool, executor) = Pool::new(
-      Config::new(
+    let (pool, executor) = Pool::create(
+      Config::Config(
         "127.0.0.1",
         port=server.addr.port(),
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-fatal-wbtest",
-        pool=PoolConfig::new(1),
+        pool=PoolConfig::PoolConfig(1),
       ),
     )
     let task = group.spawn(allow_failure=true, () => executor.run())

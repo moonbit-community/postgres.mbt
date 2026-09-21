@@ -289,7 +289,7 @@ async test "integration pooled transaction options and savepoint" {
         .query_one("select sum(value)::int4 as value from moon_pool_savepoint")
         .get_name("value")
       },
-      options=@pgpool.TransactionOptions::new(
+      options=@pgpool.TransactionOptions::TransactionOptions(
         isolation_level=@pgpool.IsolationLevel::serializable(),
         read_only=false,
       ),
