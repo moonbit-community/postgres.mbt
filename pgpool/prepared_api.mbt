@@ -202,18 +202,6 @@ async fn evict_cached_statement_entry(
 }
 
 ///|
-/// Forget cache metadata after PostgreSQL already closed every statement.
-fn discard_connection_statement_cache_metadata(
-  connection : ConnectionState,
-) -> Unit {
-  while connection.statement_cache.length() > 0 {
-    ignore(
-      connection.statement_cache.remove(connection.statement_cache.length() - 1),
-    )
-  }
-}
-
-///|
 /// Fail when a scoped prepared statement is used after its callback finished.
 fn PreparedStatementState::assert_active(
   self : PreparedStatementState,
