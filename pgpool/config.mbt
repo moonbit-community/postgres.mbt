@@ -437,9 +437,9 @@ pub fn Config::get_pool_config(self : Config) -> PoolConfig raise {
 /// Expand declarative host settings into concrete single-target client configs.
 ///
 /// Each returned `@client.Config` describes exactly one target address and is
-/// ready to pass to the connector. This step broadcasts host and port arrays
-/// when needed and rejects incomplete or contradictory inputs before any
-/// network connection is opened.
+/// ready to pass to the connector. This step broadcasts single host, hostaddr,
+/// and port values when needed, requires multi-value arrays to have matching
+/// lengths, and validates every target before any network connection is opened.
 pub fn Config::get_connection_targets(
   self : Config,
 ) -> Array[@client.Config] raise {
@@ -454,34 +454,26 @@ pub fn Config::get_connection_targets(
 ///|
 /// Normalize explicit config fields into concrete target arrays.
 fn normalize_config(config : Config) -> NormalizedConfig raise {
-  let hosts : Array[String?] = []
+  let raw_hosts : Array[String?] = []
   match config.host {
-    Some(host) => hosts.push(Some(host))
+    Some(host) => raw_hosts.push(Some(host))
     None => ()
   }
   match config.hosts {
     Some(extra_hosts) =>
       for host in extra_hosts {
-        hosts.push(Some(host))
+        raw_hosts.push(Some(host))
       }
     None => ()
   }
-  let hostaddrs = choose_optional_string_array(
+  let raw_hostaddrs = choose_optional_string_array(
     config.hostaddr,
     config.hostaddrs,
   )
-  let ports = choose_int_array(config.port, config.ports)
-  let target_count = infer_target_count(hosts, hostaddrs, ports)
-  let has_tls_identity_target = has_non_empty_host(hosts) ||
-    hostaddrs.length() > 0
-  if hosts.length() == 0 {
-    if target_count == 1 && hostaddrs.length() == 0 {
-      hosts.push(Some("127.0.0.1"))
-    } else {
-      for _ in 0..<target_count {
-        hosts.push(None)
-      }
-    }
+  let raw_ports = choose_int_array(config.port, config.ports)
+  let target_count = infer_target_count(raw_hosts, raw_hostaddrs, raw_ports)
+  if raw_hosts.length() == 0 && target_count == 1 && raw_hostaddrs.length() == 0 {
+    raw_hosts.push(Some("127.0.0.1"))
   }
   let user = if config.user == "" {
     raise ConfigError::UsernameEmpty
@@ -495,11 +487,14 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
   }
   let ssl_mode = choose_ssl_mode(config.ssl_mode)
   let ssl_root_cert = config.ssl_root_cert
-  validate_tls_config(ssl_mode, ssl_root_cert, has_tls_identity_target)
+  let hosts = broadcast_hosts(raw_hosts, target_count)
+  let hostaddrs = broadcast_optional_strings(raw_hostaddrs, target_count)
+  let ports = broadcast_ints(raw_ports, target_count, 5432)
+  validate_connection_targets(hosts, hostaddrs, ports, ssl_mode, ssl_root_cert)
   {
     hosts,
-    hostaddrs: broadcast_optional_strings(hostaddrs, target_count),
-    ports: broadcast_ints(ports, target_count, 5432),
+    hostaddrs,
+    ports,
     user,
     password: config.password,
     dbname,
@@ -519,14 +514,31 @@ fn normalize_config(config : Config) -> NormalizedConfig raise {
 }
 
 ///|
-fn has_non_empty_host(hosts : Array[String?]) -> Bool {
-  for host in hosts {
-    match host {
-      Some(host) => if host != "" { return true }
-      None => ()
+/// Validate the address identity and port of every normalized target.
+fn validate_connection_targets(
+  hosts : Array[String?],
+  hostaddrs : Array[String?],
+  ports : Array[Int],
+  ssl_mode : @client.SslMode,
+  ssl_root_cert : String?,
+) -> Unit raise {
+  for index in 0..<ports.length() {
+    let port = ports[index]
+    if port < 1 || port > 65535 {
+      raise ConfigError::InvalidConfig("port must be between 1 and 65535")
     }
+    let has_tls_identity = is_non_empty_string(hosts[index]) ||
+      is_non_empty_string(hostaddrs[index])
+    validate_tls_config(ssl_mode, ssl_root_cert, has_tls_identity)
   }
-  false
+}
+
+///|
+fn is_non_empty_string(value : String?) -> Bool {
+  match value {
+    Some(value) => value != ""
+    None => false
+  }
 }
 
 ///|
@@ -572,6 +584,21 @@ fn infer_target_count(
   } else {
     count
   }
+}
+
+///|
+/// Broadcast hosts to the target count.
+fn broadcast_hosts(hosts : Array[String?], count : Int) -> Array[String?] raise {
+  if hosts.length() == 0 {
+    return Array::make(count, None)
+  }
+  if hosts.length() == 1 {
+    return Array::make(count, hosts[0])
+  }
+  if hosts.length() != count {
+    raise ConfigError::HostPortArityMismatch
+  }
+  hosts
 }
 
 ///|
