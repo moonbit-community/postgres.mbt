@@ -194,7 +194,7 @@ pub struct PoolConfig {
 /// non-negative when present. On success this function has no side effects.
 pub fn PoolConfig::PoolConfig(
   max_size : Int,
-  timeouts? : Timeouts = Timeouts::Timeouts(),
+  timeouts? : Timeouts = Timeouts(),
   queue_mode? : QueueMode = Fifo,
   recycling_method? : RecyclingMethod = Fast,
   statement_cache_capacity? : Int = 100,

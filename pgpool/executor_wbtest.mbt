@@ -1,13 +1,13 @@
 ///|
 fn executor_test_pool() -> (Pool, PoolExecutor) raise {
   Pool::create(
-    Config::Config(
+    Config(
       "127.0.0.1",
       user="moon",
       dbname="moondb",
       ssl_mode=Disable,
       application_name="pool-executor-wbtest",
-      pool=PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ),
   )
 }
@@ -70,14 +70,14 @@ async test "borrowed session can finish after pool close before executor returns
       assert_eq(socket.read_exactly(5), b"X\x00\x00\x00\x04")
     })
     let (pool, executor) = Pool::create(
-      Config::Config(
+      Config(
         "127.0.0.1",
         port=server.addr.port(),
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-borrowed-close-wbtest",
-        pool=PoolConfig::PoolConfig(1),
+        pool=PoolConfig(1),
       ),
     )
     let task = group.spawn(no_wait=true, () => executor.run())
@@ -132,14 +132,14 @@ async test "unexpected physical driver failure fails the whole pool" {
       disconnect.get()
     })
     let (pool, executor) = Pool::create(
-      Config::Config(
+      Config(
         "127.0.0.1",
         port=server.addr.port(),
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-fatal-wbtest",
-        pool=PoolConfig::PoolConfig(1),
+        pool=PoolConfig(1),
       ),
     )
     let task = group.spawn(allow_failure=true, () => executor.run())

@@ -26,7 +26,7 @@ pub fn TransactionOptions::TransactionOptions(
 /// `BEGIN` options.
 pub async fn Client::transaction(
   self : Client,
-  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
+  options? : TransactionOptions = TransactionOptions(),
 ) -> Transaction {
   let (context, permit) = self.begin_stream_operation()
   let started = @ref.new(false)
@@ -94,7 +94,7 @@ async fn OpContext::begin_transaction(
 pub async fn[T] Client::with_transaction(
   self : Client,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions::TransactionOptions(),
+  options? : TransactionOptions = TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer @async.protect_from_cancel(() => {

@@ -51,7 +51,7 @@ fn as_client_config(
   channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
-  @client.Config::Config(
+  Config(
     host,
     hostaddr?,
     user=config.user,
@@ -78,7 +78,7 @@ fn auth_client_config(
 ) -> @client.Config {
   match password {
     Some(password) =>
-      @client.Config::Config(
+      Config(
         config.host,
         user~,
         database=config.database,
@@ -89,7 +89,7 @@ fn auth_client_config(
         application_name~,
       )
     None =>
-      @client.Config::Config(
+      Config(
         config.host,
         user~,
         database=config.database,

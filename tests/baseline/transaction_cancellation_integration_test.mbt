@@ -59,7 +59,7 @@ async test "integration pool transaction cancellation releases lease" {
     let pool = make_pool(
       group,
       as_client_config(config, application_name="moonbit-pool-tx-cancel"),
-      @pgpool.PoolConfig::PoolConfig(1),
+      PoolConfig(1),
     )
     defer pool.close()
     pool.with_session(client => {
@@ -96,7 +96,7 @@ async test "integration pool nested transaction cancellation preserves outer wor
     let pool = make_pool(
       group,
       as_client_config(config, application_name="moonbit-pool-savepoint-cancel"),
-      @pgpool.PoolConfig::PoolConfig(1),
+      PoolConfig(1),
     )
     defer pool.close()
     pool.with_session(client => {

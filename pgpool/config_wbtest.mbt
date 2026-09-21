@@ -8,7 +8,7 @@ test "pool config new builds defaults and appended hosts" {
     hosts=["replica.db"],
     target_session_attrs=TargetSessionAttrs::read_write(),
     load_balance_hosts=Random,
-    pool=PoolConfig::PoolConfig(2),
+    pool=PoolConfig(2),
   )
   let targets = config.get_connection_targets()
   @debug.assert_eq(targets.length(), 2)
@@ -36,7 +36,7 @@ test "pool config broadcasts explicit ports" {
     port=7000,
     application_name="pool-explicit-port",
     hosts=["replica.example"],
-    pool=PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   let targets = config.get_connection_targets()
   @debug.assert_eq(targets.length(), 2)
@@ -57,7 +57,7 @@ test "pool config keeps explicit tls settings" {
     ssl_mode=VerifyCa,
     ssl_root_cert="/tmp/root.crt",
     application_name="pool-tls",
-    pool=PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   let target = config.get_connection_targets()[0]
   assert_true(target.ssl_mode == VerifyCa)
@@ -73,7 +73,7 @@ test "pool config broadcasts hostaddr to every host" {
     dbname="moondb",
     application_name="pool-hostaddr",
     hosts=["two.db"],
-    pool=PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   let targets = config.get_connection_targets()
   @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
@@ -88,7 +88,7 @@ test "pool config constructor still reports empty user name" {
       user="",
       dbname="moondb",
       application_name="pool-missing-user",
-      pool=PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ).get_connection_targets()
   })
   guard result is ConfigError::UsernameEmpty else {
@@ -104,7 +104,7 @@ test "pool config constructor still reports empty dbname" {
       user="moon",
       dbname="",
       application_name="pool-empty-dbname",
-      pool=PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ).get_connection_targets()
   })
   guard result is ConfigError::DbnameEmpty else {
@@ -120,7 +120,7 @@ test "pool config requires explicit host for verify_full" {
       user="moon",
       dbname="moondb",
       application_name="pool-verify-full-host",
-      pool=PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ).get_connection_targets()
   })
   guard result is ConfigError::InvalidConfig(message) else {
@@ -139,7 +139,7 @@ test "pool config accepts hostaddr identity when host is empty" {
     user="moon",
     dbname="moondb",
     application_name="pool-verify-full-hostaddr",
-    pool=PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   ).get_connection_targets()
   @debug.assert_eq(targets[0].host, "")
   @debug.assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
@@ -155,7 +155,7 @@ test "pool config rejects sslrootcert system without verify_full" {
       ssl_mode=VerifyCa,
       ssl_root_cert="system",
       application_name="pool-system-root",
-      pool=PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ).get_connection_targets()
   })
   guard result is ConfigError::InvalidConfig(message) else {
@@ -172,9 +172,9 @@ async test "pool new updates status and config without connecting" {
       user="moon",
       dbname="moondb",
       application_name="pool-new",
-      pool=PoolConfig::PoolConfig(
+      pool=PoolConfig(
         3,
-        timeouts=Timeouts::Timeouts(
+        timeouts=Timeouts(
           wait_ms=Some(11),
           create_ms=Some(22),
           recycle_ms=Some(33),
@@ -202,12 +202,12 @@ async test "pool new updates status and config without connecting" {
 async test "pool resize shrinks unopened checkout capacity" {
   @async.with_task_group(group => {
     let pool = start_test_pool(
-      Config::Config(
+      Config(
         "db.example",
         user="moon",
         dbname="moondb",
         application_name="pool-resize",
-        pool=PoolConfig::PoolConfig(3),
+        pool=PoolConfig(3),
       ),
       group,
     )
@@ -222,12 +222,12 @@ async test "pool resize shrinks unopened checkout capacity" {
 async test "pool resize debt prevents capacity from reappearing during expansion" {
   @async.with_task_group(group => {
     let pool = start_test_pool(
-      Config::Config(
+      Config(
         "db.example",
         user="moon",
         dbname="moondb",
         application_name="pool-resize-debt",
-        pool=PoolConfig::PoolConfig(3),
+        pool=PoolConfig(3),
       ),
       group,
     )
@@ -258,12 +258,12 @@ async test "pool resize debt prevents capacity from reappearing during expansion
 async test "pool expansion adds only capacity beyond resize debt" {
   @async.with_task_group(group => {
     let pool = start_test_pool(
-      Config::Config(
+      Config(
         "db.example",
         user="moon",
         dbname="moondb",
         application_name="pool-resize-expand-beyond-debt",
-        pool=PoolConfig::PoolConfig(3),
+        pool=PoolConfig(3),
       ),
       group,
     )

@@ -29,7 +29,7 @@ pub fn PoolOptions::PoolOptions(
 /// during checkout.
 pub fn Pool::create(
   config : Config,
-  options? : PoolOptions = PoolOptions::PoolOptions(),
+  options? : PoolOptions = PoolOptions(),
 ) -> (Pool, PoolExecutor) raise {
   let normalized = normalize_config(config)
   let pool_config = config.get_pool_config()

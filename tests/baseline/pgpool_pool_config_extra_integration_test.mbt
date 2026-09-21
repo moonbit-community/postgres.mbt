@@ -20,11 +20,7 @@ test "integration pool config constructors and normalization" {
 
   let pool_config = @pgpool.PoolConfig::PoolConfig(
     2,
-    timeouts=@pgpool.Timeouts::Timeouts(
-      wait_ms=Some(10),
-      create_ms=Some(20),
-      recycle_ms=Some(30),
-    ),
+    timeouts=Timeouts(wait_ms=Some(10), create_ms=Some(20), recycle_ms=Some(30)),
     queue_mode=@pgpool.QueueMode::lifo(),
     recycling_method=@pgpool.RecyclingMethod::verified(),
     statement_cache_capacity=7,
@@ -83,10 +79,7 @@ test "integration pool config validation rejects invalid settings" {
   assert_eq(disabled_cache.statement_cache_capacity, 0)
 
   let invalid_timeout = @test.expect_error(() => {
-    @pgpool.PoolConfig::PoolConfig(
-      1,
-      timeouts=@pgpool.Timeouts::Timeouts(wait_ms=Some(-1)),
-    )
+    @pgpool.PoolConfig::PoolConfig(1, timeouts=Timeouts(wait_ms=Some(-1)))
   })
   guard invalid_timeout is @pgpool.PoolError::InvalidConfig(timeout_message) else {
     fail("expected invalid timeout")
@@ -101,7 +94,7 @@ test "integration pool config validation rejects invalid settings" {
       ssl_mode=VerifyCa,
       ssl_root_cert="system",
       application_name="pool-system-root-extra",
-      pool=@pgpool.PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     ).get_connection_targets()
   })
   guard invalid_tls is @pgpool.ConfigError::InvalidConfig(tls_message) else {
@@ -150,11 +143,11 @@ async test "integration pool custom connector supports target failover" {
       application_name="moonbit-postgres-pool-failover",
       hosts=[config.host],
       ports=[config.port, config.port],
-      pool=@pgpool.PoolConfig::PoolConfig(1),
+      pool=PoolConfig(1),
     )
     let (pool, executor) = @pgpool.Pool::create(
       declarative,
-      options=@pgpool.PoolOptions::PoolOptions(connector~),
+      options=PoolOptions(connector~),
     )
     group.spawn_bg(allow_failure=true, () => executor.run())
 
