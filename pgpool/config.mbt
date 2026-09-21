@@ -157,6 +157,8 @@ pub fn RecyclingMethod::verified() -> RecyclingMethod {
 /// `deadpool-postgres`-style "clean" recycling. In practice this closes
 /// open portals/cursors, resets session settings, clears LISTEN state, releases
 /// advisory locks, and discards temporary objects before reuse.
+/// Prepared statements and their cached plans are preserved so the
+/// connection-local statement cache remains effective across checkouts.
 pub fn RecyclingMethod::clean() -> RecyclingMethod {
   Clean
 }
