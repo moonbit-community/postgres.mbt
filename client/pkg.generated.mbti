@@ -71,7 +71,14 @@ pub async fn Client::query_typed(Self, String, Array[Type], params? : Array[&ToS
 pub async fn Client::ready(Self) -> Unit
 pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
 pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
+pub async fn[T] Client::with_copy_in(Self, String, async (CopyInSink) -> T) -> T
+pub async fn[T] Client::with_copy_out(Self, String, async (CopyOutStream) -> T) -> T
+pub async fn[T] Client::with_portal_stream(Self, Portal, Int, async (RowStream) -> T) -> T
+pub async fn[T] Client::with_simple_query(Self, String, async (SimpleQueryStream) -> T) -> T
+pub async fn[T] Client::with_statement_stream(Self, Statement, params? : Array[&ToSql], async (RowStream) -> T) -> T
+pub async fn[T] Client::with_stream(Self, String, params? : Array[&ToSql], async (RowStream) -> T) -> T
 pub async fn[T] Client::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
+pub async fn[T] Client::with_typed_stream(Self, String, Array[Type], params? : Array[&ToSql], async (RowStream) -> T) -> T
 
 type ClientExecutor
 pub async fn ClientExecutor::run(Self) -> Unit
