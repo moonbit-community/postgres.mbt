@@ -92,10 +92,12 @@ async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
 }
 ```
 
-The callback commits on success and rolls back best-effort on error or task
-cancellation. Nested transactions use savepoints. Rollback cleanup is protected
-from cancellation, including the wait for in-flight operations. A captured
-`Transaction` is expired when its callback completes.
+On normal callback return, the helper commits only if the transaction is still
+open; an explicit commit or rollback prevents a second completion. If the
+callback raises or is cancelled, it rolls back best-effort when the transaction
+is still open. Nested transactions use savepoints. Rollback cleanup is
+protected from cancellation, including the wait for in-flight operations. A
+captured `Transaction` is expired when its callback completes.
 
 Cancellation received while SQL is waiting for a response propagates after
 protected protocol cleanup and before automatic commit. This includes nested

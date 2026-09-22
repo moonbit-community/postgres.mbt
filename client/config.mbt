@@ -52,11 +52,12 @@ pub(all) enum ChannelBinding {
 } derive(Debug, Eq)
 
 ///|
-/// Immutable configuration used by `connect` to establish a PostgreSQL session.
+/// Immutable configuration supplied to `Client::create`.
 ///
-/// The same value is also retained inside the client runtime so that later
-/// features, such as cancellation, can reopen a control connection with the
-/// exact same host and port.
+/// The returned `ClientExecutor::run` uses this value to establish a PostgreSQL
+/// session. The client runtime retains it so that later features, such as
+/// cancellation, can reopen a control connection with the exact same host and
+/// port.
 pub struct Config {
   /// Hostname used for TLS verification and default server-name handling.
   host : String
