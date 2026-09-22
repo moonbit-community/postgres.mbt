@@ -142,9 +142,11 @@ handle's `close` method would try to reacquire the outer client's permit.
 
 ## Transactions
 
-`with_transaction` is the preferred scoped API. It commits when the callback
-returns and rolls back best-effort when the callback raises or is cancelled.
-Rollback cleanup is protected from task cancellation:
+`with_transaction` is the preferred scoped API. When the callback returns
+normally, it commits only if the transaction is still open; an explicit
+`commit()` or `rollback()` prevents a second completion. When the callback
+raises or is cancelled, it rolls back best-effort if the transaction is still
+open. Rollback cleanup is protected from task cancellation:
 
 ```mbt check
 ///|
@@ -250,7 +252,12 @@ supported because its socket/TLS transport is unavailable.
 
 ## Errors
 
-Operations raise `ClientError`. Important variants include database errors,
-authentication/TLS failures, wrong-type decoding, row-count mismatches,
-connection closure, and protocol/I/O failures. A fatal driver error becomes the
-terminal result for the active request and all queued waiters.
+Client-defined failures use `ClientError`. Important variants include database
+errors, authentication/TLS failures, wrong-type decoding, row-count mismatches,
+connection closure, and protocol failures. Low-level transport and I/O failures
+are not wrapped in `ClientError`; they propagate as their original error values.
+
+A fatal driver error becomes the terminal result for the active request and
+requests already accepted by the submission queue. Calls still waiting at the
+operation gate have not submitted a request; after the driver stops, they
+observe `ClientError::Closed` instead.

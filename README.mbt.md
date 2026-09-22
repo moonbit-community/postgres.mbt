@@ -47,13 +47,15 @@ The client and pool now keep three explicit TLS modes:
 `pgpool.Config::Config`. The removed `prefer` and `require` aliases are not part
 of either config API.
 
-Supported libpq-style TLS parameters:
+`client.Config::Config` and `pgpool.Config::Config` expose TLS fields with
+libpq-equivalent semantics:
 
-- `sslmode`
-- `sslrootcert`
+- `ssl_mode`
+- `ssl_root_cert`
 
-`sslrootcert=system` uses the platform trust store and requires `verify-full`.
-Custom `sslrootcert` files are passed to `moonbitlang/async/tls` as PEM root
+`ssl_root_cert="system"` uses the platform trust store and requires
+`SslMode::VerifyFull`. Custom `ssl_root_cert` paths are passed to
+`moonbitlang/async/tls` as PEM root
 certificates.
 
 Migration summary:
@@ -88,7 +90,7 @@ References:
 - PostgreSQL `sslmode`:
   <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLMODE>
 - PostgreSQL certificate verification semantics:
-  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBQ-SSL-CERTIFICATES>
+  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-CERTIFICATES>
 - PostgreSQL TLS protection matrix:
   <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-PROTECTION>
 - PostgreSQL `sslrootcert`:
