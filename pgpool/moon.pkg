@@ -9,6 +9,10 @@ import {
 supported_targets = "native+wasm"
 
 import {
+  "moonbitlang/core/test",
+} for "test"
+
+import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbitlang/async/socket",
   "moonbitlang/core/debug",
