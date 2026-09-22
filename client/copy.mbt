@@ -5,6 +5,7 @@
 ///
 /// The SQL string is executed with the simple query protocol because PostgreSQL
 /// starts COPY mode directly from the statement text.
+/// Prefer `with_copy_out` for automatic cleanup on every callback exit.
 ///
 /// Warning: if you stop consuming the returned stream early and want to discard
 /// it, call `detach()` before dropping the handle. Otherwise later requests on
@@ -32,18 +33,29 @@ pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
 ///
 /// The returned `CopyInSink` can be fed from another task while the connection
 /// loop relays backend progress and completion messages.
+/// Prefer `with_copy_in` to abort unfinished input on every callback exit.
 pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
-  let (_context, permit) = self.begin_stream_operation()
+  let (context, permit) = self.begin_stream_operation()
+  context.copy_in(sql, permit)
+}
+
+///|
+async fn OpContext::copy_in(
+  self : OpContext,
+  sql : String,
+  permit : OperationPermit,
+) -> CopyInSink {
+  let client = self.client
   let input = @async.Queue(kind=Blocking(8))
   let responses = {
     errdefer permit.release()
-    self.send_request_with_copy(simple_query_bytes(sql), input)
+    client.send_request_with_copy(simple_query_bytes(sql), input)
   }
   let terminal = @ref.new(false)
   errdefer (if terminal.val {
     permit.release()
   } else {
-    start_abandoned_copy_in(self.shared.control, input, responses, permit)
+    start_abandoned_copy_in(client.shared.control, input, responses, permit)
   })
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -52,10 +64,11 @@ pub async fn Client::copy_in(self : Client, sql : String) -> CopyInSink {
         // The producer side queue is usable only after PostgreSQL explicitly
         // switches this request into COPY FROM STDIN mode.
         return {
-          control: self.shared.control,
+          control: client.shared.control,
           input,
           responses,
           finished: @ref.new(false),
+          abandoned_done: @ref.new(None),
           permit,
         }
       ErrorResponse(body) => {
@@ -104,6 +117,7 @@ async fn CopyInSink::enqueue_action(
       self.input,
       self.responses,
       self.permit,
+      completion=self.abandoned_done,
     )
   })
   self.input.put(action) catch {
@@ -146,6 +160,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
       self.input,
       self.responses,
       self.permit,
+      completion=self.abandoned_done,
     )
   })
   self.enqueue_action(Finish)
@@ -178,6 +193,7 @@ pub async fn CopyInSink::abort(
       self.input,
       self.responses,
       self.permit,
+      completion=self.abandoned_done,
     )
   })
   try {
@@ -211,6 +227,7 @@ fn start_abandoned_copy_in(
   input : @async.Queue[CopyInAction],
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit,
+  completion? : @ref.Ref[Completion?],
 ) -> Unit {
   let task = spawn_detached_drain(control, () => {
     defer permit.release()
@@ -224,6 +241,9 @@ fn start_abandoned_copy_in(
       }
     }
   })
+  if completion is Some(completion) {
+    completion.val = task
+  }
   if task is None {
     permit.release()
   }

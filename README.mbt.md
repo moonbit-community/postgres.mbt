@@ -20,6 +20,12 @@ time. Streams and transactions retain the session until they finish. Use
 ordinary pool methods checkout and return sessions automatically, while
 `Pool::with_session` provides callback-scoped session affinity.
 
+For client streams and COPY, prefer `Client::with_stream`,
+`with_typed_stream`, `with_statement_stream`, `with_portal_stream`,
+`with_simple_query`, `with_copy_in`, and `with_copy_out`. These scopes keep the
+callback cancellable and wait for cleanup on every exit. COPY IN commits only
+when the callback explicitly calls `finish()`; otherwise it is aborted.
+
 In `0.1.0`, `Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await
 `client.ready()` to observe connection and authentication errors. `Pool::create`

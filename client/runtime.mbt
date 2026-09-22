@@ -243,6 +243,7 @@ struct CopyInSink {
   input : @async.Queue[CopyInAction]
   responses : @async.Queue[@backend.Message]
   finished : @ref.Ref[Bool]
+  abandoned_done : @ref.Ref[Completion?]
   permit : OperationPermit
 }
 

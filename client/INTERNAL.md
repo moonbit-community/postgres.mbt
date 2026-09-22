@@ -92,7 +92,24 @@ Row, simple-query, and COPY OUT streams own the operation permit.
 Cleanup is idempotent. A consumer cancellation must not leak the permit or
 allow the next operation to start before PostgreSQL reaches a safe boundary.
 
-Stream factories check pending cancellation after acquiring their permit and
+The seven `Client::with_*` stream/COPY APIs use `with_scoped_resource`. Readiness
+and permit acquisition remain cancellable. Only protocol startup and finalizers
+are protected; the business callback runs outside cancellation protection.
+Immediately after acquisition, an `errdefer` owns best-effort cleanup. Pending
+cancellation is checked before and after the callback and after finalization.
+Output scopes finish their streams; COPY IN aborts unless explicitly finished.
+COPY IN records any abandoned drain's completion so its scope can also wait for
+cleanup triggered by cancellation in `send`, `finish`, or `abort`. Callback
+errors survive cleanup errors. Statement and Portal scopes own only execution
+streams, never the parent handles.
+
+Temporary inferred/typed queries install statement cleanup immediately after
+`read_prepare_response` succeeds. Close bytes and execution parameters are built
+before submitting Execute; the non-failing RowStream constructor then takes
+ownership. Encoding/submission failures close under the existing permit and
+preserve the original error.
+
+Raw stream factories check pending cancellation after acquiring their permit and
 before starting protocol work. Factories that protect an asynchronous prepare
 or COPY startup check again after leaving protection, inside the same `errdefer`
 scope. Before a stream exists, that scope releases the permit on failure. Once

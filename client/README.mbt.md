@@ -71,9 +71,14 @@ the server early and responses are never routed between several in-flight
 requests. Waiting is cancellation-safe: cancelling a waiter does not consume
 the permit or disturb the active operation.
 
-An unfinished stream intentionally blocks later work on that client. Call
-`finish()` when stopping early. `detach()` transfers draining to the background;
-calling `finish()` afterwards waits for that drain to complete.
+An unfinished stream intentionally blocks later work on that client. Prefer
+the callback scopes below: they finish the stream even on early return, error,
+or cancellation. Inside a callback, finish the stream before starting another
+operation on the same client. Use stream handles only within their scope.
+
+For manually managed streams, call `finish()` when stopping early. `detach()`
+transfers draining to the background; calling `finish()` afterwards waits for
+that drain to complete.
 
 If the connection closes or is aborted during a detached drain, the drain saves
 `ClientError::Closed` for an explicit `finish()` call. Database errors also
@@ -89,12 +94,15 @@ Choose the smallest result shape that matches the query:
 | --- | --- |
 | Exactly one row | `Client::query_one` |
 | Zero or one row | `Client::query_opt` |
-| Collect every row | `Client::query(...).collect()` |
-| Incremental rows | `Client::query` |
+| Collect every row | `Client::with_stream(sql, stream => stream.collect())` |
+| Incremental rows | `Client::with_stream` |
+| Explicit parameter types | `Client::with_typed_stream` |
+| Execute a prepared statement | `Client::with_statement_stream` |
+| Fetch a portal window | `Client::with_portal_stream` |
 | Affected row count | `Client::execute` |
 | SQL batch without parameters | `Client::batch_execute` |
-| Text/simple protocol frames | `Client::simple_query` |
-| Bulk import/export | `Client::copy_in`, `Client::copy_out` |
+| Text/simple protocol frames | `Client::with_simple_query` |
+| Bulk import/export | `Client::with_copy_in`, `Client::with_copy_out` |
 
 `simple_query`, `query_statement`, and `query_portal` are asynchronous because
 they must wait for the session's operation permit before returning a stream.
@@ -116,6 +124,29 @@ async fn _query_example(client : @client.Client) -> Int {
 `query_typed` supplies PostgreSQL parameter types explicitly. The former
 `query_typed_raw` compatibility alias has been removed.
 
+Each scope returns the callback's result. Row, simple-query, and COPY OUT scopes
+call `finish()` under cancellation protection after the callback exits. A
+successful callback is followed by any cleanup error; when the callback raises
+or is cancelled, best-effort cleanup preserves that original cause.
+
+```mbt check
+///|
+async fn _first_value(client : @client.Client) -> Int? {
+  client.with_stream("select generate_series(1, 100) as value", stream => {
+    match stream.next() {
+      Some(row) => Some(row.get_name("value"))
+      None => None
+    }
+  })
+}
+```
+
+Returning after one row still drains the remaining results and closes the
+temporary statement before the scope returns. If parameter count, type, or
+encoding validation fails after preparation, the temporary statement is closed
+under the same operation permit before the original error is returned; no
+Execute request is submitted.
+
 ## Prepared Statements And Portals
 
 Use `prepare` when a named server-side statement should be reused:
@@ -124,17 +155,27 @@ Use `prepare` when a named server-side statement should be reused:
 ///|
 async fn _prepared_example(client : @client.Client) -> Int {
   let statement = client.prepare("select $1::int4 as value")
+  errdefer @async.protect_from_cancel(() => {
+    let _ = statement.close() catch { _ => () }
+  })
   let value = 7
-  let stream = client.query_statement(statement, params=[value as &ToSql])
-  let rows = stream.collect()
+  let result = client.with_statement_stream(
+    statement,
+    params=[value as &ToSql],
+    stream => {
+      let result : Int = stream.next().unwrap().get_name("value")
+      result
+    },
+  )
   statement.close()
-  rows[0].get_name("value")
+  result
 }
 ```
 
-`bind` and `query_portal` expose explicit fetch windows for advanced consumers.
-As with every stream, finish or drain the portal stream before issuing unrelated
-work on the same client.
+`with_statement_stream` and `with_portal_stream` manage only the execution
+stream. They never close the caller's Statement or Portal. `bind` creates a
+portal, and `with_portal_stream(portal, max_rows, f)` scopes one fetch window;
+the caller remains responsible for closing its resources in the right context.
 
 When a statement or portal is owned by an active transaction, close it through
 `Transaction::close_statement` or `Transaction::close_portal`. Calling the raw
@@ -164,6 +205,25 @@ calls queued through the outer `Client` run only after it ends. Nested
 transactions use PostgreSQL savepoints and stay inside the same operation.
 
 ## COPY And Streams
+
+Prefer `with_copy_in` and `with_copy_out` for bulk transfer. COPY IN requires an
+explicit `sink.finish()` inside the callback to commit the COPY. Returning
+without finishing, throwing, or being cancelled aborts unfinished COPY input
+and waits for cleanup. A completed COPY is not undone by a later callback error.
+
+```mbt check
+///|
+async fn _copy_rows(client : @client.Client) -> Int {
+  client.with_copy_in("copy events(value) from stdin", sink => {
+    sink.send(b"first\nsecond\n")
+    sink.finish()
+  })
+}
+```
+
+The raw APIs (`query`, `query_typed`, `query_statement`, `query_portal`,
+`simple_query`, `copy_in`, and `copy_out`) remain available when the caller needs
+to transfer ownership or control draining explicitly:
 
 - `RowStream`, `SimpleQueryStream`, and `CopyOutStream` expose `next`,
   `collect`, `finish`, and `detach` as appropriate.
@@ -208,6 +268,19 @@ a safe boundary. `execute` drains its results before closing its temporary
 statement; `execute_raw` drains results while leaving the caller's statement
 open. This can wait for the current SQL command to finish.
 
+The seven stream/COPY scopes keep the business callback cancellable, including
+waits on user queues or other I/O. Waiting for the client's permit is also
+cancellable. Protocol startup is protected until a handle has an owner; cleanup
+is protected until `ReadyForQuery` and any temporary-statement Close complete.
+Pending cancellation is checked before entering the callback, after it returns,
+and after protected cleanup. Scopes also wait for drains already started by
+stream or sink methods interrupted inside the callback.
+
+Scopes do not automatically send PostgreSQL `CancelRequest`. Cancellation can
+therefore wait for the current SQL request to finish and drain. Use a raw
+stream's `detach()` when the caller needs to return before draining completes,
+or `Client::abort()` when the physical connection may be discarded.
+
 Pending cancellation is checked before starting a new operation and after its
 outermost cancellation protection ends. Transaction callbacks check before
 automatic commit, so cancellation received during SQL triggers protected
@@ -216,7 +289,7 @@ handle, completed `BEGIN` or `SAVEPOINT` work is rolled back before releasing
 ownership. Once `COMMIT` has
 been sent, its server result is processed before cancellation propagates.
 
-If cancellation interrupts stream creation, the client releases its permit or
+If cancellation interrupts raw stream creation, the client releases its permit or
 hands the created stream to a background drain. An explicit caller protection
 defers cancellation to the caller's boundary. Task cancellation does not
 automatically send PostgreSQL cancel requests or retry operations.

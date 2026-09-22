@@ -5,6 +5,7 @@
 ///
 /// Use this when you need PostgreSQL's statement batching semantics or when you
 /// want to inspect raw text-format result frames through `SimpleQueryStream`.
+/// Prefer `with_simple_query` for automatic cleanup on every callback exit.
 ///
 /// Warning: if you stop consuming the returned stream early and want to discard
 /// it, call `detach()` before dropping the handle. Otherwise later requests on
@@ -102,6 +103,7 @@ async fn OpContext::close_statement(
 /// can fetch resolved parameter and column metadata before execution. The
 /// temporary statement is closed automatically once the returned stream is fully
 /// drained or `finish` is called.
+/// Prefer `with_stream` to also cover early return, callback errors, and cancellation.
 ///
 /// Warning: if you stop consuming the returned stream early and want to discard
 /// it, call `detach()` before dropping the handle. Otherwise later requests on
@@ -142,18 +144,20 @@ async fn OpContext::query(
     prepare_bytes(name[:], sql, []),
   )
   let (param_types, columns) = read_prepare_response(self, prepare_responses)
-  guard param_types.length() == params.length() else {
-    // Preparation already created server-side state, so close it even though
-    // execution never begins.
+  // Own the server-side statement immediately after preparation succeeds.
+  // All fallible encoding happens before submission; RowStream::new cannot
+  // fail, so successful submission transfers cleanup without another gap.
+  errdefer @async.protect_from_cancel(() => {
     let _ = close_temporary_statement(self, name) catch { _ => () }
+  })
+  let cleanup = StreamCleanup::new(self, name)
+  guard param_types.length() == params.length() else {
     raise ClientError::Encode(
       "parameter count mismatch: expected \{param_types.length().to_string()}, got \{params.length().to_string()}",
     )
   }
-  let responses = self.client.send_request(
-    Messages,
-    execute_statement_bytes(name[:], param_types, params),
-  )
+  let bytes = execute_statement_bytes(name[:], param_types, params)
+  let responses = self.client.send_request(Messages, bytes)
   // Cleanup is deferred onto the returned stream because closing the temporary
   // statement early would interleave a second request before this one finishes.
   RowStream::new(
@@ -161,7 +165,7 @@ async fn OpContext::query(
     responses,
     permit,
     initial_columns=columns,
-    cleanup=Some(StreamCleanup::new(self, name)),
+    cleanup=Some(cleanup),
   )
 }
 
@@ -233,16 +237,18 @@ async fn OpContext::query_typed(
     prepare_bytes(name[:], sql, param_types),
   )
   let (_, columns) = read_prepare_response(self, prepare_responses)
-  let responses = self.client.send_request(
-    Messages,
-    execute_statement_bytes(name[:], param_types, params),
-  )
+  errdefer @async.protect_from_cancel(() => {
+    let _ = close_temporary_statement(self, name) catch { _ => () }
+  })
+  let cleanup = StreamCleanup::new(self, name)
+  let bytes = execute_statement_bytes(name[:], param_types, params)
+  let responses = self.client.send_request(Messages, bytes)
   RowStream::new(
     self.client.shared.control,
     responses,
     permit,
     initial_columns=columns,
-    cleanup=Some(StreamCleanup::new(self, name)),
+    cleanup=Some(cleanup),
   )
 }
 
