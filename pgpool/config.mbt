@@ -187,19 +187,22 @@ pub struct PoolConfig {
   ///
   /// `0` disables caching.
   statement_cache_capacity : Int
+  /// Maximum asynchronous messages retained across physical connections.
+  async_message_capacity : Int
 } derive(Eq, Debug)
 
 ///|
 /// Construct and validate one pool configuration.
 ///
-/// `max_size` must be at least `1`, and each configured timeout must be
-/// non-negative when present. On success this function has no side effects.
+/// `max_size` and `async_message_capacity` must be positive. Each configured
+/// timeout must be non-negative when present. On success this has no side effects.
 pub fn PoolConfig::PoolConfig(
   max_size : Int,
   timeouts? : Timeouts = Timeouts(),
   queue_mode? : QueueMode = Fifo,
   recycling_method? : RecyclingMethod = Fast,
   statement_cache_capacity? : Int = 100,
+  async_message_capacity? : Int = 256,
 ) -> PoolConfig raise {
   validate_pool_config({
     max_size,
@@ -207,6 +210,7 @@ pub fn PoolConfig::PoolConfig(
     queue_mode,
     recycling_method,
     statement_cache_capacity,
+    async_message_capacity,
   })
   {
     max_size,
@@ -214,6 +218,7 @@ pub fn PoolConfig::PoolConfig(
     queue_mode,
     recycling_method,
     statement_cache_capacity,
+    async_message_capacity,
   }
 }
 
@@ -374,6 +379,8 @@ pub suberror PoolError {
   ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
+  /// A lifecycle hook returned with an open transaction; the connection was discarded.
+  HookLeftOpenTransaction
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
 
@@ -387,6 +394,9 @@ fn validate_pool_config(config : PoolConfig) -> Unit raise {
     raise PoolError::InvalidConfig(
       "statement_cache_capacity must be non-negative",
     )
+  }
+  if config.async_message_capacity < 1 {
+    raise PoolError::InvalidConfig("async_message_capacity must be positive")
   }
   validate_timeout("wait_ms", config.timeouts.wait_ms)
   validate_timeout("create_ms", config.timeouts.create_ms)

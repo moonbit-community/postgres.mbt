@@ -3,13 +3,38 @@
 ///|
 /// Construct a client handle and its single-use executor without network I/O.
 /// Spawn `executor.run()` and await `client.ready()` before reading startup data.
+/// The asynchronous message buffer holds 256 entries by default.
 pub fn Client::create(config : Config) -> (Client, ClientExecutor) {
+  Client::create_with_capacity_unchecked(config, 256)
+}
+
+///|
+/// Create a client with a bounded asynchronous message buffer.
+/// The oldest message is discarded when the buffer is full.
+pub fn Client::create_with_async_message_capacity(
+  config : Config,
+  capacity : Int,
+) -> (Client, ClientExecutor) raise {
+  if capacity < 1 {
+    raise ClientError::InvalidConfig("async message capacity must be positive")
+  }
+  Client::create_with_capacity_unchecked(config, capacity)
+}
+
+///|
+fn Client::create_with_capacity_unchecked(
+  config : Config,
+  capacity : Int,
+) -> (Client, ClientExecutor) {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
   let shared = {
     config,
     requests: Queue(kind=Unbounded),
-    async_messages: Queue(kind=Unbounded),
+    async_messages: Queue(kind=Blocking(capacity)),
+    dropped_async_messages: @ref.new(0L),
+    async_message_handler: @ref.new(None),
+    root_transaction_occupancy: @ref.new(0),
     control: DrainControl::new(),
     ready: Completion::new(),
     done: Completion::new(),
@@ -29,6 +54,27 @@ pub fn Client::create(config : Config) -> (Client, ClientExecutor) {
     next_id: @ref.new(0),
   }
   ({ shared, }, { shared, })
+}
+
+///|
+/// Number of asynchronous messages discarded from this client's own buffer.
+pub fn Client::dropped_async_messages(self : Client) -> Int64 {
+  self.shared.dropped_async_messages.val
+}
+
+///|
+/// Route asynchronous messages to a connection owner's buffer before `run`.
+/// This low-level entry is intended for pool connectors.
+pub fn Client::install_async_message_handler(
+  self : Client,
+  handler : (AsyncMessage) -> Unit,
+) -> Unit raise {
+  if self.shared.started.val || self.shared.async_message_handler.val is Some(_) {
+    raise ClientError::Protocol(
+      "async message handler must be installed before executor start",
+    )
+  }
+  self.shared.async_message_handler.val = Some(handler)
 }
 
 ///|

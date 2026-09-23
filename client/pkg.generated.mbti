@@ -17,6 +17,7 @@ pub suberror ClientError {
   ExecutorAlreadyStarted
   Closed(String)
   Protocol(String)
+  InvalidConfig(String)
   Ssl(String)
   Encode(String)
   Decode(String)
@@ -55,8 +56,11 @@ pub async fn Client::close(Self) -> Unit
 pub async fn Client::copy_in(Self, String) -> CopyInSink
 pub async fn Client::copy_out(Self, String) -> CopyOutStream
 pub fn Client::create(Config) -> (Self, ClientExecutor)
+pub fn Client::create_with_async_message_capacity(Config, Int) -> (Self, ClientExecutor) raise
+pub fn Client::dropped_async_messages(Self) -> Int64
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub fn Client::install_async_message_handler(Self, (AsyncMessage) -> Unit) -> Unit raise
 pub fn Client::is_closed(Self) -> Bool
 pub fn Client::is_transaction_idle(Self) -> Bool
 pub async fn Client::next_message(Self) -> AsyncMessage?
@@ -73,6 +77,8 @@ pub async fn Client::simple_query(Self, String) -> SimpleQueryStream
 pub async fn Client::transaction(Self, options? : TransactionOptions) -> Transaction
 pub async fn[T] Client::with_copy_in(Self, String, async (CopyInSink) -> T) -> T
 pub async fn[T] Client::with_copy_out(Self, String, async (CopyOutStream) -> T) -> T
+pub async fn[T] Client::with_prepared(Self, String, async (ScopedStatement) -> T) -> T
+pub async fn[T] Client::with_prepared_typed(Self, String, Array[Type], async (ScopedStatement) -> T) -> T
 pub async fn[T] Client::with_simple_query(Self, String, async (SimpleQueryStream) -> T) -> T
 pub async fn[T] Client::with_statement_stream(Self, Statement, params? : Array[&ToSql], async (RowStream) -> T) -> T
 pub async fn[T] Client::with_stream(Self, String, params? : Array[&ToSql], async (RowStream) -> T) -> T
@@ -192,6 +198,22 @@ pub async fn RowStream::next(Self) -> Row?
 pub async fn RowStream::one(Self) -> Row
 pub async fn RowStream::opt(Self) -> Row?
 
+pub struct ScopedPortal {
+  columns : Array[Column]
+  // private fields
+}
+pub async fn ScopedPortal::execute(Self) -> Int
+pub async fn[T] ScopedPortal::with_stream(Self, Int, async (RowStream) -> T) -> T
+
+pub struct ScopedStatement {
+  params : Array[Type]
+  columns : Array[Column]
+  // private fields
+}
+pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> Int
+pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
+pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
+
 pub enum SimpleQueryMessage {
   RowDescription(Array[String])
   Row(SimpleQueryRow)
@@ -242,7 +264,10 @@ pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSq
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
+pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
 pub async fn[T] Transaction::with_portal_stream(Self, Portal, Int, async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_prepared(Self, String, async (ScopedStatement) -> T) -> T
+pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[Type], async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T
 pub async fn[T] Transaction::with_statement_stream(Self, Statement, params? : Array[&ToSql], async (RowStream) -> T) -> T
 pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&ToSql], async (RowStream) -> T) -> T

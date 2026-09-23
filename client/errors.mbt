@@ -50,10 +50,12 @@ pub suberror ClientError {
   NotReady
   /// `ClientExecutor::run` was called more than once.
   ExecutorAlreadyStarted
-  /// The client, statement, portal, or transaction is already closed.
+  /// The client, statement, portal, or transaction is closed or its scope expired.
   Closed(String)
   /// A server reply violated driver expectations.
   Protocol(String)
+  /// A client creation option is invalid.
+  InvalidConfig(String)
   /// TLS negotiation or handshake failed.
   Ssl(String)
   /// Query parameter encoding failed.

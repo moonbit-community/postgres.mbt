@@ -21,6 +21,7 @@ pub suberror PoolError {
   ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
+  HookLeftOpenTransaction
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
 
@@ -88,8 +89,10 @@ pub async fn Pool::check_connection(Self) -> Unit
 pub fn Pool::close(Self) -> Unit
 pub fn Pool::config(Self) -> PoolConfig
 pub fn Pool::create(Config, options? : PoolOptions) -> (Self, PoolExecutor) raise
+pub fn Pool::dropped_async_messages(Self) -> Int64
 pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
 pub fn Pool::is_closed(Self) -> Bool
+pub async fn Pool::next_message(Self) -> PoolAsyncMessage?
 pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
@@ -102,25 +105,34 @@ pub async fn[T] Pool::with_session(Self, async (Session) -> T) -> T
 pub async fn[T] Pool::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 pub impl GenericClient for Pool
 
+pub struct PoolAsyncMessage {
+  connection_id : Int
+  message : @client.AsyncMessage
+} derive(Eq, @debug.Debug)
+pub fn PoolAsyncMessage::equal(Self, Self) -> Bool
+pub fn PoolAsyncMessage::not_equal(Self, Self) -> Bool
+pub fn PoolAsyncMessage::to_repr(Self) -> @debug.Repr
+
 pub struct PoolConfig {
   max_size : Int
   timeouts : Timeouts
   queue_mode : QueueMode
   recycling_method : RecyclingMethod
   statement_cache_capacity : Int
+  async_message_capacity : Int
 } derive(Eq, @debug.Debug)
-pub fn PoolConfig::PoolConfig(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int) -> Self raise
+pub fn PoolConfig::PoolConfig(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int, async_message_capacity? : Int) -> Self raise
 
 type PoolExecutor
 pub async fn PoolExecutor::run(Self) -> Unit
 
 pub struct PoolOptions {
   connector : Connector?
-  post_create : (async (@client.Client) -> Unit)?
-  pre_recycle : (async (@client.Client) -> Unit)?
-  post_recycle : (async (@client.Client) -> Unit)?
+  post_create : (async (Operation) -> Unit)?
+  pre_recycle : (async (Operation) -> Unit)?
+  post_recycle : (async (Operation) -> Unit)?
 }
-pub fn PoolOptions::PoolOptions(connector? : Connector, post_create? : async (@client.Client) -> Unit, pre_recycle? : async (@client.Client) -> Unit, post_recycle? : async (@client.Client) -> Unit) -> Self
+pub fn PoolOptions::PoolOptions(connector? : Connector, post_create? : async (Operation) -> Unit, pre_recycle? : async (Operation) -> Unit, post_recycle? : async (Operation) -> Unit) -> Self
 
 pub struct PreparedStatement {
   params : Array[@client.Type]

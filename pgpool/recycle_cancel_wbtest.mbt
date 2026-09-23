@@ -41,7 +41,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     let hook_gate : @async.Queue[Unit] = Queue(kind=Unbounded)
     defer hook_gate.close()
     let mut suspend_hook = true
-    async fn hook(_client : @client.Client) {
+    async fn hook(_operation : Operation) {
       if suspend_hook {
         suspend_hook = false
         entered.put(())
