@@ -178,6 +178,19 @@ pub fn Client::is_closed(self : Client) -> Bool {
 }
 
 ///|
+/// Return whether the latest `ReadyForQuery` reported an idle transaction.
+///
+/// This is a snapshot of the most recent protocol response, not a live server
+/// check. It returns `false` before successful startup and after the client
+/// closes, even though the initial stored status is `I`.
+pub fn Client::is_transaction_idle(self : Client) -> Bool {
+  self.shared.ready.done.val &&
+  self.shared.ready.error.val is None &&
+  !self.shared.closed.val &&
+  self.shared.transaction_status.val == b'I'
+}
+
+///|
 /// Gracefully shut down the client runtime.
 ///
 /// Close is an operation barrier: it waits behind work already accepted by the

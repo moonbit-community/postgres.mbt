@@ -54,6 +54,11 @@ every teardown callback has already completed. It therefore returns `true`
 immediately after `abort()`; `close()` remains the API to await graceful
 PostgreSQL shutdown and completed transport cleanup.
 
+`Client::is_transaction_idle()` returns `true` only after successful startup,
+while the client remains open, and when the most recent `ReadyForQuery` status
+was `I`. It is a snapshot of the last protocol response, not a live server
+check. It returns `false` for active (`T`) or failed (`E`) transactions.
+
 ## Execution Model
 
 A physical PostgreSQL session has one protocol timeline. The client therefore

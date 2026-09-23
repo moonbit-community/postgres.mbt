@@ -99,6 +99,123 @@ async test "integration pool with_session keeps affinity" {
 }
 
 ///|
+/// A bare BEGIN must not let a Fast pool hand an open transaction to another
+/// borrower. Releasing the lease restores the single slot for a new backend.
+async test "integration pool Fast retires an active transaction on return" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let pool = make_pool(
+      group,
+      as_client_config(config, application_name="moonbit-postgres-pool-open-tx"),
+      PoolConfig(1),
+    )
+
+    let first_pid : Int = pool.with_session(session => {
+      let pid : Int = session
+        .query_one("select pg_backend_pid()::int4 as pid")
+        .get_name("pid")
+      session.batch_execute("BEGIN")
+      pid
+    })
+    assert_eq(pool.status().size, 0)
+    assert_eq(pool.status().available, 0)
+
+    let replacement = pool.query_one(
+      "select pg_backend_pid()::int4 as pid, 7::int4 as value",
+    )
+    let replacement_pid : Int = replacement.get_name("pid")
+    let value : Int = replacement.get_name("value")
+    assert_true(first_pid != replacement_pid)
+    assert_eq(value, 7)
+    assert_eq(pool.status().size, 1)
+    assert_eq(pool.status().available, 1)
+    pool.close()
+  })
+}
+
+///|
+/// A failed statement inside BEGIN leaves PostgreSQL in E until rollback.
+/// The next borrower must get a working new physical connection.
+async test "integration pool Fast retires a failed transaction on return" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let pool = make_pool(
+      group,
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-pool-failed-tx",
+      ),
+      PoolConfig(1),
+    )
+
+    let first_pid : Int = pool.with_session(session => {
+      let pid : Int = session
+        .query_one("select pg_backend_pid()::int4 as pid")
+        .get_name("pid")
+      session.batch_execute("BEGIN")
+      ignore(
+        expect_database_error(
+          expect_error_async(() => session.batch_execute("select 1 / 0")),
+        ),
+      )
+      pid
+    })
+    assert_eq(pool.status().size, 0)
+    assert_eq(pool.status().available, 0)
+
+    let replacement = pool.query_one(
+      "select pg_backend_pid()::int4 as pid, 8::int4 as value",
+    )
+    let replacement_pid : Int = replacement.get_name("pid")
+    let value : Int = replacement.get_name("value")
+    assert_true(first_pid != replacement_pid)
+    assert_eq(value, 8)
+    assert_eq(pool.status().size, 1)
+    assert_eq(pool.status().available, 1)
+    pool.close()
+  })
+}
+
+///|
+/// Ending the transaction before return keeps the same idle backend and its
+/// session settings available for Fast recycling.
+async test "integration pool Fast reuses a rolled back idle connection" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let pool = make_pool(
+      group,
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-pool-rolled-back",
+      ),
+      PoolConfig(1),
+    )
+
+    let first_pid : Int = pool.with_session(session => {
+      let pid : Int = session
+        .query_one("select pg_backend_pid()::int4 as pid")
+        .get_name("pid")
+      session.batch_execute("SET application_name = 'moonbit-fast-idle'")
+      session.batch_execute("BEGIN")
+      session.batch_execute("ROLLBACK")
+      pid
+    })
+    assert_eq(pool.status().size, 1)
+    assert_eq(pool.status().available, 1)
+
+    let next_pid : Int = pool
+      .query_one("select pg_backend_pid()::int4 as pid")
+      .get_name("pid")
+    let application_name : String = pool
+      .query_one("show application_name")
+      .get_name("application_name")
+    assert_eq(next_pid, first_pid)
+    assert_eq(application_name, "moonbit-fast-idle")
+    pool.close()
+  })
+}
+
+///|
 /// Pool capacity, rather than a manual lease, controls checkout waiting.
 async test "integration pool direct operation observes wait timeout" {
   guard integration_config() is Some(config) else { return }

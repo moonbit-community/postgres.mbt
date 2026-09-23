@@ -59,6 +59,7 @@ pub fn Client::create(Config) -> (Self, ClientExecutor)
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
 pub fn Client::is_closed(Self) -> Bool
+pub fn Client::is_transaction_idle(Self) -> Bool
 pub async fn Client::next_message(Self) -> AsyncMessage?
 pub fn Client::parameter(Self, String) -> String? raise
 pub async fn Client::prepare(Self, String) -> Statement

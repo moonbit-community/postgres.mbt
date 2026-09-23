@@ -93,6 +93,29 @@ fn make_shared(
 }
 
 ///|
+test "client transaction idle requires successful readiness and an open idle status" {
+  let shared = make_shared()
+  let client : Client = { shared, }
+
+  assert_true(client.is_transaction_idle())
+  shared.transaction_status.val = b'T'
+  assert_false(client.is_transaction_idle())
+  shared.transaction_status.val = b'E'
+  assert_false(client.is_transaction_idle())
+  shared.transaction_status.val = b'I'
+
+  shared.ready.done.val = false
+  assert_false(client.is_transaction_idle())
+  shared.ready.done.val = true
+  shared.ready.error.val = Some(ClientError::NotReady)
+  assert_false(client.is_transaction_idle())
+  shared.ready.error.val = None
+
+  shared.closed.val = true
+  assert_false(client.is_transaction_idle())
+}
+
+///|
 async fn start_test_client(
   config : Config,
   group : @async.TaskGroup[Unit],
