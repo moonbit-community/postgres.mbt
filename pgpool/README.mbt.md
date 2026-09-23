@@ -233,6 +233,7 @@ any target without a non-empty host or hostaddr before opening a socket.
 - FIFO or LIFO idle-connection selection
 - fast, verified, clean, or custom recycling
 - per-connection statement-cache capacity
+- shared asynchronous-message capacity (256 by default)
 
 The default `Fast` mode sends no cleanup SQL when an idle connection is
 checked out. On every `Session` return, the pool checks the client's latest
@@ -243,8 +244,20 @@ Idle connections retain session state such as `SET` values and `LISTEN`
 subscriptions under `Fast`; select `Clean` when that state must be cleared.
 
 `PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
-Hooks receive the raw `@client.Client`; keep them short and leave the session
-idle when they return.
+Hooks receive an `Operation` that expires when the callback ends. Queries and
+commands issued through it finish before the next borrower uses the connection.
+Hooks must leave the connection transaction idle. A `post_create` hook that
+leaves a transaction open raises `PoolError::HookLeftOpenTransaction` and
+discards the connection; recycle hooks discard the connection and retry with a
+new one. Custom `Connector` remains a low-level entry that returns a raw Client.
+
+`Pool::next_message()` reads notices, notifications, and parameter changes
+from one shared bounded buffer. Each `PoolAsyncMessage` includes a unique
+physical `connection_id` and the `message`. Use one consumer. When the buffer
+fills, the oldest message is discarded and
+`Pool::dropped_async_messages()` increases. `PoolConfig::PoolConfig` accepts a
+positive `async_message_capacity`; the default is 256. After `Pool::close()`,
+buffered messages can still be read, then `next_message()` returns `None`.
 
 Create and recycle deadlines are hard for client I/O: when either expires, the
 pool first calls `Client::abort()` on the candidate physical connection and

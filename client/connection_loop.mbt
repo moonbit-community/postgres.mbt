@@ -315,8 +315,30 @@ fn Driver::handle_async_message(
 ///|
 /// Publish one asynchronous backend message.
 fn Driver::push_async_message(self : Driver, message : AsyncMessage) -> Unit {
-  ignore(self.shared.async_messages.try_put(message)) catch {
-    _ => ()
+  self.shared.push_async_message(message)
+}
+
+///|
+fn Shared::push_async_message(self : Shared, message : AsyncMessage) -> Unit {
+  match self.async_message_handler.val {
+    Some(handler) => handler(message)
+    None => {
+      if (self.async_messages.try_put(message) catch { _ => false }) {
+        return
+      }
+      if self.closed.val {
+        return
+      }
+      match (self.async_messages.try_get() catch { _ => None }) {
+        Some(_) => {
+          self.dropped_async_messages.val += 1L
+          ignore(self.async_messages.try_put(message)) catch {
+            _ => ()
+          }
+        }
+        None => ()
+      }
+    }
   }
 }
 

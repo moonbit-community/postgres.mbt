@@ -14,9 +14,9 @@ pub fn Connector::Connector(
 /// Build runtime options for pool construction.
 pub fn PoolOptions::PoolOptions(
   connector? : Connector,
-  post_create? : async (@client.Client) -> Unit,
-  pre_recycle? : async (@client.Client) -> Unit,
-  post_recycle? : async (@client.Client) -> Unit,
+  post_create? : async (Operation) -> Unit,
+  pre_recycle? : async (Operation) -> Unit,
+  post_recycle? : async (Operation) -> Unit,
 ) -> PoolOptions {
   { connector, post_create, pre_recycle, post_recycle, }
 }
@@ -60,6 +60,8 @@ pub fn Pool::create(
     idle: [],
     connections: [],
     next_connection_id: @ref.new(0),
+    async_messages: Queue(kind=Blocking(pool_config.async_message_capacity)),
+    dropped_async_messages: @ref.new(0L),
     size: @ref.new(0),
     waiting: @ref.new(0),
     closed: @ref.new(false),
@@ -142,11 +144,23 @@ async fn serve_creations(
         client.abort()
         return
       }
+      client.install_async_message_handler(message => {
+        push_pool_async_message(shared, {
+          connection_id: request.physical_id,
+          message,
+        })
+      }) catch {
+        error => {
+          client.abort()
+          request.result.close(error~)
+          return
+        }
+      }
       group.spawn_bg(() => run_physical_executor(client, executor))
       if request.cancelled.val || shared.closed.val {
         client.abort()
       } else {
-        ignore(request.result.try_put(client)) catch {
+        ignore(request.result.try_put((client, request.physical_id))) catch {
           _ => client.abort()
         }
       }
@@ -215,6 +229,7 @@ fn maybe_finish_shutdown(shared : Shared) -> Unit {
 ///|
 fn fail_pool(shared : Shared, error : Error) -> Unit {
   shared.closed.val = true
+  shared.async_messages.close()
   shared.ready.complete(Some(error))
   shared.slots.close(error=PoolError::Closed, clear=true)
   for request in shared.active_creations {
@@ -280,6 +295,7 @@ async fn Pool::checkout_session_with_timeouts(
     queue_mode: self.shared.pool_config.val.queue_mode,
     recycling_method: self.shared.pool_config.val.recycling_method,
     statement_cache_capacity: self.shared.pool_config.val.statement_cache_capacity,
+    async_message_capacity: self.shared.pool_config.val.async_message_capacity,
   })
   self.assert_open()
   self.ready()
@@ -338,6 +354,41 @@ pub fn Pool::timeouts(self : Pool) -> Timeouts {
 /// Return the full pool config currently used by this pool.
 pub fn Pool::config(self : Pool) -> PoolConfig {
   self.shared.pool_config.val
+}
+
+///|
+/// Receive one asynchronous message from any physical pool connection.
+/// A single consumer should call this method; buffered messages remain
+/// readable after the pool closes.
+pub async fn Pool::next_message(self : Pool) -> PoolAsyncMessage? {
+  Some(self.shared.async_messages.get()) catch {
+    _ => None
+  }
+}
+
+///|
+/// Number of oldest asynchronous messages discarded when the pool buffer filled.
+pub fn Pool::dropped_async_messages(self : Pool) -> Int64 {
+  self.shared.dropped_async_messages.val
+}
+
+///|
+fn push_pool_async_message(shared : Shared, message : PoolAsyncMessage) -> Unit {
+  if shared.closed.val {
+    return
+  }
+  if (shared.async_messages.try_put(message) catch { _ => false }) {
+    return
+  }
+  match (shared.async_messages.try_get() catch { _ => None }) {
+    Some(_) => {
+      shared.dropped_async_messages.val += 1L
+      ignore(shared.async_messages.try_put(message)) catch {
+        _ => ()
+      }
+    }
+    None => ()
+  }
 }
 
 ///|
@@ -400,6 +451,7 @@ pub fn Pool::close(self : Pool) -> Unit {
     return
   }
   self.shared.closed.val = true
+  self.shared.async_messages.close()
   self.shared.slots.close(error=PoolError::Closed, clear=true)
   for request in self.shared.active_creations {
     request.cancelled.val = true
@@ -650,7 +702,7 @@ async fn Pool::connect_target(
   target : @client.Config,
   candidate : @ref.Ref[@client.Client?],
 ) -> ConnectionState {
-  let client = self.schedule_connection(target)
+  let (client, physical_id) = self.schedule_connection(target)
   candidate.val = Some(client)
   errdefer client.abort()
   client.ready()
@@ -660,7 +712,7 @@ async fn Pool::connect_target(
   check_target_session_attrs(self.shared.target_session_attrs, client)
   run_client_hook(self.shared.post_create, client)
   self.shared.size.val += 1
-  ConnectionState::new(self.shared, client)
+  ConnectionState::new(self.shared, client, id=physical_id)
 }
 
 ///|
@@ -668,11 +720,13 @@ async fn Pool::connect_target(
 async fn Pool::schedule_connection(
   self : Pool,
   target : @client.Config,
-) -> @client.Client {
+) -> (@client.Client, Int) {
   self.assert_open()
   self.shared.next_creation_id.val += 1
+  self.shared.next_connection_id.val += 1
   let request : CreateRequest = {
     id: self.shared.next_creation_id.val,
+    physical_id: self.shared.next_connection_id.val,
     target,
     result: Queue(kind=Unbounded),
     cancelled: @ref.new(false),
@@ -741,10 +795,17 @@ fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
 fn ConnectionState::new(
   shared : Shared,
   client : @client.Client,
+  id? : Int,
 ) -> ConnectionState {
-  shared.next_connection_id.val += 1
+  let id = match id {
+    Some(id) => id
+    None => {
+      shared.next_connection_id.val += 1
+      shared.next_connection_id.val
+    }
+  }
   let connection = {
-    id: shared.next_connection_id.val,
+    id,
     client: @ref.new(Some(client)),
     statement_cache_capacity: shared.pool_config.val.statement_cache_capacity,
     statement_cache: [],
@@ -797,11 +858,24 @@ fn remove_live_connection(shared : Shared, connection_id : Int) -> Unit {
 ///|
 /// Run an optional client hook if one is installed.
 async fn run_client_hook(
-  hook : (async (@client.Client) -> Unit)?,
+  hook : (async (Operation) -> Unit)?,
   client : @client.Client,
 ) -> Unit {
   match hook {
-    Some(hook) => hook(client)
+    Some(hook) => {
+      let connection : ConnectionState = {
+        id: 0,
+        client: @ref.new(Some(client)),
+        statement_cache_capacity: 0,
+        statement_cache: [],
+      }
+      errdefer (if !client.is_transaction_idle() { client.abort() })
+      run_cancellable_scope(connection, (operation, _) => hook(operation))
+      if !client.is_transaction_idle() {
+        client.abort()
+        raise PoolError::HookLeftOpenTransaction
+      }
+    }
     None => ()
   }
 }

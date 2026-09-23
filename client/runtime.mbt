@@ -135,6 +135,9 @@ priv struct Shared {
   config : Config
   requests : @async.Queue[Request]
   async_messages : @async.Queue[AsyncMessage]
+  dropped_async_messages : @ref.Ref[Int64]
+  async_message_handler : @ref.Ref[((AsyncMessage) -> Unit)?]
+  root_transaction_occupancy : @ref.Ref[Int]
   control : DrainControl
   ready : Completion
   done : Completion
@@ -255,6 +258,7 @@ struct Transaction {
   context : OpContext
   scope_gate : OperationGate
   child : @ref.Ref[TransactionChild?]
+  scoped_resources : @ref.Ref[Int]
   closing : @ref.Ref[Completion?]
   root_permit : OperationPermit?
   parent_permit : OperationPermit?

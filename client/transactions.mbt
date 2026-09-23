@@ -28,6 +28,9 @@ pub async fn Client::transaction(
   self : Client,
   options? : TransactionOptions = TransactionOptions(),
 ) -> Transaction {
+  self.shared.root_transaction_occupancy.val += 1
+  let registered = @ref.new(true)
+  defer (if registered.val { self.shared.root_transaction_occupancy.val -= 1 })
   let (context, permit) = self.begin_stream_operation()
   let started = @ref.new(false)
   errdefer {
@@ -44,6 +47,7 @@ pub async fn Client::transaction(
     transaction
   })
   check_pending_cancellation()
+  registered.val = false
   transaction
 }
 
@@ -79,6 +83,7 @@ async fn OpContext::begin_transaction(
     context: self,
     scope_gate: OperationGate::new(),
     child: @ref.new(None),
+    scoped_resources: @ref.new(0),
     closing: @ref.new(None),
     root_permit: Some(permit),
     parent_permit: None,
@@ -103,12 +108,14 @@ pub async fn[T] Client::with_transaction(
   let transaction = self.transaction(options~)
   errdefer @async.protect_from_cancel(() => {
     if !transaction.finished.val {
+      transaction.wait_for_resource_scopes()
       let _ = transaction.rollback() catch { _ => () }
     }
   })
   let result = f(transaction)
   check_pending_cancellation()
   if !transaction.finished.val {
+    transaction.wait_for_resource_scopes()
     transaction.commit()
   }
   result
@@ -135,12 +142,14 @@ pub async fn[T] Transaction::with_transaction(
   let child = self.transaction()
   errdefer @async.protect_from_cancel(() => {
     if !child.finished.val {
+      child.wait_for_resource_scopes()
       let _ = child.rollback() catch { _ => () }
     }
   })
   let result = f(child)
   check_pending_cancellation()
   if !child.finished.val {
+    child.wait_for_resource_scopes()
     child.commit()
   }
   result
@@ -156,12 +165,14 @@ pub async fn[T] Transaction::with_savepoint(
   let child = self.savepoint(name)
   errdefer @async.protect_from_cancel(() => {
     if !child.finished.val {
+      child.wait_for_resource_scopes()
       let _ = child.rollback() catch { _ => () }
     }
   })
   let result = f(child)
   check_pending_cancellation()
   if !child.finished.val {
+    child.wait_for_resource_scopes()
     child.commit()
   }
   result
@@ -304,6 +315,7 @@ async fn Transaction::begin_savepoint(
           context: self.context,
           scope_gate: OperationGate::new(),
           child: @ref.new(None),
+          scoped_resources: @ref.new(0),
           closing: @ref.new(None),
           root_permit: None,
           parent_permit: Some(parent_permit),
@@ -380,7 +392,21 @@ pub async fn Transaction::bind(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Portal {
-  self.run_scope_operation(context => context.bind(statement, params))
+  let permit = self.scope_gate.acquire()
+  defer permit.release()
+  self.assert_open()
+  errdefer self.invalidate_if_connection_closed()
+  check_pending_cancellation()
+  let portal = @async.protect_from_cancel(() => {
+    self.context.bind(statement, params)
+  })
+  errdefer @async.protect_from_cancel(() => {
+    self.context.close_portal(portal) catch {
+      _ => self.client.abort()
+    }
+  })
+  check_pending_cancellation()
+  portal
 }
 
 ///|
@@ -582,8 +608,29 @@ fn local_child_error(error : Error) -> Bool {
 }
 
 ///|
+fn Transaction::has_active_resource_scopes(self : Transaction) -> Bool {
+  if self.scoped_resources.val > 0 {
+    return true
+  }
+  match self.child.val {
+    Some(Nested(child)) => child.has_active_resource_scopes()
+    _ => false
+  }
+}
+
+///|
+async fn Transaction::wait_for_resource_scopes(self : Transaction) -> Unit {
+  while self.has_active_resource_scopes() && !self.client.shared.closed.val {
+    @async.pause()
+  }
+}
+
+///|
 async fn Transaction::finish(self : Transaction, action : String) -> Unit {
   self.assert_open()
+  if self.has_active_resource_scopes() {
+    raise ClientError::Closed("transaction has active resource scope")
+  }
   let closing = Completion::new()
   self.closing.val = Some(closing)
   defer {
@@ -699,7 +746,12 @@ fn Transaction::release_owner_permit(self : Transaction) -> Unit {
     Some(parent_permit) => parent_permit.release()
     None =>
       match self.root_permit {
-        Some(root_permit) => root_permit.release()
+        Some(root_permit) => {
+          if !root_permit.released.val {
+            self.client.shared.root_transaction_occupancy.val -= 1
+          }
+          root_permit.release()
+        }
         None => ()
       }
   }

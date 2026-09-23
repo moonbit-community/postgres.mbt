@@ -25,9 +25,9 @@ priv struct Shared {
   next_creation_id : @ref.Ref[Int]
   targets : Array[@client.Config]
   connector : Connector
-  post_create : (async (@client.Client) -> Unit)?
-  pre_recycle : (async (@client.Client) -> Unit)?
-  post_recycle : (async (@client.Client) -> Unit)?
+  post_create : (async (Operation) -> Unit)?
+  pre_recycle : (async (Operation) -> Unit)?
+  post_recycle : (async (Operation) -> Unit)?
   target_session_attrs : TargetSessionAttrs
   load_balance_hosts : LoadBalanceHosts
   pool_config : @ref.Ref[PoolConfig]
@@ -36,6 +36,8 @@ priv struct Shared {
   idle : Array[ConnectionState]
   connections : Array[ConnectionState]
   next_connection_id : @ref.Ref[Int]
+  async_messages : @async.Queue[PoolAsyncMessage]
+  dropped_async_messages : @ref.Ref[Int64]
   size : @ref.Ref[Int]
   waiting : @ref.Ref[Int]
   closed : @ref.Ref[Bool]
@@ -51,6 +53,19 @@ struct Pool {
 }
 
 ///|
+/// Asynchronous backend message tagged with its physical pool connection.
+pub struct PoolAsyncMessage {
+  connection_id : Int
+  message : @client.AsyncMessage
+} derive(Debug, Eq)
+
+///|
+pub extend PoolAsyncMessage with @debug.Debug::{to_repr}
+
+///|
+pub extend PoolAsyncMessage with Eq::{not_equal, equal}
+
+///|
 /// Owns all physical connection executors and pool maintenance tasks.
 struct PoolExecutor {
   shared : Shared
@@ -59,8 +74,9 @@ struct PoolExecutor {
 ///|
 priv struct CreateRequest {
   id : Int
+  physical_id : Int
   target : @client.Config
-  result : @async.Queue[@client.Client]
+  result : @async.Queue[(@client.Client, Int)]
   cancelled : @ref.Ref[Bool]
   task : @ref.Ref[@async.Task[Unit]?]
 }
@@ -79,12 +95,12 @@ struct Connector {
 pub struct PoolOptions {
   /// Custom connector used when checkout needs to open a new physical session.
   connector : Connector?
-  /// Hook that runs after a new connection opens successfully.
-  post_create : (async (@client.Client) -> Unit)?
-  /// Hook that runs before checkout-time recycling of an idle connection.
-  pre_recycle : (async (@client.Client) -> Unit)?
-  /// Hook that runs after the configured recycling step succeeds.
-  post_recycle : (async (@client.Client) -> Unit)?
+  /// Callback-scoped hook after a new connection opens. Must leave it idle.
+  post_create : (async (Operation) -> Unit)?
+  /// Callback-scoped hook before recycling. Must leave the connection idle.
+  pre_recycle : (async (Operation) -> Unit)?
+  /// Callback-scoped hook after recycling. Must leave the connection idle.
+  post_recycle : (async (Operation) -> Unit)?
 }
 
 ///|

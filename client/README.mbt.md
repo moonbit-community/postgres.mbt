@@ -155,34 +155,31 @@ Execute request is submitted.
 
 ## Prepared Statements And Portals
 
-Use `prepare` when a named server-side statement should be reused:
+Use `with_prepared` to keep a named server-side statement for a callback and
+close it on return, error, or cancellation:
 
 ```mbt check
 ///|
 async fn _prepared_example(client : @client.Client) -> Int {
-  let statement = client.prepare("select $1::int4 as value")
-  errdefer @async.protect_from_cancel(() => {
-    let _ = statement.close() catch { _ => () }
-  })
-  let value = 7
-  let result = client.with_statement_stream(
-    statement,
-    params=[value as &ToSql],
-    stream => {
+  client.with_prepared("select $1::int4 as value", statement => {
+    let value = 7
+    statement.with_stream(params=[value as &ToSql], stream => {
       let result : Int = stream.next().unwrap().get_name("value")
       result
-    },
-  )
-  statement.close()
-  result
+    })
+  })
 }
 ```
 
-`Client::with_statement_stream` manages only the execution stream and leaves
-the Statement open. When a statement is prepared inside a transaction, use
-`Transaction::close_statement`: calling `Statement::close` while the transaction
-is open would wait for the outer client's permit. A named Statement may outlive
-the transaction, so rollback does not close it.
+`with_prepared_typed` also accepts explicit parameter types. The scoped handle
+offers `with_stream` and `execute`, and expires when the callback ends. It waits
+for operations already started through that handle, then closes the Statement.
+`Client::with_statement_stream` manages only an execution stream and leaves a
+manually prepared Statement open. For a manual statement inside a transaction,
+use `Transaction::close_statement`: direct `Statement::close` immediately raises
+`ClientError::Closed` while a root transaction holds or waits for the client
+permit. A named Statement may outlive the transaction, so rollback does not
+close it.
 
 Create and use portals inside an explicit transaction. The former
 `Client::bind`, `Client::query_portal`, `Client::with_portal_stream`, and
@@ -190,31 +187,30 @@ Create and use portals inside an explicit transaction. The former
 `Transaction::query_portal` or `Transaction::with_portal_stream`, and
 `Transaction::close_portal`. A portal becomes invalid when its enclosing
 PostgreSQL transaction ends.
-The stream scope finishes one fetch window; it does not close the portal or its
-statement:
+`with_prepared` and its transaction-only `with_portal` method close each
+resource in stream, Portal, Statement order:
 
 ```mbt check
 ///|
 async fn _portal_example(client : @client.Client) -> Int {
   client.with_transaction(tx => {
-    let statement = tx.prepare("select 7::int4 as value")
-    errdefer @async.protect_from_cancel(() => {
-      let _ = tx.close_statement(statement) catch { _ => () }
+    tx.with_prepared("select 7::int4 as value", statement => {
+      statement.with_portal(portal => {
+        portal.with_stream(1, stream => {
+          let result : Int = stream.next().unwrap().get_name("value")
+          result
+        })
+      })
     })
-    let portal = tx.bind(statement)
-    errdefer @async.protect_from_cancel(() => {
-      let _ = tx.close_portal(portal) catch { _ => () }
-    })
-    let value = tx.with_portal_stream(portal, 1, stream => {
-      let result : Int = stream.next().unwrap().get_name("value")
-      result
-    })
-    tx.close_portal(portal)
-    tx.close_statement(statement)
-    value
   })
 }
 ```
+
+`Transaction::with_portal(statement, f)` also scopes a manually prepared
+Statement's Portal. Both scoped handles expire at callback end. Explicit
+`commit()` or `rollback()` raises `ClientError::Closed` while either resource
+scope is active. The lower-level `with_portal_stream` finishes only one fetch
+window, leaving the Portal and Statement with their caller.
 
 If cancellation arrives while `prepare` is waiting for PostgreSQL, the driver
 closes an already created statement before propagating cancellation. A failed
@@ -324,7 +320,11 @@ async fn _read_async_message(client : @client.Client) -> @client.AsyncMessage? {
 ```
 
 Use one dedicated consumer for `next_message()`. It returns `None` after the
-driver closes. Current server parameters are available through
+driver closes, after buffered messages are read. By default the client retains
+at most 256 messages. `Client::create_with_async_message_capacity(config,
+capacity)` accepts a positive capacity. When full, the driver discards the
+oldest message and increments `Client::dropped_async_messages()` without
+waiting for the consumer. Current server parameters remain available through
 `Client::parameter(name)`.
 
 ## Cancellation

@@ -26,6 +26,10 @@ For client streams and COPY, prefer `Client::with_stream`,
 `Transaction::with_portal_stream`. These scopes keep the callback cancellable
 and wait for cleanup on every exit. COPY IN commits only when the callback
 explicitly calls `finish()`; otherwise it is aborted.
+For named statements, `Client::with_prepared` and
+`Transaction::with_prepared` close the Statement after the callback.
+`Transaction::with_portal` closes a bound Portal before its Statement scope
+ends. Async backend messages use bounded buffers on both Client and Pool.
 Transaction scopes also drain unfinished query streams before completion and
 roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
 

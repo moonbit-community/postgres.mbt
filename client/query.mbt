@@ -103,6 +103,11 @@ pub async fn Statement::close(self : Statement) -> Unit {
   if self.closed.val {
     return
   }
+  if self.client.shared.root_transaction_occupancy.val > 0 {
+    raise ClientError::Closed(
+      "transaction owns the connection; use Transaction::close_statement",
+    )
+  }
   self.client.run_operation(context => context.close_statement(self))
 }
 
@@ -430,6 +435,12 @@ async fn OpContext::bind(
         match database_error {
           Some(err) => raise ClientError::Database(err)
           None => {
+            let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
+            errdefer @async.protect_from_cancel(() => {
+              self.close_portal(raw_portal) catch {
+                _ => self.client.abort()
+              }
+            })
             let portal = Portal::{
               name,
               // Resolve column OIDs lazily here so callers still get enriched
