@@ -73,9 +73,11 @@ async fn _session_example(pool : @pgpool.Pool) -> Int {
 during its callback. Captured handles used afterwards raise
 `PoolError::ScopeExpired`.
 
-Calls submitted through one `Session` execute FIFO. Do not capture the outer
-session and wait on it from inside a transaction, prepared-statement, or
-cancellable callback: use the capability passed to that callback.
+Calls submitted through one `Session` execute FIFO. A prepared-statement
+callback may use the same `Session` for other SQL or nested `with_prepared`
+calls. Transaction, streaming/COPY, and cancellable callbacks keep an exclusive
+session operation until their protocol work finishes, so use the capability
+passed to those callbacks.
 
 ## Transactions
 
@@ -116,8 +118,10 @@ connection before reuse:
 - `Session::with_copy_in` receives `@client.CopyInSink`
 - `Session::with_copy_out` receives `@client.CopyOutStream`
 
-The callbacks may consume, finish, abort, or detach their handles. On callback
-exit, the pool waits for required cleanup before recycling the connection.
+The callbacks may consume, finish, abort, or detach their handles. They remain
+cancellable while waiting for application work. On callback exit, the pool
+drains streams or aborts unfinished COPY input before recycling the connection;
+task cancellation may therefore wait for an in-flight database response.
 There are no duplicate pgpool stream, portal, or COPY wrapper types.
 
 An aborted connection's detached drain saves `ClientError::Closed`, which an
@@ -129,6 +133,10 @@ in the same task group; unexpected protocol errors still propagate.
 `Session::with_prepared` and `with_prepared_typed` provide a scoped
 `PreparedStatement`. It supports fully consumed query/execute helpers and
 `with_stream`; explicit bind, pooled portals, and manual close are not exposed.
+The callback remains cancellable and does not hold the Session operation lock.
+On exit, the scope rejects new calls, waits for calls already started, then
+closes a temporary or evicted statement. Transaction-scoped prepared callbacks
+remain exclusive to their transaction.
 
 Ordinary query, execute, and streaming helpers use prepared statements cached
 automatically per physical connection. Configure the LRU capacity through
@@ -190,6 +198,10 @@ async fn _cancellable(pool : @pgpool.Pool) -> Unit {
 `OperationCancelToken` is best-effort and becomes inert when its callback
 ends, preventing a stale token from cancelling work performed by a later
 borrower.
+
+The `run_cancellable` callback remains cancellable while waiting for
+application work. Before releasing its exclusive session operation, the scope
+waits for in-flight requests and any cancel packet already being sent.
 
 Queued requests keep FIFO order while waiting for a previous cancel send to
 finish. The next request is marked active only after that wait, so a delayed

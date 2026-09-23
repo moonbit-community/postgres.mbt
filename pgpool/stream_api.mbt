@@ -18,83 +18,12 @@ async fn[T] with_row_stream(
 ) -> T {
   errdefer finish_row_stream_best_effort(stream)
   check_pending_cancellation()
-  let result = @async.protect_from_cancel(() => f(stream))
+  let result = f(stream)
   check_pending_cancellation()
-  ignore(stream.finish())
-  result
-}
-
-///|
-/// Finish a simple-query stream while preserving an earlier callback error.
-async fn finish_simple_stream_best_effort(
-  stream : @client.SimpleQueryStream,
-) -> Unit {
-  try @async.protect_from_cancel(() => stream.finish()) catch {
-    _ => ()
-  } noraise {
-    _ => ()
+  {
+    defer check_pending_cancellation()
+    @async.protect_from_cancel(() => ignore(stream.finish()))
   }
-}
-
-///|
-/// Run a callback and guarantee that its simple-query stream is drained.
-async fn[T] with_simple_stream(
-  stream : @client.SimpleQueryStream,
-  f : async (@client.SimpleQueryStream) -> T,
-) -> T {
-  errdefer finish_simple_stream_best_effort(stream)
-  check_pending_cancellation()
-  let result = @async.protect_from_cancel(() => f(stream))
-  check_pending_cancellation()
-  stream.finish()
-  result
-}
-
-///|
-/// Finish a COPY OUT stream while preserving an earlier callback error.
-async fn finish_copy_out_best_effort(stream : @client.CopyOutStream) -> Unit {
-  try @async.protect_from_cancel(() => stream.finish()) catch {
-    _ => ()
-  } noraise {
-    _ => ()
-  }
-}
-
-///|
-/// Run a callback and guarantee that its COPY OUT stream is drained.
-async fn[T] with_copy_out_stream(
-  stream : @client.CopyOutStream,
-  f : async (@client.CopyOutStream) -> T,
-) -> T {
-  errdefer finish_copy_out_best_effort(stream)
-  check_pending_cancellation()
-  let result = @async.protect_from_cancel(() => f(stream))
-  check_pending_cancellation()
-  stream.finish()
-  result
-}
-
-///|
-/// Abort unfinished COPY IN work while preserving an earlier callback error.
-async fn abort_copy_in_best_effort(sink : @client.CopyInSink) -> Unit {
-  try @async.protect_from_cancel(() => sink.abort()) catch {
-    _ => ()
-  } noraise {
-    _ => ()
-  }
-}
-
-///|
-/// Run a callback and abort COPY IN if the callback did not finish it.
-async fn[T] with_copy_in_sink(
-  sink : @client.CopyInSink,
-  f : async (@client.CopyInSink) -> T,
-) -> T {
-  errdefer abort_copy_in_best_effort(sink)
-  check_pending_cancellation()
-  let result = @async.protect_from_cancel(() => f(sink))
-  check_pending_cancellation()
-  sink.abort()
   result
 }
 
@@ -130,7 +59,7 @@ pub async fn[T] Session::with_simple_query(
   sql : String,
   f : async (@client.SimpleQueryStream) -> T,
 ) -> T {
-  self.run_operation(client => with_simple_stream(client.simple_query(sql), f))
+  self.run_scoped_operation(client => client.with_simple_query(sql, f))
 }
 
 ///|
@@ -140,7 +69,7 @@ pub async fn[T] Session::with_copy_in(
   sql : String,
   f : async (@client.CopyInSink) -> T,
 ) -> T {
-  self.run_operation(client => with_copy_in_sink(client.copy_in(sql), f))
+  self.run_scoped_operation(client => client.with_copy_in(sql, f))
 }
 
 ///|
@@ -150,7 +79,7 @@ pub async fn[T] Session::with_copy_out(
   sql : String,
   f : async (@client.CopyOutStream) -> T,
 ) -> T {
-  self.run_operation(client => with_copy_out_stream(client.copy_out(sql), f))
+  self.run_scoped_operation(client => client.with_copy_out(sql, f))
 }
 
 ///|

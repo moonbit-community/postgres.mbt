@@ -8,11 +8,12 @@ async fn[T] PreparedStatementScope::run_request(
   transaction_op : async (@client.Transaction) -> T,
 ) -> T {
   check_pending_cancellation()
-  // This can return a stream; its callback helper owns cancellation cleanup
-  // after protection ends, before the handle can be delivered to user code.
+  // Fully consumed requests keep the session gate only for their database work.
   match self {
-    ClientScope(state) =>
-      @async.protect_from_cancel(() => client_op(state.scoped_client()))
+    ClientScope(state) => {
+      let session : Session = { state, }
+      session.run_operation(client_op)
+    }
     TransactionScope(state) =>
       @async.protect_from_cancel(() => {
         transaction_op(state.scoped_transaction())
@@ -21,7 +22,8 @@ async fn[T] PreparedStatementScope::run_request(
 }
 
 ///|
-/// Close a statement through the operation context that owns its scope.
+/// Close a statement through its owning operation context. Client callers
+/// already hold the Session gate while changing the cache or closing it.
 async fn PreparedStatementScope::close_statement(
   self : PreparedStatementScope,
   statement : @client.Statement,
@@ -212,6 +214,21 @@ fn PreparedStatementState::assert_active(
 }
 
 ///|
+/// Count a call before it can wait for the session gate. Cleanup closes the
+/// scope first, then waits for all calls that already entered to finish.
+fn PreparedStatementState::begin_call(
+  self : PreparedStatementState,
+) -> Unit raise {
+  self.assert_active()
+  self.active_calls.val += 1
+}
+
+///|
+fn PreparedStatementState::finish_call(self : PreparedStatementState) -> Unit {
+  self.active_calls.val -= 1
+}
+
+///|
 /// Access the raw statement handle behind one scoped prepared statement.
 fn PreparedStatementState::raw_statement(
   self : PreparedStatementState,
@@ -241,6 +258,39 @@ async fn PreparedStatementState::invalidate_on_error(
     ClientScope(state) => state.connection
     TransactionScope(state) => state.connection
   }
+  // An evicted lease may share a key with a newer cache entry. Never evict the
+  // replacement for an error produced by the older statement.
+  if lease.entry.evicted.val {
+    return
+  }
+  match self.scope {
+    ClientScope(state) =>
+      try
+        @async.protect_from_cancel(() => {
+          state.gate.acquire()
+          defer state.gate.release()
+          self.evict_invalidated_entry(connection, lease)
+        })
+      catch {
+        _ => ()
+      } noraise {
+        _ => ()
+      }
+    TransactionScope(_) => self.evict_invalidated_entry(connection, lease)
+  }
+}
+
+///|
+/// The caller holds the connection's cache gate, or the transaction's
+/// exclusive gate. The original database error takes precedence over Close.
+async fn PreparedStatementState::evict_invalidated_entry(
+  self : PreparedStatementState,
+  connection : ConnectionState,
+  lease : CachedStatementLease,
+) -> Unit {
+  if lease.entry.evicted.val {
+    return
+  }
   match
     take_cached_statement_entry(
       connection,
@@ -248,11 +298,12 @@ async fn PreparedStatementState::invalidate_on_error(
       lease.entry.param_types,
     ) {
     Some(entry) => {
-      // Invalidation must preserve the database error that triggered it.
-      // Closing SQLSTATE 26000 can itself fail because the server has already
-      // forgotten the named statement, so eviction cleanup is best-effort.
       let _ = evict_cached_statement_entry(entry, statement => {
-        self.scope.close_statement(statement)
+        match self.scope {
+          ClientScope(_) => statement.close()
+          TransactionScope(state) =>
+            state.scoped_transaction().close_statement(statement)
+        }
       }) catch {
         _ => ()
       }
@@ -269,12 +320,26 @@ async fn PreparedStatement::release_internal(self : PreparedStatement) -> Unit {
   }
   self.state.active.val = false
   self.state.released.val = true
-  match self.state.handle {
-    Temporary(statement) => self.state.scope.close_statement(statement)
-    Cached(lease) =>
-      release_cached_statement_lease(lease, statement => {
-        self.state.scope.close_statement(statement)
+  while self.state.active_calls.val > 0 {
+    @async.pause()
+  }
+  let close = () => {
+    match self.state.handle {
+      Temporary(statement) => self.state.scope.close_statement(statement)
+      Cached(lease) =>
+        release_cached_statement_lease(lease, statement => {
+          self.state.scope.close_statement(statement)
+        })
+    }
+  }
+  match self.state.scope {
+    ClientScope(state) => {
+      errdefer (if state.connection.client.val is Some(client) {
+        client.abort()
       })
+      state.prepared_cleanup_step(_ => close())
+    }
+    TransactionScope(_) => close()
   }
 }
 
@@ -298,9 +363,12 @@ async fn[T] run_prepared_callback(
 ) -> T {
   errdefer prepared.release_best_effort()
   check_pending_cancellation()
-  let result = @async.protect_from_cancel(() => f(prepared))
+  let result = f(prepared)
   check_pending_cancellation()
-  prepared.release_internal()
+  {
+    defer check_pending_cancellation()
+    @async.protect_from_cancel(() => prepared.release_internal())
+  }
   result
 }
 
@@ -310,14 +378,11 @@ async fn PreparedStatement::run_query_all(
   self : PreparedStatement,
   params : Array[&@client.ToSql],
 ) -> Array[@client.Row] {
-  self.state.assert_active()
   let statement = self.state.raw_statement()
-  match self.state.scope {
-    ClientScope(state) =>
-      state.scoped_client().query_statement(statement, params~).collect()
-    TransactionScope(state) =>
-      state.scoped_transaction().query_statement(statement, params~).collect()
-  }
+  self.state.scope.run_request(
+    client => client.query_statement(statement, params~).collect(),
+    transaction => transaction.query_statement(statement, params~).collect(),
+  )
 }
 
 ///|
@@ -326,14 +391,11 @@ async fn PreparedStatement::run_query_one(
   self : PreparedStatement,
   params : Array[&@client.ToSql],
 ) -> @client.Row {
-  self.state.assert_active()
   let statement = self.state.raw_statement()
-  match self.state.scope {
-    ClientScope(state) =>
-      state.scoped_client().query_statement(statement, params~).one()
-    TransactionScope(state) =>
-      state.scoped_transaction().query_statement(statement, params~).one()
-  }
+  self.state.scope.run_request(
+    client => client.query_statement(statement, params~).one(),
+    transaction => transaction.query_statement(statement, params~).one(),
+  )
 }
 
 ///|
@@ -342,14 +404,11 @@ async fn PreparedStatement::run_query_opt(
   self : PreparedStatement,
   params : Array[&@client.ToSql],
 ) -> @client.Row? {
-  self.state.assert_active()
   let statement = self.state.raw_statement()
-  match self.state.scope {
-    ClientScope(state) =>
-      state.scoped_client().query_statement(statement, params~).opt()
-    TransactionScope(state) =>
-      state.scoped_transaction().query_statement(statement, params~).opt()
-  }
+  self.state.scope.run_request(
+    client => client.query_statement(statement, params~).opt(),
+    transaction => transaction.query_statement(statement, params~).opt(),
+  )
 }
 
 ///|
@@ -358,13 +417,11 @@ async fn PreparedStatement::run_execute(
   self : PreparedStatement,
   params : Array[&@client.ToSql],
 ) -> Int {
-  self.state.assert_active()
   let statement = self.state.raw_statement()
-  match self.state.scope {
-    ClientScope(state) => state.scoped_client().execute_raw(statement, params~)
-    TransactionScope(state) =>
-      state.scoped_transaction().execute_raw(statement, params~)
-  }
+  self.state.scope.run_request(
+    client => client.execute_raw(statement, params~),
+    transaction => transaction.execute_raw(statement, params~),
+  )
 }
 
 ///|
@@ -378,21 +435,23 @@ pub async fn[T] Session::with_prepared(
   sql : String,
   f : async (PreparedStatement) -> T,
 ) -> T {
-  self.run_operation(client => {
-    let (handle, statement) = acquire_prepared_handle(
+  self.state.begin_prepared_lease()
+  defer self.state.finish_prepared_lease()
+  let (handle, statement) = self.state.prepare_step(client => {
+    acquire_prepared_handle(
       self.state.connection,
       sql,
       [],
       () => client.prepare(sql),
       statement => statement.close(),
     )
-    let prepared = PreparedStatement::new(
-      ClientScope(self.state),
-      handle,
-      statement,
-    )
-    run_prepared_callback(prepared, f)
   })
+  let prepared = PreparedStatement::new(
+    ClientScope(self.state),
+    handle,
+    statement,
+  )
+  run_prepared_callback(prepared, f)
 }
 
 ///|
@@ -403,21 +462,23 @@ pub async fn[T] Session::with_prepared_typed(
   param_types : Array[@client.Type],
   f : async (PreparedStatement) -> T,
 ) -> T {
-  self.run_operation(client => {
-    let (handle, statement) = acquire_prepared_handle(
+  self.state.begin_prepared_lease()
+  defer self.state.finish_prepared_lease()
+  let (handle, statement) = self.state.prepare_step(client => {
+    acquire_prepared_handle(
       self.state.connection,
       sql,
       param_types,
       () => client.prepare_typed(sql, param_types),
       statement => statement.close(),
     )
-    let prepared = PreparedStatement::new(
-      ClientScope(self.state),
-      handle,
-      statement,
-    )
-    run_prepared_callback(prepared, f)
   })
+  let prepared = PreparedStatement::new(
+    ClientScope(self.state),
+    handle,
+    statement,
+  )
+  run_prepared_callback(prepared, f)
 }
 
 ///|
@@ -427,21 +488,23 @@ pub async fn[T] Transaction::with_prepared(
   sql : String,
   f : async (PreparedStatement) -> T,
 ) -> T {
-  self.run_operation(transaction => {
-    let (handle, statement) = acquire_prepared_handle(
+  let transaction = self.state.begin_operation()
+  defer self.state.finish_operation()
+  let (handle, statement) = @async.protect_from_cancel(() => {
+    acquire_prepared_handle(
       self.state.connection,
       sql,
       [],
       () => transaction.prepare(sql),
       statement => transaction.close_statement(statement),
     )
-    let prepared = PreparedStatement::new(
-      TransactionScope(self.state),
-      handle,
-      statement,
-    )
-    run_prepared_callback(prepared, f)
   })
+  let prepared = PreparedStatement::new(
+    TransactionScope(self.state),
+    handle,
+    statement,
+  )
+  run_prepared_callback(prepared, f)
 }
 
 ///|
@@ -452,21 +515,23 @@ pub async fn[T] Transaction::with_prepared_typed(
   param_types : Array[@client.Type],
   f : async (PreparedStatement) -> T,
 ) -> T {
-  self.run_operation(transaction => {
-    let (handle, statement) = acquire_prepared_handle(
+  let transaction = self.state.begin_operation()
+  defer self.state.finish_operation()
+  let (handle, statement) = @async.protect_from_cancel(() => {
+    acquire_prepared_handle(
       self.state.connection,
       sql,
       param_types,
       () => transaction.prepare_typed(sql, param_types),
       statement => transaction.close_statement(statement),
     )
-    let prepared = PreparedStatement::new(
-      TransactionScope(self.state),
-      handle,
-      statement,
-    )
-    run_prepared_callback(prepared, f)
   })
+  let prepared = PreparedStatement::new(
+    TransactionScope(self.state),
+    handle,
+    statement,
+  )
+  run_prepared_callback(prepared, f)
 }
 
 ///|
@@ -477,6 +542,8 @@ pub async fn PreparedStatement::query_all(
   self : PreparedStatement,
   params? : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
+  self.state.begin_call()
+  defer self.state.finish_call()
   self.run_query_all(params) catch {
     @client.ClientError::Database(_) as err => {
       self.state.invalidate_on_error(err)
@@ -495,6 +562,8 @@ pub async fn PreparedStatement::query_one(
   self : PreparedStatement,
   params? : Array[&@client.ToSql] = [],
 ) -> @client.Row {
+  self.state.begin_call()
+  defer self.state.finish_call()
   self.run_query_one(params) catch {
     @client.ClientError::Database(_) as err => {
       self.state.invalidate_on_error(err)
@@ -513,6 +582,8 @@ pub async fn PreparedStatement::query_opt(
   self : PreparedStatement,
   params? : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
+  self.state.begin_call()
+  defer self.state.finish_call()
   self.run_query_opt(params) catch {
     @client.ClientError::Database(_) as err => {
       self.state.invalidate_on_error(err)
@@ -528,6 +599,8 @@ pub async fn PreparedStatement::execute(
   self : PreparedStatement,
   params? : Array[&@client.ToSql] = [],
 ) -> Int {
+  self.state.begin_call()
+  defer self.state.finish_call()
   self.run_execute(params) catch {
     @client.ClientError::Database(_) as err => {
       self.state.invalidate_on_error(err)
@@ -544,13 +617,26 @@ pub async fn[T] PreparedStatement::with_stream(
   params? : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
-  self.state.assert_active()
+  self.state.begin_call()
+  defer self.state.finish_call()
   let statement = self.state.raw_statement()
-  let stream = self.state.scope.run_request(
-    client => client.query_statement(statement, params~),
-    transaction => transaction.query_statement(statement, params~),
-  )
-  with_row_stream(stream, f) catch {
+  let run = () => {
+    match self.state.scope {
+      ClientScope(state) => {
+        let session : Session = { state, }
+        session.run_scoped_operation(client => {
+          client.with_statement_stream(statement, params~, f)
+        })
+      }
+      TransactionScope(state) => {
+        let stream = @async.protect_from_cancel(() => {
+          state.scoped_transaction().query_statement(statement, params~)
+        })
+        with_row_stream(stream, f)
+      }
+    }
+  }
+  run() catch {
     @client.ClientError::Database(_) as err => {
       self.state.invalidate_on_error(err)
       raise err
