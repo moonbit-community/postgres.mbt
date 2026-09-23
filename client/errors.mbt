@@ -66,6 +66,8 @@ pub suberror ClientError {
   ColumnNotFound(String)
   /// A helper such as `query_one` observed an unexpected row count.
   RowCount(String)
+  /// A transaction callback returned while a nested transaction was still open.
+  UnfinishedChildTransaction
   /// The driver received a backend message that does not fit the current state.
   UnexpectedMessage(String)
 } derive(Debug, Eq)

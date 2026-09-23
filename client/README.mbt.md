@@ -187,7 +187,12 @@ handle's `close` method would try to reacquire the outer client's permit.
 normally, it commits only if the transaction is still open; an explicit
 `commit()` or `rollback()` prevents a second completion. When the callback
 raises or is cancelled, it rolls back best-effort if the transaction is still
-open. Rollback cleanup is protected from task cancellation:
+open. Unfinished query streams are detached and drained through protocol
+cleanup before commit or rollback. A database error found during that drain
+causes rollback and is raised to the caller. An unfinished nested transaction
+is recursively rolled back, then the parent rolls back and raises
+`ClientError::UnfinishedChildTransaction`. A callback error or cancellation
+keeps its original cause while protected cleanup completes:
 
 ```mbt check
 ///|
@@ -203,6 +208,31 @@ Use `transaction()` only when manual `commit()` / `rollback()` control is
 required. A transaction reserves the session for its complete lifetime, so
 calls queued through the outer `Client` run only after it ends. Nested
 transactions use PostgreSQL savepoints and stay inside the same operation.
+Manual `commit()` and `rollback()` also finish any open child streams; rollback
+recursively rolls back open nested transactions. A manual commit with an open
+nested transaction instead rolls it back and raises
+`UnfinishedChildTransaction` after rolling back the parent.
+
+Inside a transaction, `with_stream`, `with_statement_stream`, and
+`with_portal_stream` scope one execution stream. They discard unread rows and
+wait for cleanup when the callback returns, raises, or is cancelled. The latter
+two leave the Statement and Portal owned by the caller. Use
+`with_transaction` or `with_savepoint` on a transaction to scope nested work:
+
+```mbt check
+///|
+async fn _nested_transaction_example(client : @client.Client) -> Unit {
+  client.with_transaction(tx => {
+    tx.with_savepoint("optional_work", child => {
+      child.with_stream("select 1", stream => ignore(stream.next()))
+    })
+  })
+}
+```
+
+Do not return a stream or nested transaction handle from its callback for later
+use: the scope finishes it before returning. Draining can wait for the current
+SQL command to finish; it does not impose an implicit timeout.
 
 ## COPY And Streams
 
@@ -268,7 +298,8 @@ a safe boundary. `execute` drains its results before closing its temporary
 statement; `execute_raw` drains results while leaving the caller's statement
 open. This can wait for the current SQL command to finish.
 
-The seven stream/COPY scopes keep the business callback cancellable, including
+The client and transaction stream/COPY scopes keep business callbacks
+cancellable, including
 waits on user queues or other I/O. Waiting for the client's permit is also
 cancellable. Protocol startup is protected until a handle has an owner; cleanup
 is protected until `ReadyForQuery` and any temporary-statement Close complete.

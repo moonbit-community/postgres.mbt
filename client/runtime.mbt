@@ -256,8 +256,20 @@ struct Transaction {
   client : Client
   context : OpContext
   scope_gate : OperationGate
+  child : @ref.Ref[TransactionChild?]
+  closing : @ref.Ref[Completion?]
   root_permit : OperationPermit?
   parent_permit : OperationPermit?
   savepoint : String?
   finished : @ref.Ref[Bool]
+}
+
+///|
+// A child owns the scope permit until its protocol work has completed.
+// Creating is published before startup can suspend, so completion can wait
+// without trying to acquire the permit held by the creator.
+priv enum TransactionChild {
+  Creating(Completion)
+  Stream(RowStream)
+  Nested(Transaction)
 }

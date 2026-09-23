@@ -23,6 +23,7 @@ pub suberror ClientError {
   WrongType(WrongTypeError)
   ColumnNotFound(String)
   RowCount(String)
+  UnfinishedChildTransaction
   UnexpectedMessage(String)
 } derive(Eq, @debug.Debug)
 
@@ -244,6 +245,11 @@ pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSq
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
+pub async fn[T] Transaction::with_portal_stream(Self, Portal, Int, async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T
+pub async fn[T] Transaction::with_statement_stream(Self, Statement, params? : Array[&ToSql], async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&ToSql], async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
 
 pub struct TransactionOptions {
   isolation_level : String?

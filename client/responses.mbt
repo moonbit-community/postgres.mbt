@@ -64,6 +64,25 @@ async fn close_temporary_statement(context : OpContext, name : Bytes) -> Unit {
 }
 
 ///|
+// Preserve the original query creation error. A failed Close that did not
+// reach ReadyForQuery makes the connection timeline unsafe to reuse.
+async fn close_temporary_statement_after_error(
+  context : OpContext,
+  name : Bytes,
+) -> Unit {
+  let close_error : Error? = try {
+    close_temporary_statement(context, name)
+    None
+  } catch {
+    error => Some(error)
+  }
+  match close_error {
+    Some(ClientError::Database(_)) | None => ()
+    Some(_) => context.client.abort()
+  }
+}
+
+///|
 /// Wait for PostgreSQL to acknowledge `COPY OUT` mode and build the stream.
 async fn start_copy_out(
   control : DrainControl,

@@ -17,7 +17,8 @@ pub struct QuerySummary {
 /// The stream owns the queue of backend messages for one request. Temporary
 /// statements created by helper APIs are cleaned up only after the stream
 /// reaches its terminal `ReadyForQuery`, so callers should either consume the
-/// stream to exhaustion, call `finish`, or call `detach`.
+/// stream to exhaustion, call `finish`, or call `detach`. A transaction also
+/// drains any registered stream before its own commit or rollback.
 pub struct RowStream {
   /// The latest resolved column metadata. This becomes available after the
   /// driver sees a `RowDescription`.

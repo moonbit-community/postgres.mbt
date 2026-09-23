@@ -148,7 +148,7 @@ async fn OpContext::query(
   // All fallible encoding happens before submission; RowStream::new cannot
   // fail, so successful submission transfers cleanup without another gap.
   errdefer @async.protect_from_cancel(() => {
-    let _ = close_temporary_statement(self, name) catch { _ => () }
+    close_temporary_statement_after_error(self, name)
   })
   let cleanup = StreamCleanup::new(self, name)
   guard param_types.length() == params.length() else {
@@ -238,7 +238,7 @@ async fn OpContext::query_typed(
   )
   let (_, columns) = read_prepare_response(self, prepare_responses)
   errdefer @async.protect_from_cancel(() => {
-    let _ = close_temporary_statement(self, name) catch { _ => () }
+    close_temporary_statement_after_error(self, name)
   })
   let cleanup = StreamCleanup::new(self, name)
   let bytes = execute_statement_bytes(name[:], param_types, params)
