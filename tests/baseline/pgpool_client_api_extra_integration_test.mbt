@@ -154,6 +154,51 @@ async test "integration pooled prepared statement scope and typed parameters" {
 }
 
 ///|
+/// A prepared callback can issue other Session SQL and retain its statement
+/// after an LRU eviction, including when caching is disabled.
+async test "integration prepared callback composes same-session SQL and nested scopes" {
+  guard integration_config() is Some(config) else { return }
+  for capacity in [0, 1] {
+    @async.with_task_group(group => {
+      let pool = make_pool(
+        group,
+        as_client_config(
+          config,
+          application_name="moonbit-postgres-pool-prepared-nested",
+        ),
+        make_pool_config(1, statement_cache_capacity=capacity),
+      )
+      let result : (Int, Int, Int, Int) = pool.with_session(session => {
+        session.with_prepared("select $1::int4 + 1 as value", outer => {
+          let same : Int = session.with_prepared(
+            "select $1::int4 + 1 as value",
+            inner => {
+              let input = 1
+              inner
+              .query_one(params=[input as &@client.ToSql])
+              .get_name("value")
+            },
+          )
+          let ordinary : Int = session
+            .query_one("select 3::int4 as value")
+            .get_name("value")
+          let other : Int = session.with_prepared("select 4::int4 as value", inner => {
+            inner.query_one().get_name("value")
+          })
+          let input = 4
+          let retained : Int = outer
+            .query_one(params=[input as &@client.ToSql])
+            .get_name("value")
+          (same, ordinary, other, retained)
+        })
+      })
+      assert_true(result == (2, 3, 4, 5))
+      pool.close()
+    })
+  }
+}
+
+///|
 /// Mutating the caller's typed-prepare array must not rewrite an existing
 /// cache key or make a differently typed request reuse the old statement.
 async test "integration pooled prepared cache snapshots typed parameter keys" {

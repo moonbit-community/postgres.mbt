@@ -38,6 +38,52 @@ fn ClientLeaseState::finish_operation(self : ClientLeaseState) -> Unit {
 }
 
 ///|
+/// Keep the physical connection leased across a prepared callback without
+/// owning the FIFO gate. Individual requests acquire that gate separately.
+fn ClientLeaseState::begin_prepared_lease(
+  self : ClientLeaseState,
+) -> Unit raise {
+  if self.releasing.val ||
+    self.released.val ||
+    self.connection.client.val is None {
+    raise PoolError::ScopeExpired
+  }
+  self.active_ops.val += 1
+}
+
+///|
+fn ClientLeaseState::finish_prepared_lease(self : ClientLeaseState) -> Unit {
+  self.active_ops.val -= 1
+  if self.releasing.val && !self.released.val && self.active_ops.val == 0 {
+    self.finalize_release()
+  }
+}
+
+///|
+/// Acquire the session gate for preparation. The resulting handle is delivered
+/// to its owner before pending cancellation is observed by that owner.
+async fn[T] ClientLeaseState::prepare_step(
+  self : ClientLeaseState,
+  op : async (@client.Client) -> T,
+) -> T {
+  let client = self.begin_operation()
+  defer self.finish_operation()
+  @async.protect_from_cancel(() => op(client))
+}
+
+///|
+/// Cleanup must still acquire the gate after the outer Session has begun
+/// releasing; the prepared lease keeps the physical connection alive.
+async fn[T] ClientLeaseState::prepared_cleanup_step(
+  self : ClientLeaseState,
+  op : async (@client.Client) -> T,
+) -> T {
+  self.gate.acquire()
+  defer self.gate.release()
+  op(self.scoped_client())
+}
+
+///|
 /// Start one exclusive cancellable scope on this lease.
 async fn ClientLeaseState::begin_cancellable_scope(
   self : ClientLeaseState,
@@ -120,6 +166,21 @@ async fn[T] Session::run_operation(
   check_pending_cancellation()
   defer check_pending_cancellation()
   @async.protect_from_cancel(() => op(client))
+}
+
+///|
+/// Keep an exclusive session gate for a protocol stream while allowing its
+/// callback to observe task cancellation. The client scope owns protocol
+/// startup and finalization.
+async fn[T] Session::run_scoped_operation(
+  self : Session,
+  op : async (@client.Client) -> T,
+) -> T {
+  let client = self.state.begin_operation()
+  defer self.state.finish_operation()
+  check_pending_cancellation()
+  defer check_pending_cancellation()
+  op(client)
 }
 
 ///|

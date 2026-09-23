@@ -98,7 +98,7 @@ pub async fn[T] Session::run_cancellable(
   defer self.state.finish_cancellable_scope()
   check_pending_cancellation()
   defer check_pending_cancellation()
-  @async.protect_from_cancel(() => run_cancellable_scope(connection, f))
+  run_cancellable_scope(connection, f)
 }
 
 ///|

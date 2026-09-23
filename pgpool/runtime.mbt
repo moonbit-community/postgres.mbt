@@ -132,6 +132,7 @@ priv struct PreparedStatementState {
   scope : PreparedStatementScope
   handle : PreparedStatementHandle
   active : @ref.Ref[Bool]
+  active_calls : @ref.Ref[Int]
   released : @ref.Ref[Bool]
 }
 
@@ -343,6 +344,12 @@ fn PreparedStatement::new(
   {
     params: statement.params,
     columns: statement.columns,
-    state: { scope, handle, active: @ref.new(true), released: @ref.new(false), },
+    state: {
+      scope,
+      handle,
+      active: @ref.new(true),
+      active_calls: @ref.new(0),
+      released: @ref.new(false),
+    },
   }
 }
