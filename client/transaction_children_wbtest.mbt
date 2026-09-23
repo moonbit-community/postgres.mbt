@@ -159,7 +159,6 @@ async test "transaction stream scopes cover query statement and portal" {
         closed: @ref.new(false),
       }
       let portal : Portal = {
-        client,
         name: b"existing_portal",
         columns: [],
         closed: @ref.new(false),

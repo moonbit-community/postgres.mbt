@@ -103,14 +103,15 @@ Choose the smallest result shape that matches the query:
 | Incremental rows | `Client::with_stream` |
 | Explicit parameter types | `Client::with_typed_stream` |
 | Execute a prepared statement | `Client::with_statement_stream` |
-| Fetch a portal window | `Client::with_portal_stream` |
+| Fetch a portal window | `Transaction::with_portal_stream` |
 | Affected row count | `Client::execute` |
 | SQL batch without parameters | `Client::batch_execute` |
 | Text/simple protocol frames | `Client::with_simple_query` |
 | Bulk import/export | `Client::with_copy_in`, `Client::with_copy_out` |
 
-`simple_query`, `query_statement`, and `query_portal` are asynchronous because
-they must wait for the session's operation permit before returning a stream.
+`Client::simple_query`, `Client::query_statement`, and
+`Transaction::query_portal` are asynchronous because they must wait for an
+operation permit before returning a stream.
 MoonBit async calls do not use an `await` keyword.
 
 Rows decode by index or PostgreSQL column name:
@@ -177,14 +178,47 @@ async fn _prepared_example(client : @client.Client) -> Int {
 }
 ```
 
-`with_statement_stream` and `with_portal_stream` manage only the execution
-stream. They never close the caller's Statement or Portal. `bind` creates a
-portal, and `with_portal_stream(portal, max_rows, f)` scopes one fetch window;
-the caller remains responsible for closing its resources in the right context.
+`Client::with_statement_stream` manages only the execution stream and leaves
+the Statement open. When a statement is prepared inside a transaction, use
+`Transaction::close_statement`: calling `Statement::close` while the transaction
+is open would wait for the outer client's permit. A named Statement may outlive
+the transaction, so rollback does not close it.
 
-When a statement or portal is owned by an active transaction, close it through
-`Transaction::close_statement` or `Transaction::close_portal`. Calling the raw
-handle's `close` method would try to reacquire the outer client's permit.
+Create and use portals inside an explicit transaction. The former
+`Client::bind`, `Client::query_portal`, `Client::with_portal_stream`, and
+`Portal::close` methods have been removed. Replace them with `Transaction::bind`,
+`Transaction::query_portal` or `Transaction::with_portal_stream`, and
+`Transaction::close_portal`. A portal becomes invalid when its enclosing
+PostgreSQL transaction ends.
+The stream scope finishes one fetch window; it does not close the portal or its
+statement:
+
+```mbt check
+///|
+async fn _portal_example(client : @client.Client) -> Int {
+  client.with_transaction(tx => {
+    let statement = tx.prepare("select 7::int4 as value")
+    errdefer @async.protect_from_cancel(() => {
+      let _ = tx.close_statement(statement) catch { _ => () }
+    })
+    let portal = tx.bind(statement)
+    errdefer @async.protect_from_cancel(() => {
+      let _ = tx.close_portal(portal) catch { _ => () }
+    })
+    let value = tx.with_portal_stream(portal, 1, stream => {
+      let result : Int = stream.next().unwrap().get_name("value")
+      result
+    })
+    tx.close_portal(portal)
+    tx.close_statement(statement)
+    value
+  })
+}
+```
+
+If cancellation arrives while `prepare` is waiting for PostgreSQL, the driver
+closes an already created statement before propagating cancellation. A failed
+Close aborts that physical connection.
 
 ## Transactions
 
@@ -256,9 +290,10 @@ async fn _copy_rows(client : @client.Client) -> Int {
 }
 ```
 
-The raw APIs (`query`, `query_typed`, `query_statement`, `query_portal`,
-`simple_query`, `copy_in`, and `copy_out`) remain available when the caller needs
-to transfer ownership or control draining explicitly:
+The raw client APIs (`query`, `query_typed`, `query_statement`, `simple_query`,
+`copy_in`, and `copy_out`) remain available when the caller needs to transfer
+ownership or control draining explicitly. `Transaction::query_portal` provides
+the raw portal stream inside a transaction:
 
 - `RowStream`, `SimpleQueryStream`, and `CopyOutStream` expose `next`,
   `collect`, `finish`, and `detach` as appropriate.

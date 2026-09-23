@@ -225,7 +225,12 @@ pub async fn Transaction::prepare_typed(
   sql : String,
   types : Array[Type],
 ) -> Statement {
-  self.run_scope_operation(context => context.prepare_typed(sql, types))
+  let permit = self.scope_gate.acquire()
+  defer permit.release()
+  self.assert_open()
+  errdefer self.invalidate_if_connection_closed()
+  check_pending_cancellation()
+  self.context.prepare_for_delivery(sql, types)
 }
 
 ///|
@@ -368,7 +373,8 @@ pub async fn Transaction::execute_raw(
 }
 
 ///|
-/// Bind parameters to a statement while the transaction is open.
+/// Bind parameters to a statement while the transaction is open. The portal
+/// remains valid only within its enclosing PostgreSQL transaction.
 pub async fn Transaction::bind(
   self : Transaction,
   statement : Statement,
@@ -378,8 +384,10 @@ pub async fn Transaction::bind(
 }
 
 ///|
-/// Execute a portal while the transaction is open. An unfinished result is
-/// drained at transaction end; the portal remains owned by the caller.
+/// Fetch up to `max_rows` from a portal while the transaction is open.
+/// `QuerySummary.suspended` reports when PostgreSQL has more rows. An
+/// unfinished result is drained at transaction end; the portal remains owned
+/// by the caller.
 pub async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,

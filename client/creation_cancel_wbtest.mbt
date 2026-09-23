@@ -243,12 +243,11 @@ async test "pending cancellation prevents new client and transaction stream requ
         closed: @ref.new(false),
       }
       let portal : Portal = {
-        client,
         name: b"existing",
         columns: [],
         closed: @ref.new(false),
       }
-      for mode in 0..<7 {
+      for mode in 0..<(if transaction_scope { 7 } else { 6 }) {
         let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
         let release_start : @async.Queue[Unit] = Queue(kind=Unbounded)
         defer release_start.close()
@@ -275,8 +274,7 @@ async test "pending cancellation prevents new client and transaction stream requ
                 2 => ignore(client.copy_out("COPY t TO STDOUT"))
                 3 => ignore(client.copy_in("COPY t FROM STDIN"))
                 4 => ignore(client.query_typed("select 1", []))
-                5 => ignore(client.query_statement(statement))
-                _ => ignore(client.query_portal(portal, 1))
+                _ => ignore(client.query_statement(statement))
               }
           }
         })

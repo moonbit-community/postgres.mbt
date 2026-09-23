@@ -128,10 +128,9 @@ priv struct OpContext {
 ///|
 /// Shared mutable state visible to every handle created from one connection.
 ///
-/// All user-facing handles (`Client`, `Statement`, `Portal`, `Transaction`,
-/// cancellation tokens, and the private driver task) reference this struct
-/// so they can coordinate lifecycle, cache type metadata, and publish async
-/// messages without global state.
+/// The client, prepared statements, transactions, cancellation tokens, and
+/// private driver task reference this struct to coordinate lifecycle, cache
+/// type metadata, and publish async messages without global state.
 priv struct Shared {
   config : Config
   requests : @async.Queue[Request]
@@ -209,11 +208,10 @@ pub struct Statement {
 ///|
 /// Bound portal ready for repeated or chunked execution.
 ///
-/// Portals are useful when the caller wants to execute a prepared statement
-/// once, inspect the returned columns, and then fetch rows incrementally via
-/// `query_portal`.
+/// Portals are created and used through an open transaction. Fetch rows
+/// incrementally with
+/// `Transaction::query_portal` or `Transaction::with_portal_stream`.
 pub struct Portal {
-  priv client : Client
   priv name : Bytes
   /// Result columns currently associated with the portal.
   columns : Array[Column]
