@@ -716,6 +716,11 @@ fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
         release_capacity(shared)
         return
       }
+      if !client.is_transaction_idle() {
+        retire_connection(shared, connection, close_client=true)
+        release_capacity(shared)
+        return
+      }
       if shared.size.val > shared.pool_config.val.max_size {
         retire_connection(shared, connection, close_client=true)
         release_capacity(shared)

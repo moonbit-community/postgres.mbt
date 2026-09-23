@@ -234,6 +234,14 @@ any target without a non-empty host or hostaddr before opening a socket.
 - fast, verified, clean, or custom recycling
 - per-connection statement-cache capacity
 
+The default `Fast` mode sends no cleanup SQL when an idle connection is
+checked out. On every `Session` return, the pool checks the client's latest
+`ReadyForQuery` status. A connection still in an active (`T`) or failed (`E`)
+transaction is discarded, along with its statement cache, instead of being
+offered to the next borrower. The pool does not issue an automatic `ROLLBACK`.
+Idle connections retain session state such as `SET` values and `LISTEN`
+subscriptions under `Fast`; select `Clean` when that state must be cleared.
+
 `PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
 Hooks receive the raw `@client.Client`; keep them short and leave the session
 idle when they return.
