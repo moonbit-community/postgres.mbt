@@ -208,17 +208,24 @@ async test "scoped statement and portal streams leave caller resources open and 
         closed: @ref.new(false),
       }
       let portal : Portal = {
-        client,
         name: b"owned_portal",
         columns: [],
         closed: @ref.new(false),
       }
+      let transaction = if use_portal {
+        let begin = group.spawn(() => client.transaction())
+        next_request().responses.put(
+          copy_test_ready_for_query_message(status=b'T'),
+        )
+        Some(begin.wait())
+      } else {
+        None
+      }
       for _ in 0..<2 {
         let task = group.spawn(() => {
-          if use_portal {
-            client.with_portal_stream(portal, 1, _ => 42)
-          } else {
-            client.with_statement_stream(statement, _ => 42)
+          match transaction {
+            Some(tx) => tx.with_portal_stream(portal, 1, _ => 42)
+            None => client.with_statement_stream(statement, _ => 42)
           }
         })
         let request = next_request()
@@ -234,11 +241,20 @@ async test "scoped statement and portal streams leave caller resources open and 
         if use_portal {
           request.responses.put(parse_backend_message(b"s\x00\x00\x00\x04"))
         }
-        request.responses.put(copy_test_ready_for_query_message())
+        request.responses.put(
+          copy_test_ready_for_query_message(
+            status=if use_portal { b'T' } else { b'I' },
+          ),
+        )
         assert_eq(task.wait(), 42)
         assert_false(statement.closed.val)
         assert_false(portal.closed.val)
         assert_true(client.shared.requests.try_get() is None)
+      }
+      if transaction is Some(tx) {
+        let rollback = group.spawn(() => tx.rollback())
+        next_request().responses.put(copy_test_ready_for_query_message())
+        rollback.wait()
       }
     })
   }

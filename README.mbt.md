@@ -21,10 +21,11 @@ ordinary pool methods checkout and return sessions automatically, while
 `Pool::with_session` provides callback-scoped session affinity.
 
 For client streams and COPY, prefer `Client::with_stream`,
-`with_typed_stream`, `with_statement_stream`, `with_portal_stream`,
-`with_simple_query`, `with_copy_in`, and `with_copy_out`. These scopes keep the
-callback cancellable and wait for cleanup on every exit. COPY IN commits only
-when the callback explicitly calls `finish()`; otherwise it is aborted.
+`with_typed_stream`, `with_statement_stream`, `with_simple_query`,
+`with_copy_in`, and `with_copy_out`. Fetch portals inside a transaction with
+`Transaction::with_portal_stream`. These scopes keep the callback cancellable
+and wait for cleanup on every exit. COPY IN commits only when the callback
+explicitly calls `finish()`; otherwise it is aborted.
 Transaction scopes also drain unfinished query streams before completion and
 roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
 

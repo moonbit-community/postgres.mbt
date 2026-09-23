@@ -77,16 +77,20 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 清理是幂等的。消费者取消时，既不能泄漏许可，也不能让下一个操作在 PostgreSQL
 到达安全边界之前开始。
 
-七个 `Client::with_*` 流/COPY API 共用 `with_scoped_resource`。等待就绪和获取许可仍可
+六个 `Client::with_*` 流/COPY API 共用 `with_scoped_resource`。等待就绪和获取许可仍可
 取消；仅协议启动和 finalizer 受到取消保护，业务回调保持可取消。资源获取后立即安装
 `errdefer`，在回调前、回调后和清理后检查待处理取消。输出流调用 `finish()`；COPY IN
 若未显式完成则调用 `abort()`。COPY IN 记录遗弃排空的完成信号，作用域因此也能等待
 `send`、`finish` 或 `abort` 被取消时启动的后台清理。清理错误不覆盖回调原错误。
-Statement/Portal 作用域仅拥有本次执行流，不关闭父句柄。
+Client 的 Statement 作用域和事务的 Portal 作用域仅拥有本次执行流，不关闭父句柄。
 
 inferred/typed 临时查询在 `read_prepare_response` 成功后立即安装语句清理。Close 字节和
 执行参数均在提交 Execute 前构造；随后由不会抛错的 RowStream 构造器接管清理责任。
 编码或提交失败时，使用已有许可关闭语句，并保留原始错误。
+
+命名 `prepare` 使用专门的句柄交付路径：客户端或事务在受保护的准备过程结束后，仍持有
+许可和 `OpContext`，然后检查待处理取消。若已取消，就受保护地发送 Close 并等待
+`ReadyForQuery`，再传播取消。任何 Close 失败都会中止物理连接，但调用方仍收到原取消。
 
 裸流工厂在获取许可后、开始协议工作前检查是否存在待处理的取消。对异步预处理或 COPY
 启动过程施加取消保护的工厂，会在离开保护区域后、仍处于同一个 `errdefer` 作用域内时

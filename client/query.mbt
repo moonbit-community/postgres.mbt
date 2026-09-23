@@ -52,7 +52,33 @@ pub async fn Client::prepare_typed(
   sql : String,
   types : Array[Type],
 ) -> Statement {
-  self.run_operation(context => context.prepare_typed(sql, types))
+  self.ready()
+  let permit = self.shared.operation_gate.acquire()
+  defer permit.release()
+  ensure_open(self.shared)
+  check_pending_cancellation()
+  self.operation_context().prepare_for_delivery(sql, types)
+}
+
+///|
+// The operation owner must hold its permit until this handoff completes.
+// Cancellation can arrive while the protected prepare waits for the server;
+// in that case, close the created statement before exposing cancellation.
+async fn OpContext::prepare_for_delivery(
+  self : OpContext,
+  sql : String,
+  types : Array[Type],
+) -> Statement {
+  let statement = @async.protect_from_cancel(() => {
+    self.prepare_typed(sql, types)
+  })
+  errdefer @async.protect_from_cancel(() => {
+    self.close_statement(statement) catch {
+      _ => self.client.abort()
+    }
+  })
+  check_pending_cancellation()
+  statement
 }
 
 ///|
@@ -365,19 +391,7 @@ async fn OpContext::execute_raw(
 }
 
 ///|
-/// Bind parameters to a prepared statement and create a server-side portal.
-///
-/// Portals are primarily useful for chunked fetching with `query_portal` or for
-/// separating parameter binding from later execution.
-pub async fn Client::bind(
-  self : Client,
-  statement : Statement,
-  params? : Array[&ToSql] = [],
-) -> Portal {
-  self.run_operation(context => context.bind(statement, params))
-}
-
-///|
+// Bind a portal within a transaction's existing operation context.
 async fn OpContext::bind(
   self : OpContext,
   statement : Statement,
@@ -417,7 +431,6 @@ async fn OpContext::bind(
           Some(err) => raise ClientError::Database(err)
           None => {
             let portal = Portal::{
-              client: self.client,
               name,
               // Resolve column OIDs lazily here so callers still get enriched
               // type descriptors even when portals are bound later.
@@ -437,15 +450,6 @@ async fn OpContext::bind(
 }
 
 ///|
-/// Close the portal on the server.
-pub async fn Portal::close(self : Portal) -> Unit {
-  if self.closed.val {
-    return
-  }
-  self.client.run_operation(context => context.close_portal(self))
-}
-
-///|
 async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
   if portal.closed.val {
     return
@@ -459,21 +463,7 @@ async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
 }
 
 ///|
-/// Execute a portal and stream up to `max_rows` rows.
-///
-/// When PostgreSQL suspends the portal because the limit was reached, the
-/// returned `RowStream` reports that via `QuerySummary.suspended`.
-pub async fn Client::query_portal(
-  self : Client,
-  portal : Portal,
-  max_rows : Int,
-) -> RowStream {
-  let (context, permit) = self.begin_stream_operation()
-  errdefer permit.release()
-  context.query_portal(portal, max_rows, permit~)
-}
-
-///|
+// Execute a transaction-owned portal through the enclosing operation permit.
 fn OpContext::query_portal(
   self : OpContext,
   portal : Portal,

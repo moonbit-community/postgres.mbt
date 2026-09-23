@@ -82,23 +82,6 @@ pub async fn[T] Client::with_statement_stream(
 }
 
 ///|
-/// Fetch up to `max_rows` with the cleanup semantics of `with_stream`.
-/// Only this execution stream is finished; the caller retains the portal and
-/// its statement, including when PostgreSQL suspends the portal at the limit.
-pub async fn[T] Client::with_portal_stream(
-  self : Client,
-  portal : Portal,
-  max_rows : Int,
-  f : async (RowStream) -> T,
-) -> T {
-  self.with_scoped_resource(
-    (context, permit) => context.query_portal(portal, max_rows, permit~),
-    stream => ignore(stream.finish()),
-    f,
-  )
-}
-
-///|
 /// Consume simple-query frames in a cancellable callback and return its result.
 /// Finish the stream on every exit, with the same error and cancellation
 /// semantics as `with_stream`.
