@@ -95,3 +95,25 @@ async test "typed parameter count mismatch does not create a statement" {
     assert_true(client.shared.requests.try_get() is None)
   })
 }
+
+///|
+async test "failed temporary Close without ReadyForQuery aborts connection" {
+  @async.with_task_group(group => {
+    let shared = copy_test_shared(@ref.new(Some(group)))
+    let client : Client = { shared, }
+    let task = group.spawn(allow_failure=true, () => {
+      client.query("select $1::int4", params=[true as &ToSql])
+    })
+    let prepare = shared.requests.get()
+    scoped_test_prepare(prepare, param_types=[Type::int4()])
+    let close = shared.requests.get()
+    assert_eq(close.bytes, close_bytes(b'S', b"q1"))
+    close.responses.close(error=ClientError::Protocol("close lost"), clear=true)
+    assert_true(
+      expect_error_async(() => task.wait()) is ClientError::WrongType(_),
+    )
+    assert_true(shared.aborted.val)
+    assert_true(shared.operation_gate.mutex.try_acquire())
+    shared.operation_gate.mutex.release()
+  })
+}

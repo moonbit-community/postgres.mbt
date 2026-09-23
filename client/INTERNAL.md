@@ -155,6 +155,16 @@ same context to the child transaction.
 
 Callback transactions roll back on errors and task cancellation. Rollback is
 protected from cancellation and finishes before releasing the owning permit.
+Each transaction records its current stream or nested transaction before
+handing out the handle. Startup first publishes a `Creating` marker, so a
+concurrent close waits for creation and cleanup. Closing rejects new scoped
+operations, drains a stream or recursively rolls back a nested transaction,
+then acquires the scope gate to send its own completion command. Acquiring the
+gate before child cleanup would wait on the child's permit and deadlock.
+Database errors during stream drain are reported after a protected rollback;
+protocol or transport failures abort the physical connection when synchronization
+cannot be confirmed. An open nested transaction on commit is a usage error and
+causes recursive rollback through the parent.
 
 async 0.22 does not automatically propagate pending cancellation on leaving a
 protected block. Client and transaction operation boundaries check before new

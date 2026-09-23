@@ -25,6 +25,8 @@ For client streams and COPY, prefer `Client::with_stream`,
 `with_simple_query`, `with_copy_in`, and `with_copy_out`. These scopes keep the
 callback cancellable and wait for cleanup on every exit. COPY IN commits only
 when the callback explicitly calls `finish()`; otherwise it is aborted.
+Transaction scopes also drain unfinished query streams before completion and
+roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
 
 In `0.1.0`, `Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await

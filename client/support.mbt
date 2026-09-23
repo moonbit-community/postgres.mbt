@@ -192,6 +192,9 @@ fn Transaction::assert_open(self : Transaction) -> Unit raise {
   if self.finished.val {
     raise ClientError::Closed("transaction is already finished")
   }
+  if self.closing.val is Some(_) {
+    raise ClientError::Closed("transaction is closing")
+  }
   if self.client.shared.closed.val {
     self.finished.val = true
     self.release_owner_permit()
