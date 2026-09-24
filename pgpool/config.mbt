@@ -194,13 +194,12 @@ pub fn PoolConfig::PoolConfig(
 }
 
 ///|
-/// Failures raised while validating or normalizing declarative pool input.
+/// Failures raised while validating declarative pool input.
 ///
 /// These errors are reported before the pool opens any physical connection.
 pub suberror ConfigError {
   UsernameEmpty
   DbnameEmpty
-  HostPortArityMismatch
   InvalidConfig(String)
 } derive(Eq, Debug)
 
@@ -240,12 +239,31 @@ pub(all) enum LoadBalanceHosts {
 } derive(Eq, Debug)
 
 ///|
-/// Declarative input used to derive one pool plus one or more concrete
-/// connection targets.
+/// One PostgreSQL endpoint. When both addresses are set, the client connects
+/// to `hostaddr` and uses `host` for TLS hostname verification.
+pub struct ConnectionTarget {
+  /// Hostname used for TLS verification and DNS connection when no address is set.
+  host : String?
+  /// Concrete address used for the TCP connection when present.
+  hostaddr : String?
+  /// TCP port for this endpoint.
+  port : Int
+} derive(Eq, Debug)
+
+///|
+/// Construct one endpoint. `Config::Config` validates its address and port.
+pub fn ConnectionTarget::ConnectionTarget(
+  host? : String,
+  hostaddr? : String,
+  port? : Int = 5432,
+) -> ConnectionTarget {
+  { host, hostaddr, port, }
+}
+
+///|
+/// Declarative input used to derive one pool and its connection targets.
 ///
-/// All fields are explicit. Validation is deferred until callers ask for
-/// normalized output via `Pool::create`, `get_pool_config`, or
-/// `get_connection_targets`.
+/// The constructor validates all endpoints and common connection settings.
 pub struct Config {
   user : String
   /// Optional in the declarative config, but required at connection startup
@@ -257,12 +275,7 @@ pub struct Config {
   ssl_mode : @client.SslMode?
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
-  host : String?
-  hosts : Array[String]?
-  hostaddr : String?
-  hostaddrs : Array[String]?
-  port : Int?
-  ports : Array[Int]?
+  priv targets : Array[ConnectionTarget]
   connect_timeout_ms : Int?
   keepalives : Bool?
   keepalives_idle_s : Int?
@@ -272,16 +285,18 @@ pub struct Config {
 } derive(Eq, Debug)
 
 ///|
-/// Build declarative pool config with client-style required inputs.
+/// Return a read-only view of the configured endpoints in connection order.
+pub fn Config::targets(self : Config) -> ArrayView[ConnectionTarget] {
+  self.targets[:]
+}
+
+///|
+/// Build a pool config from an ordered, non-empty list of endpoints.
 ///
-/// The first target is described by the same core fields as `@client.Config`,
-/// then optional pool-specific multi-target settings can be added on top.
-/// Defaults keep the secure client path: port `5432`, `ssl_mode = VerifyFull`,
-/// and `dbname = user`.
+/// The target array is copied. Defaults keep the secure client path:
+/// `ssl_mode = VerifyFull` and `dbname = user`.
 pub fn Config::Config(
-  host : String,
-  hostaddr? : String,
-  port? : Int = 5432,
+  targets : Array[ConnectionTarget],
   user~ : String,
   dbname? : String = user,
   password? : String,
@@ -293,13 +308,18 @@ pub fn Config::Config(
   connect_timeout_ms? : Int,
   keepalives? : Bool,
   keepalives_idle_s? : Int,
-  hosts? : Array[String],
-  hostaddrs? : Array[String],
-  ports? : Array[Int],
   target_session_attrs? : TargetSessionAttrs = Any,
   load_balance_hosts? : LoadBalanceHosts = Disable,
   pool~ : PoolConfig,
-) -> Config {
+) -> Config raise {
+  validate_connection_targets(targets)
+  if user == "" {
+    raise ConfigError::UsernameEmpty
+  }
+  if dbname == "" {
+    raise ConfigError::DbnameEmpty
+  }
+  validate_tls_config(ssl_mode, ssl_root_cert)
   {
     user,
     password,
@@ -309,12 +329,7 @@ pub fn Config::Config(
     ssl_mode: Some(ssl_mode),
     ssl_root_cert,
     channel_binding: Some(channel_binding),
-    host: Some(host),
-    hosts,
-    hostaddr,
-    hostaddrs,
-    port: Some(port),
-    ports,
+    targets: targets.copy(),
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
@@ -387,27 +402,6 @@ fn validate_timeout(name : String, timeout_ms : Int?) -> Unit raise {
 }
 
 ///|
-/// Fully normalized declarative config ready to create client targets.
-priv struct NormalizedConfig {
-  hosts : Array[String?]
-  hostaddrs : Array[String?]
-  ports : Array[Int]
-  user : String
-  password : String?
-  dbname : String
-  options : String?
-  application_name : String
-  ssl_mode : @client.SslMode
-  ssl_root_cert : String?
-  channel_binding : @client.ChannelBinding
-  connect_timeout_ms : Int?
-  keepalives : Bool?
-  keepalives_idle_s : Int?
-  target_session_attrs : TargetSessionAttrs
-  load_balance_hosts : LoadBalanceHosts
-}
-
-///|
 /// Return the validated pool-capacity config for this declarative input.
 pub fn Config::get_pool_config(self : Config) -> PoolConfig raise {
   validate_pool_config(self.pool)
@@ -415,102 +409,54 @@ pub fn Config::get_pool_config(self : Config) -> PoolConfig raise {
 }
 
 ///|
-/// Expand declarative host settings into concrete single-target client configs.
+/// Build one client config per endpoint, preserving the configured order.
 ///
-/// Each returned `@client.Config` describes exactly one target address and is
-/// ready to pass to the connector. This step broadcasts single host, hostaddr,
-/// and port values when needed, requires multi-value arrays to have matching
-/// lengths, and validates every target before any network connection is opened.
-pub fn Config::get_connection_targets(
-  self : Config,
-) -> Array[@client.Config] raise {
-  let normalized = normalize_config(self)
+/// Each target connects to its own address and port. When both addresses are
+/// present, the client connects to `hostaddr` and verifies TLS against `host`.
+pub fn Config::get_connection_targets(self : Config) -> Array[@client.Config] {
   let targets : Array[@client.Config] = []
-  for i in 0..<normalized.ports.length() {
-    targets.push(make_client_config(normalized, i))
+  for target in self.targets {
+    targets.push(
+      @client.Config::new_internal(
+        target.host.unwrap_or(""),
+        target.hostaddr,
+        target.port,
+        self.user,
+        self.dbname,
+        self.password,
+        self.ssl_mode.unwrap_or(VerifyFull),
+        self.ssl_root_cert,
+        self.channel_binding.unwrap_or(Disable),
+        self.application_name,
+        self.options,
+        self.connect_timeout_ms,
+        self.keepalives,
+        self.keepalives_idle_s,
+      ),
+    )
   }
   targets
 }
 
 ///|
-/// Normalize explicit config fields into concrete target arrays.
-fn normalize_config(config : Config) -> NormalizedConfig raise {
-  let raw_hosts : Array[String?] = []
-  match config.host {
-    Some(host) => raw_hosts.push(Some(host))
-    None => ()
+/// Validate every address and port before a config can be constructed.
+fn validate_connection_targets(targets : Array[ConnectionTarget]) -> Unit raise {
+  if targets.length() == 0 {
+    raise ConfigError::InvalidConfig("targets must not be empty")
   }
-  match config.hosts {
-    Some(extra_hosts) =>
-      for host in extra_hosts {
-        raw_hosts.push(Some(host))
-      }
-    None => ()
-  }
-  let raw_hostaddrs = choose_optional_string_array(
-    config.hostaddr,
-    config.hostaddrs,
-  )
-  let raw_ports = choose_int_array(config.port, config.ports)
-  let target_count = infer_target_count(raw_hosts, raw_hostaddrs, raw_ports)
-  if raw_hosts.length() == 0 && target_count == 1 && raw_hostaddrs.length() == 0 {
-    raw_hosts.push(Some("127.0.0.1"))
-  }
-  let user = if config.user == "" {
-    raise ConfigError::UsernameEmpty
-  } else {
-    config.user
-  }
-  let dbname = if config.dbname == "" {
-    raise ConfigError::DbnameEmpty
-  } else {
-    config.dbname
-  }
-  let ssl_mode = choose_ssl_mode(config.ssl_mode)
-  let ssl_root_cert = config.ssl_root_cert
-  let hosts = broadcast_hosts(raw_hosts, target_count)
-  let hostaddrs = broadcast_optional_strings(raw_hostaddrs, target_count)
-  let ports = broadcast_ints(raw_ports, target_count, 5432)
-  validate_connection_targets(hosts, hostaddrs, ports, ssl_mode, ssl_root_cert)
-  {
-    hosts,
-    hostaddrs,
-    ports,
-    user,
-    password: config.password,
-    dbname,
-    options: config.options,
-    application_name: config.application_name,
-    ssl_mode,
-    ssl_root_cert,
-    channel_binding: choose_channel_binding(config.channel_binding),
-    connect_timeout_ms: config.connect_timeout_ms,
-    keepalives: config.keepalives,
-    keepalives_idle_s: config.keepalives_idle_s,
-    target_session_attrs: choose_target_session_attrs(
-      config.target_session_attrs,
-    ),
-    load_balance_hosts: choose_load_balance_hosts(config.load_balance_hosts),
-  }
-}
-
-///|
-/// Validate the address identity and port of every normalized target.
-fn validate_connection_targets(
-  hosts : Array[String?],
-  hostaddrs : Array[String?],
-  ports : Array[Int],
-  ssl_mode : @client.SslMode,
-  ssl_root_cert : String?,
-) -> Unit raise {
-  for index in 0..<ports.length() {
-    let port = ports[index]
-    if port < 1 || port > 65535 {
-      raise ConfigError::InvalidConfig("port must be between 1 and 65535")
+  for index in 0..<targets.length() {
+    let target = targets[index]
+    if !is_non_empty_string(target.host) &&
+      !is_non_empty_string(target.hostaddr) {
+      raise ConfigError::InvalidConfig(
+        "target \{index}: host or hostaddr must be non-empty",
+      )
     }
-    let has_tls_identity = is_non_empty_string(hosts[index]) ||
-      is_non_empty_string(hostaddrs[index])
-    validate_tls_config(ssl_mode, ssl_root_cert, has_tls_identity)
+    if target.port < 1 || target.port > 65535 {
+      raise ConfigError::InvalidConfig(
+        "target \{index}: port must be between 1 and 65535",
+      )
+    }
   }
 }
 
@@ -523,142 +469,9 @@ fn is_non_empty_string(value : String?) -> Bool {
 }
 
 ///|
-/// Build one concrete client config from a normalized target entry.
-fn make_client_config(
-  normalized : NormalizedConfig,
-  index : Int,
-) -> @client.Config {
-  @client.Config::new_internal(
-    normalized.hosts[index].unwrap_or(""),
-    normalized.hostaddrs[index],
-    normalized.ports[index],
-    normalized.user,
-    normalized.dbname,
-    normalized.password,
-    normalized.ssl_mode,
-    normalized.ssl_root_cert,
-    normalized.channel_binding,
-    normalized.application_name,
-    normalized.options,
-    normalized.connect_timeout_ms,
-    normalized.keepalives,
-    normalized.keepalives_idle_s,
-  )
-}
-
-///|
-/// Return the number of targets implied by the current host, hostaddr, and port arrays.
-fn infer_target_count(
-  hosts : Array[String?],
-  hostaddrs : Array[String],
-  ports : Array[Int],
-) -> Int {
-  let mut count = hosts.length()
-  if hostaddrs.length() > count {
-    count = hostaddrs.length()
-  }
-  if ports.length() > count {
-    count = ports.length()
-  }
-  if count == 0 {
-    1
-  } else {
-    count
-  }
-}
-
-///|
-/// Broadcast hosts to the target count.
-fn broadcast_hosts(hosts : Array[String?], count : Int) -> Array[String?] raise {
-  if hosts.length() == 0 {
-    return Array::make(count, None)
-  }
-  if hosts.length() == 1 {
-    return Array::make(count, hosts[0])
-  }
-  if hosts.length() != count {
-    raise ConfigError::HostPortArityMismatch
-  }
-  hosts
-}
-
-///|
-/// Broadcast optional host addresses to the target count.
-fn broadcast_optional_strings(
-  values : Array[String],
-  count : Int,
-) -> Array[String?] raise {
-  if values.length() == 0 {
-    return Array::make(count, None)
-  }
-  if values.length() == 1 {
-    return Array::make(count, Some(values[0]))
-  }
-  if values.length() != count {
-    raise ConfigError::HostPortArityMismatch
-  }
-  values.map(value => Some(value))
-}
-
-///|
-/// Broadcast ports to the target count.
-fn broadcast_ints(
-  values : Array[Int],
-  count : Int,
-  default : Int,
-) -> Array[Int] raise {
-  if values.length() == 0 {
-    return Array::make(count, default)
-  }
-  if values.length() == 1 {
-    return Array::make(count, values[0])
-  }
-  if values.length() != count {
-    raise ConfigError::HostPortArityMismatch
-  }
-  values
-}
-
-///|
-/// Choose one string array override from scalar-or-array values.
-fn choose_optional_string_array(
-  scalar : String?,
-  array : Array[String]?,
-) -> Array[String] {
-  match array {
-    Some(array) => array
-    None =>
-      match scalar {
-        Some(value) => [value]
-        None => []
-      }
-  }
-}
-
-///|
-/// Choose one integer array override from scalar-or-array values.
-fn choose_int_array(scalar : Int?, array : Array[Int]?) -> Array[Int] {
-  match array {
-    Some(array) => array
-    None =>
-      match scalar {
-        Some(value) => [value]
-        None => []
-      }
-  }
-}
-
-///|
-/// Choose one SSL mode override.
-fn choose_ssl_mode(selected : @client.SslMode?) -> @client.SslMode {
-  selected.unwrap_or(VerifyFull)
-}
-
-///|
 fn validate_tls_config(
   ssl_mode : @client.SslMode,
   ssl_root_cert : String?,
-  has_explicit_host : Bool,
 ) -> Unit raise {
   match ssl_root_cert {
     Some(root_cert) =>
@@ -669,31 +482,4 @@ fn validate_tls_config(
       }
     None => ()
   }
-  if ssl_mode == VerifyFull && !has_explicit_host {
-    raise ConfigError::InvalidConfig(
-      "sslmode=verify-full requires explicit host or hostaddr",
-    )
-  }
-}
-
-///|
-/// Choose one channel-binding override.
-fn choose_channel_binding(
-  selected : @client.ChannelBinding?,
-) -> @client.ChannelBinding {
-  selected.unwrap_or(Disable)
-}
-
-///|
-/// Choose one target-session-attrs override.
-fn choose_target_session_attrs(
-  selected : TargetSessionAttrs?,
-) -> TargetSessionAttrs {
-  selected.unwrap_or(Any)
-}
-
-///|
-/// Choose one load-balancing override.
-fn choose_load_balance_hosts(selected : LoadBalanceHosts?) -> LoadBalanceHosts {
-  selected.unwrap_or(Disable)
 }

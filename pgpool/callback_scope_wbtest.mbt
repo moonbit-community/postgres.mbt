@@ -92,8 +92,7 @@ async fn with_callback_scope_pool(
     })
     let pool = start_test_pool(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         ssl_mode=Disable,
         application_name="callback-scope-test",

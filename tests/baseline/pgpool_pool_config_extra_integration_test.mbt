@@ -30,14 +30,14 @@ async test "integration pool custom connector supports target failover" {
       }
     })
     let declarative = @pgpool.Config::Config(
-      config.host,
+      [
+        @pgpool.ConnectionTarget(host=config.host, port=config.port),
+        @pgpool.ConnectionTarget(host=config.host, port=config.port),
+      ],
       user=config.user,
       dbname=config.database,
       password=config.password,
-      port=config.port,
       application_name="moonbit-postgres-pool-failover",
-      hosts=[config.host],
-      ports=[config.port, config.port],
       pool=PoolConfig(1),
     )
     let (pool, executor) = @pgpool.Pool::create(

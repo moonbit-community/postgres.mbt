@@ -19,7 +19,7 @@ async fn[T, E : Error] expect_pgpool_error_async(
 ///|
 fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
   let config = Config::Config(
-    "db.example",
+    [ConnectionTarget(host="db.example")],
     user="moon",
     dbname="moondb",
     application_name="pgpool-client-api-wbtest",

@@ -1,6 +1,6 @@
 ///|
-/// Config normalization remains independent of opening a database connection.
-test "pool config constructors and normalization" {
+/// Config expansion remains independent of opening a database connection.
+test "pool config constructors and targets" {
   guard @pgpool.QueueMode::fifo() is Fifo else {
     fail("expected fifo queue mode")
   }
@@ -30,15 +30,15 @@ test "pool config constructors and normalization" {
   @debug.assert_eq(pool_config.timeouts.wait_ms, Some(10))
 
   let config = @pgpool.Config::Config(
-    "one.db",
-    hostaddrs=["10.0.0.1", "10.0.0.2"],
-    ports=[1111, 2222],
+    [
+      @pgpool.ConnectionTarget(host="one.db", hostaddr="10.0.0.1", port=1111),
+      @pgpool.ConnectionTarget(host="two.db", hostaddr="10.0.0.2", port=2222),
+    ],
     user="moon",
     dbname="moondb",
     ssl_mode=VerifyCa,
     ssl_root_cert="/tmp/root.crt",
     application_name="pool-config-extra",
-    hosts=["two.db"],
     pool=pool_config,
   )
   let targets = config.get_connection_targets()
@@ -51,6 +51,40 @@ test "pool config constructors and normalization" {
   assert_eq(targets[1].port, 2222)
   assert_true(targets[0].ssl_mode == VerifyCa)
   assert_eq(config.get_pool_config().statement_cache_capacity, 7)
+}
+
+///|
+/// Constructor inputs and inspected copies must not change connection targets.
+test "pool config target array is a private snapshot" {
+  let configured = [
+    @pgpool.ConnectionTarget(host="primary.db", hostaddr="10.0.0.1"),
+    @pgpool.ConnectionTarget(host="replica.db", hostaddr="10.0.0.2", port=5433),
+  ]
+  let config = @pgpool.Config::Config(
+    configured,
+    user="moon",
+    application_name="pool-target-snapshot",
+    pool=PoolConfig(1),
+  )
+  configured[0] = @pgpool.ConnectionTarget(host="other.db", port=9999)
+  configured.clear()
+
+  let target_view = config.targets()
+  let inspected_targets = target_view.to_owned()
+  inspected_targets.clear()
+
+  assert_eq(target_view.length(), 2)
+  assert_eq(target_view[0].host, Some("primary.db"))
+  assert_eq(target_view[1].hostaddr, Some("10.0.0.2"))
+  assert_eq(target_view[0].port, 5432)
+  let targets = config.get_connection_targets()
+  assert_eq(targets.length(), 2)
+  assert_eq(targets[0].host, "primary.db")
+  assert_eq(targets[1].host, "replica.db")
+  assert_eq(targets[0].hostaddr, Some("10.0.0.1"))
+  assert_eq(targets[1].hostaddr, Some("10.0.0.2"))
+  assert_eq(targets[0].port, 5432)
+  assert_eq(targets[1].port, 5433)
 }
 
 ///|
@@ -88,14 +122,14 @@ test "pool config validation rejects invalid settings" {
 
   let invalid_tls = @test.expect_error(() => {
     @pgpool.Config::Config(
-      "db.example",
+      [@pgpool.ConnectionTarget(host="db.example")],
       user="moon",
       dbname="moondb",
       ssl_mode=VerifyCa,
       ssl_root_cert="system",
       application_name="pool-system-root-extra",
       pool=PoolConfig(1),
-    ).get_connection_targets()
+    )
   })
   guard invalid_tls is @pgpool.ConfigError::InvalidConfig(tls_message) else {
     fail("expected TLS validation error")

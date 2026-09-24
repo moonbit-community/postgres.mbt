@@ -110,12 +110,16 @@ fn make_pool(
   pool_config : @pgpool.PoolConfig,
 ) -> @pgpool.Pool raise {
   let config = @pgpool.Config::Config(
-    config.host,
-    hostaddr?=config.hostaddr,
+    [
+      @pgpool.ConnectionTarget(
+        host=config.host,
+        hostaddr?=config.hostaddr,
+        port=config.port,
+      ),
+    ],
     user=config.user,
     dbname=config.database,
     password?=config.password,
-    port=config.port,
     ssl_mode=config.ssl_mode,
     ssl_root_cert?=config.ssl_root_cert,
     channel_binding=config.channel_binding,
