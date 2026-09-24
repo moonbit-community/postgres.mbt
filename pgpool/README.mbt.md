@@ -94,12 +94,33 @@ async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
 }
 ```
 
+Pool transaction options use the `client` isolation enum re-exported as
+`@pgpool.IsolationLevel`; existing enum constructor calls remain valid. The
+isolation level is selected from four fixed SQL spellings:
+
+```mbt check
+///|
+async fn _pool_serializable_transaction(pool : @pgpool.Pool) -> Unit {
+  pool.with_transaction(
+    _tx => (),
+    options=@pgpool.TransactionOptions(
+      isolation_level=@pgpool.IsolationLevel::serializable(),
+    ),
+  )
+}
+```
+
 On normal callback return, the helper commits only if the transaction is still
 open; an explicit commit or rollback prevents a second completion. If the
 callback raises or is cancelled, it rolls back best-effort when the transaction
 is still open. Nested transactions use savepoints. Rollback cleanup is
 protected from cancellation, including the wait for in-flight operations. A
 captured `Transaction` is expired when its callback completes.
+
+`with_savepoint(name, ...)` quotes `name` as a case-sensitive PostgreSQL
+identifier. Spaces, double quotes, semicolons, and Unicode are supported.
+Empty names and names containing NUL raise the client's
+`InvalidSavepointName` error before SQL is sent; the parent remains usable.
 
 Cancellation received while SQL is waiting for a response propagates after
 protected protocol cleanup and before automatic commit. This includes nested

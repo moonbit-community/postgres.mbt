@@ -56,6 +56,8 @@ pub suberror ClientError {
   Protocol(String)
   /// A client creation option is invalid.
   InvalidConfig(String)
+  /// A savepoint name is empty or contains a NUL character.
+  InvalidSavepointName(String)
   /// TLS negotiation or handshake failed.
   Ssl(String)
   /// Query parameter encoding failed.

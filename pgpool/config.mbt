@@ -40,37 +40,8 @@ pub enum TimeoutKind {
 } derive(Eq, Debug)
 
 ///|
-/// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
-pub enum IsolationLevel {
-  ReadUncommitted
-  ReadCommitted
-  RepeatableRead
-  Serializable
-} derive(Eq, Debug)
-
-///|
-/// Construct `READ UNCOMMITTED`.
-pub fn IsolationLevel::read_uncommitted() -> IsolationLevel {
-  ReadUncommitted
-}
-
-///|
-/// Construct `READ COMMITTED`.
-pub fn IsolationLevel::read_committed() -> IsolationLevel {
-  ReadCommitted
-}
-
-///|
-/// Construct `REPEATABLE READ`.
-pub fn IsolationLevel::repeatable_read() -> IsolationLevel {
-  RepeatableRead
-}
-
-///|
-/// Construct `SERIALIZABLE`.
-pub fn IsolationLevel::serializable() -> IsolationLevel {
-  Serializable
-}
+/// Re-export the client isolation level for pooled transaction options.
+pub using @client {type IsolationLevel}
 
 ///|
 /// Options for the `BEGIN` command used when opening a pooled transaction.

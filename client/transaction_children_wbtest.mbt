@@ -120,21 +120,25 @@ async test "unfinished nested transactions roll back from deepest to root" {
     })
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let inner = next_request()
-    assert_eq(inner.bytes, simple_query_bytes("SAVEPOINT inner"))
+    assert_eq(inner.bytes, simple_query_bytes("SAVEPOINT \"inner\""))
     inner.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let leaf = next_request()
-    assert_eq(leaf.bytes, simple_query_bytes("SAVEPOINT leaf"))
+    assert_eq(leaf.bytes, simple_query_bytes("SAVEPOINT \"leaf\""))
     leaf.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let leaf_rollback = next_request()
     assert_eq(
       leaf_rollback.bytes,
-      simple_query_bytes("ROLLBACK TO SAVEPOINT leaf; RELEASE SAVEPOINT leaf"),
+      simple_query_bytes(
+        "ROLLBACK TO SAVEPOINT \"leaf\"; RELEASE SAVEPOINT \"leaf\"",
+      ),
     )
     leaf_rollback.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let inner_rollback = next_request()
     assert_eq(
       inner_rollback.bytes,
-      simple_query_bytes("ROLLBACK TO SAVEPOINT inner; RELEASE SAVEPOINT inner"),
+      simple_query_bytes(
+        "ROLLBACK TO SAVEPOINT \"inner\"; RELEASE SAVEPOINT \"inner\"",
+      ),
     )
     inner_rollback.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let root_rollback = next_request()
@@ -278,7 +282,7 @@ async test "manual rollback recursively closes nested stream and savepoint" {
     assert_eq(
       nested_rollback.bytes,
       simple_query_bytes(
-        "ROLLBACK TO SAVEPOINT nested; RELEASE SAVEPOINT nested",
+        "ROLLBACK TO SAVEPOINT \"nested\"; RELEASE SAVEPOINT \"nested\"",
       ),
     )
     nested_rollback.responses.put(
@@ -306,7 +310,7 @@ async test "manual commit with an open savepoint rolls back and reports misuse" 
     assert_eq(
       child_rollback.bytes,
       simple_query_bytes(
-        "ROLLBACK TO SAVEPOINT open_child; RELEASE SAVEPOINT open_child",
+        "ROLLBACK TO SAVEPOINT \"open_child\"; RELEASE SAVEPOINT \"open_child\"",
       ),
     )
     child_rollback.responses.put(copy_test_ready_for_query_message(status=b'T'))
@@ -452,7 +456,7 @@ async test "closing a transaction while creating a savepoint rolls it back" {
     assert_eq(
       nested_rollback.bytes,
       simple_query_bytes(
-        "ROLLBACK TO SAVEPOINT pending; RELEASE SAVEPOINT pending",
+        "ROLLBACK TO SAVEPOINT \"pending\"; RELEASE SAVEPOINT \"pending\"",
       ),
     )
     nested_rollback.responses.put(
@@ -480,23 +484,23 @@ async test "nested transaction scopes release savepoints before root commit" {
     })
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let unnamed = next_request()
-    assert_eq(unnamed.bytes, simple_query_bytes("SAVEPOINT moon_tx_1"))
+    assert_eq(unnamed.bytes, simple_query_bytes("SAVEPOINT \"moon_tx_1\""))
     unnamed.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let release_unnamed = next_request()
     assert_eq(
       release_unnamed.bytes,
-      simple_query_bytes("RELEASE SAVEPOINT moon_tx_1"),
+      simple_query_bytes("RELEASE SAVEPOINT \"moon_tx_1\""),
     )
     release_unnamed.responses.put(
       copy_test_ready_for_query_message(status=b'T'),
     )
     let named = next_request()
-    assert_eq(named.bytes, simple_query_bytes("SAVEPOINT named"))
+    assert_eq(named.bytes, simple_query_bytes("SAVEPOINT \"named\""))
     named.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let release_named = next_request()
     assert_eq(
       release_named.bytes,
-      simple_query_bytes("RELEASE SAVEPOINT named"),
+      simple_query_bytes("RELEASE SAVEPOINT \"named\""),
     )
     release_named.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let commit = next_request()

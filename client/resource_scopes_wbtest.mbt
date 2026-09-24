@@ -197,10 +197,13 @@ async test "child transaction commits inside parent statement scope" {
     })
     scoped_test_prepare(next_request())
     let savepoint = next_request()
-    assert_eq(savepoint.bytes, simple_query_bytes("SAVEPOINT moon_tx_2"))
+    assert_eq(savepoint.bytes, simple_query_bytes("SAVEPOINT \"moon_tx_2\""))
     savepoint.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let release = next_request()
-    assert_eq(release.bytes, simple_query_bytes("RELEASE SAVEPOINT moon_tx_2"))
+    assert_eq(
+      release.bytes,
+      simple_query_bytes("RELEASE SAVEPOINT \"moon_tx_2\""),
+    )
     release.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let close = next_request()
     assert_eq(close.bytes, close_bytes(b'S', b"s1"))
