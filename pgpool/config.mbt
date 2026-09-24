@@ -264,6 +264,7 @@ pub fn ConnectionTarget::ConnectionTarget(
 /// Declarative input used to derive one pool and its connection targets.
 ///
 /// The constructor validates all endpoints and common connection settings.
+/// Its `Debug` representation replaces a configured password with `<hidden>`.
 pub struct Config {
   user : String
   /// Optional in the declarative config, but required at connection startup
@@ -282,7 +283,33 @@ pub struct Config {
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
-} derive(Eq, Debug)
+} derive(Eq)
+
+///|
+/// Keep pool diagnostics useful without rendering the password.
+pub impl @debug.Debug for Config with fn to_repr(self) {
+  let password : String? = match self.password {
+    None => None
+    Some(_) => Some("<hidden>")
+  }
+  @debug.Repr::record({
+    "user": @debug.Repr(self.user),
+    "password": @debug.Repr(password),
+    "dbname": @debug.Repr(self.dbname),
+    "options": @debug.Repr(self.options),
+    "application_name": @debug.Repr(self.application_name),
+    "ssl_mode": @debug.Repr(self.ssl_mode),
+    "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
+    "channel_binding": @debug.Repr(self.channel_binding),
+    "targets": @debug.Repr(self.targets),
+    "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
+    "keepalives": @debug.Repr(self.keepalives),
+    "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
+    "target_session_attrs": @debug.Repr(self.target_session_attrs),
+    "load_balance_hosts": @debug.Repr(self.load_balance_hosts),
+    "pool": @debug.Repr(self.pool),
+  })
+}
 
 ///|
 /// Return a read-only view of the configured endpoints in connection order.

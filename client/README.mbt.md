@@ -409,6 +409,8 @@ does not try to preserve the session, send `Terminate`, or perform a TLS
 `Config::Config` accepts the host, optional concrete `hostaddr`, user, database,
 password, port, TLS settings, channel-binding policy, application name,
 startup options, connect timeout, and TCP keepalive settings.
+The `Debug` output for a config shows `<hidden>` in place of a configured
+password; a missing password remains `None`.
 
 TLS modes are:
 

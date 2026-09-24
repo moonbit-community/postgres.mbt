@@ -41,11 +41,12 @@ pub struct Config {
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
   // private fields
-} derive(Eq, @debug.Debug)
+} derive(Eq)
 pub fn Config::Config(Array[ConnectionTarget], user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config]
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::targets(Self) -> ArrayView[ConnectionTarget]
+pub impl @debug.Debug for Config
 
 pub struct ConnectionTarget {
   host : String?

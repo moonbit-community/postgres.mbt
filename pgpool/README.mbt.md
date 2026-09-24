@@ -252,6 +252,8 @@ zero-based target index. The constructor copies the supplied array; `targets()`
 returns a read-only view of that snapshot. Common authentication, TLS, startup,
 `TargetSessionAttrs`, host load balancing, and `PoolConfig` options stay on the
 outer config.
+The `Debug` output for a config shows `<hidden>` in place of a configured
+password; a missing password remains `None`.
 
 `PoolConfig` controls:
 
