@@ -68,6 +68,66 @@ async test "integration pool direct query APIs" {
 }
 
 ///|
+/// A notification must reach the pool while its listening connection is idle.
+async fn assert_pool_idle_notification(
+  config : IntegrationConfig,
+  ssl_mode : @client.SslMode,
+  channel : String,
+) -> Unit {
+  @async.with_task_group(group => {
+    let pool = make_pool(
+      group,
+      as_client_config(
+        config,
+        ssl_mode~,
+        application_name="moonbit-postgres-pool-idle-notification",
+      ),
+      PoolConfig(1),
+    )
+    let publisher = start_client(
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-pool-notification-publisher",
+      ),
+      group,
+    )
+    pool.batch_execute("LISTEN \{channel}")
+    publisher.batch_execute("NOTIFY \{channel}, 'ping'")
+    @async.with_timeout(3000, () => {
+      while true {
+        guard pool.next_message() is Some(item) else {
+          fail("pool closed before delivering an idle notification")
+        }
+        match item.message {
+          @client.AsyncMessage::Notification(notification) => {
+            assert_eq(notification.channel, channel)
+            assert_eq(notification.payload, "ping")
+            assert_eq(item.connection_id, 1)
+            break
+          }
+          _ => ()
+        }
+      }
+    })
+    publisher.close()
+    pool.close()
+  })
+}
+
+///|
+async test "integration pool receives idle notification" {
+  guard integration_config() is Some(config) else { return }
+  assert_pool_idle_notification(config, Disable, "moon_pool_idle_plain")
+}
+
+///|
+async test "integration TLS pool receives idle notification" {
+  guard integration_config() is Some(config) else { return }
+  guard !integration_tls_failure_expected() else { return }
+  assert_pool_idle_notification(config, VerifyFull, "moon_pool_idle_tls")
+}
+
+///|
 /// A session callback provides affinity for temp tables and other session-local
 /// state without exposing manual checkout/release.
 async test "integration pool with_session keeps affinity" {

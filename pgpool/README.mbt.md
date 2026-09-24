@@ -289,6 +289,7 @@ fills, the oldest message is discarded and
 `Pool::dropped_async_messages()` increases. `PoolConfig::PoolConfig` accepts a
 positive `async_message_capacity`; the default is 256. After `Pool::close()`,
 buffered messages can still be read, then `next_message()` returns `None`.
+An idle listening connection delivers notifications without another checkout.
 
 Create and recycle deadlines are hard for client I/O: when either expires, the
 pool first calls `Client::abort()` on the candidate physical connection and
@@ -312,8 +313,10 @@ and await `pool.ready()` before use. A repeated `run()` raises
 `PoolError::ExecutorAlreadyStarted`. `Pool::close()` rejects new operations and
 closes idle connections. Active callbacks are allowed to finish; their physical
 connections close instead of returning to the idle set. Await the executor task
-to know that all connections have stopped. Cancellation or an unexpected
-background connection failure closes the whole pool.
+to know that all connections have stopped. Pool executor cancellation or an
+unexpected pool maintenance failure closes the whole pool. An individual
+physical connection failure closes that client; the pool discards it on return
+or on its next checkout and can create a replacement.
 
 `Pool::resize()` never interrupts checked-out sessions. When shrinking cannot
 remove enough currently available capacity tokens, the pool records resize

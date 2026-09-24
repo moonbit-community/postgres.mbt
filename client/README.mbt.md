@@ -353,7 +353,8 @@ async fn _read_async_message(client : @client.Client) -> @client.AsyncMessage? {
 }
 ```
 
-Use one dedicated consumer for `next_message()`. It returns `None` after the
+Use one dedicated consumer for `next_message()`. Notifications arrive while the
+connection is idle, without sending another query. It returns `None` after the
 driver closes, after buffered messages are read. By default the client retains
 at most 256 messages. `Client::create_with_async_message_capacity(config,
 capacity)` accepts a positive capacity. When full, the driver discards the
