@@ -114,9 +114,10 @@ pub struct Config {
   connect_timeout_ms : Int?
   keepalives : Bool?
   keepalives_idle_s : Int?
-} derive(Eq, @debug.Debug)
+} derive(Eq)
 pub fn Config::Config(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
 pub fn Config::new_internal(String, String?, Int, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int?, Bool?, Int?) -> Self
+pub impl @debug.Debug for Config
 
 type CopyInSink
 pub async fn CopyInSink::abort(Self, message? : String) -> Unit

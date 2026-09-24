@@ -57,7 +57,8 @@ pub(all) enum ChannelBinding {
 /// The returned `ClientExecutor::run` uses this value to establish a PostgreSQL
 /// session. The client runtime retains it so that later features, such as
 /// cancellation, can reopen a control connection with the exact same host and
-/// port.
+/// port. Its `Debug` representation replaces a configured password with
+/// `<hidden>`.
 pub struct Config {
   /// Hostname used for TLS verification and default server-name handling.
   host : String
@@ -93,7 +94,32 @@ pub struct Config {
   keepalives : Bool?
   /// Idle time in seconds before the first TCP keepalive probe.
   keepalives_idle_s : Int?
-} derive(Debug, Eq)
+} derive(Eq)
+
+///|
+/// Keep connection diagnostics useful without rendering the password.
+pub impl @debug.Debug for Config with fn to_repr(self) {
+  let password : String? = match self.password {
+    None => None
+    Some(_) => Some("<hidden>")
+  }
+  @debug.Repr::record({
+    "host": @debug.Repr(self.host),
+    "hostaddr": @debug.Repr(self.hostaddr),
+    "port": @debug.Repr(self.port),
+    "user": @debug.Repr(self.user),
+    "database": @debug.Repr(self.database),
+    "password": @debug.Repr(password),
+    "ssl_mode": @debug.Repr(self.ssl_mode),
+    "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
+    "channel_binding": @debug.Repr(self.channel_binding),
+    "application_name": @debug.Repr(self.application_name),
+    "options": @debug.Repr(self.options),
+    "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
+    "keepalives": @debug.Repr(self.keepalives),
+    "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
+  })
+}
 
 ///|
 /// Build a configuration with PostgreSQL-friendly defaults.

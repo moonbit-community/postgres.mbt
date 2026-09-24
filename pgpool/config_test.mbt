@@ -1,4 +1,54 @@
 ///|
+/// Public debug output must not expose credentials from either configuration.
+test "client and pool config debug redacts passwords" {
+  let client = @client.Config::Config(
+    "db.example",
+    user="moon",
+    password="api_probe_secret",
+    application_name="client-debug-test",
+  )
+  let client_debug = @debug.to_string(client)
+  assert_true(client_debug.contains("host: \"db.example\""))
+  assert_true(client_debug.contains("password: Some(\"<hidden>\")"))
+  assert_true(!client_debug.contains("api_probe_secret"))
+  assert_eq(client.password, Some("api_probe_secret"))
+
+  let pool = @pgpool.Config::Config(
+    [@pgpool.ConnectionTarget(host="db.example")],
+    user="moon",
+    password="pool_probe_secret",
+    application_name="pool-debug-test",
+    pool=@pgpool.PoolConfig::PoolConfig(1),
+  )
+  let pool_debug = @debug.to_string(pool)
+  assert_true(pool_debug.contains("dbname: \"moon\""))
+  assert_true(pool_debug.contains("password: Some(\"<hidden>\")"))
+  assert_true(!pool_debug.contains("pool_probe_secret"))
+  assert_eq(pool.password, Some("pool_probe_secret"))
+  let target_debug = @debug.to_string(pool.get_connection_targets()[0])
+  assert_true(target_debug.contains("password: Some(\"<hidden>\")"))
+  assert_true(!target_debug.contains("pool_probe_secret"))
+
+  let client_without_password = @client.Config::Config(
+    "db.example",
+    user="moon",
+    application_name="client-no-password-debug-test",
+  )
+  assert_true(
+    @debug.to_string(client_without_password).contains("password: None"),
+  )
+  let pool_without_password = @pgpool.Config::Config(
+    [@pgpool.ConnectionTarget(host="db.example")],
+    user="moon",
+    application_name="pool-no-password-debug-test",
+    pool=@pgpool.PoolConfig::PoolConfig(1),
+  )
+  assert_true(
+    @debug.to_string(pool_without_password).contains("password: None"),
+  )
+}
+
+///|
 /// Config expansion remains independent of opening a database connection.
 test "pool config constructors and targets" {
   guard @pgpool.QueueMode::fifo() is Fifo else {
