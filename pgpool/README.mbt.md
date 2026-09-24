@@ -264,6 +264,8 @@ password; a missing password remains `None`.
 - per-connection statement-cache capacity
 - shared asynchronous-message capacity (256 by default)
 
+Read the current timeout settings from `pool.config().timeouts`.
+
 The default `Fast` mode sends no cleanup SQL when an idle connection is
 checked out. On every `Session` return, the pool checks the client's latest
 `ReadyForQuery` status. A connection still in an active (`T`) or failed (`E`)

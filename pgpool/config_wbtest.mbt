@@ -191,7 +191,7 @@ async test "pool new updates status and config without connecting" {
       ),
     )
     let pool = start_test_pool(config, group)
-    let timeouts = pool.timeouts()
+    let timeouts = pool.config().timeouts
     @debug.assert_eq(pool.status().max_size, 3)
     @debug.assert_eq(timeouts.wait_ms, Some(11))
     @debug.assert_eq(timeouts.create_ms, Some(22))

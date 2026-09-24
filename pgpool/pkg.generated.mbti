@@ -92,7 +92,6 @@ pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : 
 pub async fn Pool::ready(Self) -> Unit
 pub fn Pool::resize(Self, Int) -> Unit raise
 pub fn Pool::status(Self) -> Status
-pub fn Pool::timeouts(Self) -> Timeouts
 pub async fn[T] Pool::with_session(Self, async (Session) -> T) -> T
 pub async fn[T] Pool::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 pub impl GenericClient for Pool
