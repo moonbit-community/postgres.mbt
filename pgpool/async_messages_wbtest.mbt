@@ -51,8 +51,7 @@ async test "pool messages retain newest items with source IDs after close" {
     })
     let pool = start_test_pool(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
@@ -105,8 +104,7 @@ async test "pool hook handle expires and rejects a leaked transaction" {
       }
     })
     let config = Config(
-      "127.0.0.1",
-      port=server.addr.port(),
+      [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
       user="moon",
       dbname="moondb",
       ssl_mode=Disable,
@@ -162,8 +160,7 @@ async test "recycle hook transaction discards the old connection" {
     })
     let pool = start_test_pool(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,

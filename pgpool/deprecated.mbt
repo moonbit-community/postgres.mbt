@@ -94,6 +94,16 @@ pub extend LoadBalanceHosts with Eq::{not_equal, equal}
 ///|
 #deprecated
 #doc(hidden)
+pub extend ConnectionTarget with @debug.Debug::{to_repr}
+
+///|
+#deprecated
+#doc(hidden)
+pub extend ConnectionTarget with Eq::{not_equal, equal}
+
+///|
+#deprecated
+#doc(hidden)
 pub extend Config with @debug.Debug::{to_repr}
 
 ///|

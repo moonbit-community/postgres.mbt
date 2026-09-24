@@ -55,8 +55,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     }
     let pool = start_test_pool(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         ssl_mode=Disable,
         application_name="recycle-cancel-test",

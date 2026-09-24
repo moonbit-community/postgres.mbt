@@ -2,7 +2,7 @@
 fn executor_test_pool() -> (Pool, PoolExecutor) raise {
   Pool::create(
     Config(
-      "127.0.0.1",
+      [ConnectionTarget(host="127.0.0.1")],
       user="moon",
       dbname="moondb",
       ssl_mode=Disable,
@@ -71,8 +71,7 @@ async test "borrowed session can finish after pool close before executor returns
     })
     let (pool, executor) = Pool::create(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,
@@ -133,8 +132,7 @@ async test "unexpected physical driver failure fails the whole pool" {
     })
     let (pool, executor) = Pool::create(
       Config(
-        "127.0.0.1",
-        port=server.addr.port(),
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
         user="moon",
         dbname="moondb",
         ssl_mode=Disable,

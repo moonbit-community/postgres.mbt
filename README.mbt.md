@@ -75,16 +75,16 @@ Migration summary:
 
 - `prefer` -> `verify-full` for authenticated TLS, or `disable` for intentional plaintext
 - `require` -> `verify-full` in most deployments, or `verify-ca` when hostname validation is intentionally out of scope
-- `verify-full` now requires an explicit `host` or `hostaddr`
+- `verify-full` requires an explicit `host` or `hostaddr`; every pool target
+  requires one even when TLS verification is disabled
 
 `pgpool` no longer parses connection URLs. Spell the pool config explicitly:
 
 ```mbt check
 ///|
-fn _upgrade_examples() -> @pgpool.Config {
+fn _upgrade_examples() -> @pgpool.Config raise {
   @pgpool.Config::Config(
-    "db.example",
-    hostaddr="10.0.0.15",
+    [@pgpool.ConnectionTarget(host="db.example", hostaddr="10.0.0.15")],
     user="moon",
     dbname="app",
     password="secret",

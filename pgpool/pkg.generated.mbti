@@ -12,7 +12,6 @@ import {
 pub suberror ConfigError {
   UsernameEmpty
   DbnameEmpty
-  HostPortArityMismatch
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
 
@@ -35,22 +34,25 @@ pub struct Config {
   ssl_mode : @client.SslMode?
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
-  host : String?
-  hosts : Array[String]?
-  hostaddr : String?
-  hostaddrs : Array[String]?
-  port : Int?
-  ports : Array[Int]?
   connect_timeout_ms : Int?
   keepalives : Bool?
   keepalives_idle_s : Int?
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
+  // private fields
 } derive(Eq, @debug.Debug)
-pub fn Config::Config(String, hostaddr? : String, port? : Int, user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, hosts? : Array[String], hostaddrs? : Array[String], ports? : Array[Int], target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self
-pub fn Config::get_connection_targets(Self) -> Array[@client.Config] raise
+pub fn Config::Config(Array[ConnectionTarget], user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self raise
+pub fn Config::get_connection_targets(Self) -> Array[@client.Config]
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
+pub fn Config::targets(Self) -> ArrayView[ConnectionTarget]
+
+pub struct ConnectionTarget {
+  host : String?
+  hostaddr : String?
+  port : Int
+} derive(Eq, @debug.Debug)
+pub fn ConnectionTarget::ConnectionTarget(host? : String, hostaddr? : String, port? : Int) -> Self
 
 type Connector
 pub fn Connector::Connector(async (@client.Config) -> (@client.Client, @client.ClientExecutor)) -> Self

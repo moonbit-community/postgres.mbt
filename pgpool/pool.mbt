@@ -31,8 +31,8 @@ pub fn Pool::create(
   config : Config,
   options? : PoolOptions = PoolOptions(),
 ) -> (Pool, PoolExecutor) raise {
-  let normalized = normalize_config(config)
   let pool_config = config.get_pool_config()
+  let targets = config.get_connection_targets()
   let slots : @async.Queue[Unit] = Queue(kind=Unbounded)
   for _ in 0..<pool_config.max_size {
     ignore(slots.try_put(()))
@@ -47,13 +47,13 @@ pub fn Pool::create(
     pending_creations: @ref.new(0),
     active_creations: [],
     next_creation_id: @ref.new(0),
-    targets: config.get_connection_targets(),
+    targets,
     connector: options.connector.unwrap_or(default_connector()),
     post_create: options.post_create,
     pre_recycle: options.pre_recycle,
     post_recycle: options.post_recycle,
-    target_session_attrs: normalized.target_session_attrs,
-    load_balance_hosts: normalized.load_balance_hosts,
+    target_session_attrs: config.target_session_attrs.unwrap_or(Any),
+    load_balance_hosts: config.load_balance_hosts.unwrap_or(Disable),
     pool_config: @ref.new(pool_config),
     slots,
     resize_debt: @ref.new(0),

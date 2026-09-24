@@ -11,11 +11,10 @@ fn make_decl_pool(
   options? : @pgpool.PoolOptions = PoolOptions(),
 ) -> @pgpool.Pool raise {
   let declarative = @pgpool.Config::Config(
-    config.host,
+    [@pgpool.ConnectionTarget(host=config.host, port=config.port)],
     user=config.user,
     dbname=config.database,
     password=config.password,
-    port=config.port,
     application_name~,
     pool=make_pool_config(
       max_size,

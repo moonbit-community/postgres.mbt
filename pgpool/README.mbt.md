@@ -25,7 +25,7 @@ async fn _pool_quick_start(
 ) -> Unit {
   @async.with_task_group(group => {
     let config = @pgpool.Config::Config(
-      host,
+      [@pgpool.ConnectionTarget(host~)],
       user~,
       dbname=database,
       password~,
@@ -239,15 +239,19 @@ on a raw client when the physical connection must be stopped immediately.
 
 ## Configuration
 
-`pgpool.Config` normalizes one or more PostgreSQL targets into concrete
-`@client.Config` values. It supports host/hostaddr lists, per-target ports,
-`TargetSessionAttrs`, host load balancing, TLS, authentication, startup
-parameters, and `PoolConfig`.
+`pgpool.Config` takes a non-empty array of `ConnectionTarget` records. Each
+record supplies a `host`, a `hostaddr`, or both, plus its own port (default
+`5432`). If both addresses are present, the client connects to `hostaddr` and
+uses `host` for TLS hostname verification. The order of records is the order
+of connection attempts unless host load balancing is enabled.
 
-A single host, hostaddr, or port is broadcast across the inferred target count.
-Multi-value arrays must have matching lengths. Normalization rejects ports
-outside the inclusive range from `1` through `65535` and, under `VerifyFull`,
-any target without a non-empty host or hostaddr before opening a socket.
+`Config::Config` validates every address and port, the user and database names,
+and TLS settings before the pool is created. A target needs at least one
+non-empty address, and its port must be in `1..65535`. Errors identify the
+zero-based target index. The constructor copies the supplied array; `targets()`
+returns a read-only view of that snapshot. Common authentication, TLS, startup,
+`TargetSessionAttrs`, host load balancing, and `PoolConfig` options stay on the
+outer config.
 
 `PoolConfig` controls:
 

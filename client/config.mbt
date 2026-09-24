@@ -138,7 +138,7 @@ pub fn Config::Config(
 ///|
 /// Internal constructor for a single PostgreSQL connection target.
 ///
-/// Used by pgpool after expanding its multi-target configuration. Callers
+/// Used by pgpool to build one client config per endpoint. Callers
 /// supply every field explicitly; no defaults or validation are applied here.
 #internal(internal, "for internal use only")
 pub fn Config::new_internal(
