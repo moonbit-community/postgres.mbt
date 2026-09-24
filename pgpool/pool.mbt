@@ -343,14 +343,6 @@ pub fn Pool::is_closed(self : Pool) -> Bool {
 }
 
 ///|
-/// Return the timeout config currently used by automatic checkout.
-///
-/// This reflects the pool's current stored config.
-pub fn Pool::timeouts(self : Pool) -> Timeouts {
-  self.shared.pool_config.val.timeouts
-}
-
-///|
 /// Return the full pool config currently used by this pool.
 pub fn Pool::config(self : Pool) -> PoolConfig {
   self.shared.pool_config.val
