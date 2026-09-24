@@ -29,12 +29,24 @@ pub struct Column {
 /// The row stores its column metadata alongside the raw field payloads so each
 /// `get` call can validate the target type, decode on demand, and still support
 /// low-level access through `get_raw`.
-pub struct Row {
+struct Row {
   /// Column metadata for each position.
   columns : Array[Column]
   /// Raw field payloads. `None` represents SQL `NULL`.
   values : Array[Bytes?]
 } derive(Debug, Eq)
+
+///|
+/// Return a read-only view of the row's column metadata.
+pub fn Row::columns(self : Row) -> ArrayView[Column] {
+  self.columns[:]
+}
+
+///|
+/// Return a read-only view of the row's raw field payloads.
+pub fn Row::values(self : Row) -> ArrayView[Bytes?] {
+  self.values[:]
+}
 
 ///|
 /// Return the number of values in this row.

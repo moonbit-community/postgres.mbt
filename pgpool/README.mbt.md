@@ -154,6 +154,8 @@ in the same task group; unexpected protocol errors still propagate.
 `Session::with_prepared` and `with_prepared_typed` provide a scoped
 `PreparedStatement`. It supports fully consumed query/execute helpers and
 `with_stream`; explicit bind, pooled portals, and manual close are not exposed.
+Inspect inferred parameter and result metadata through its read-only
+`params()` and `columns()` views. Use `to_owned()` for an editable copy.
 The callback remains cancellable and does not hold the Session operation lock.
 On exit, the scope rejects new calls, waits for calls already started, then
 closes a temporary or evicted statement. Transaction-scoped prepared callbacks

@@ -280,16 +280,22 @@ pub enum AsyncMessage {
 /// The client does not attempt to decode the copy format. It simply surfaces
 /// each `CopyData` payload exactly as received so higher-level code can parse
 /// CSV, text, or binary COPY output as needed.
-pub struct CopyOutStream {
-  priv control : DrainControl
-  priv responses : @async.Queue[@backend.Message]
-  priv permit : OperationPermit?
+struct CopyOutStream {
+  control : DrainControl
+  responses : @async.Queue[@backend.Message]
+  permit : OperationPermit?
   /// Column wire formats reported by PostgreSQL's `CopyOutResponse`.
   formats : Array[WireFormat]
-  priv mut database_error : DatabaseError?
-  priv mut detached : Bool
-  priv mut detached_done : Completion?
-  priv mut finished : Bool
+  mut database_error : DatabaseError?
+  mut detached : Bool
+  mut detached_done : Completion?
+  mut finished : Bool
+}
+
+///|
+/// Return a read-only view of the COPY OUT column wire formats.
+pub fn CopyOutStream::formats(self : CopyOutStream) -> ArrayView[WireFormat] {
+  self.formats[:]
 }
 
 ///|

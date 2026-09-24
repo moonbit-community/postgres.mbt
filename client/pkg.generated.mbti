@@ -123,13 +123,11 @@ pub async fn CopyInSink::abort(Self, message? : String) -> Unit
 pub async fn CopyInSink::finish(Self) -> Int
 pub async fn CopyInSink::send(Self, BytesView) -> Unit
 
-pub struct CopyOutStream {
-  formats : Array[WireFormat]
-  // private fields
-}
+type CopyOutStream
 pub async fn CopyOutStream::collect(Self) -> Array[Bytes]
 pub fn CopyOutStream::detach(Self) -> Unit
 pub async fn CopyOutStream::finish(Self) -> Unit
+pub fn CopyOutStream::formats(Self) -> ArrayView[WireFormat]
 pub async fn CopyOutStream::next(Self) -> Bytes?
 
 pub struct DatabaseError {
@@ -159,8 +157,8 @@ pub fn IsolationLevel::serializable() -> Self
 pub enum Kind {
   Simple
   Array(UInt)
-  Enum(Array[String])
-  Composite(Array[Field])
+  Enum(ArrayView[String])
+  Composite(ArrayView[Field])
   Domain(UInt)
   Range(UInt)
   Pseudo
@@ -173,10 +171,8 @@ pub struct Notification {
   payload : String
 } derive(Eq, @debug.Debug)
 
-pub struct Portal {
-  columns : Array[Column]
-  // private fields
-}
+type Portal
+pub fn Portal::columns(Self) -> ArrayView[Column]
 
 pub struct QuerySummary {
   command_tag : String
@@ -184,10 +180,8 @@ pub struct QuerySummary {
   suspended : Bool
 } derive(Eq, @debug.Debug)
 
-pub struct Row {
-  columns : Array[Column]
-  values : Array[Bytes?]
-} derive(Eq, @debug.Debug)
+type Row derive(Eq, @debug.Debug)
+pub fn Row::columns(Self) -> ArrayView[Column]
 pub fn[T : FromSql] Row::get(Self, Int) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
 pub fn Row::get_raw(Self, Int) -> Bytes?
@@ -198,48 +192,42 @@ pub fn Row::index_of(Self, String) -> Int?
 pub fn Row::len(Self) -> Int
 pub fn[T : FromSql] Row::try_get(Self, Int) -> T? raise
 pub fn[T : FromSql] Row::try_get_name(Self, String) -> T? raise
+pub fn Row::values(Self) -> ArrayView[Bytes?]
 
-pub struct RowStream {
-  mut columns : Array[Column]
-  // private fields
-}
+type RowStream
 pub async fn RowStream::collect(Self) -> Array[Row]
+pub fn RowStream::columns(Self) -> ArrayView[Column]
 pub fn RowStream::detach(Self) -> Unit
 pub async fn RowStream::finish(Self) -> QuerySummary
 pub async fn RowStream::next(Self) -> Row?
 pub async fn RowStream::one(Self) -> Row
 pub async fn RowStream::opt(Self) -> Row?
 
-pub struct ScopedPortal {
-  columns : Array[Column]
-  // private fields
-}
+type ScopedPortal
+pub fn ScopedPortal::columns(Self) -> ArrayView[Column]
 pub async fn ScopedPortal::execute(Self) -> Int
 pub async fn[T] ScopedPortal::with_stream(Self, Int, async (RowStream) -> T) -> T
 
-pub struct ScopedStatement {
-  params : Array[Type]
-  columns : Array[Column]
-  // private fields
-}
+type ScopedStatement
+pub fn ScopedStatement::columns(Self) -> ArrayView[Column]
 pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> Int
+pub fn ScopedStatement::params(Self) -> ArrayView[Type]
 pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
 pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
 
 pub enum SimpleQueryMessage {
-  RowDescription(Array[String])
+  RowDescription(ArrayView[String])
   Row(SimpleQueryRow)
   CommandComplete(String)
 } derive(Eq, @debug.Debug)
 
-pub struct SimpleQueryRow {
-  columns : Array[String]
-  values : Array[String?]
-} derive(Eq, @debug.Debug)
+type SimpleQueryRow derive(Eq, @debug.Debug)
+pub fn SimpleQueryRow::columns(Self) -> ArrayView[String]
 pub fn SimpleQueryRow::get(Self, Int) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
 pub fn SimpleQueryRow::index_of(Self, String) -> Int?
 pub fn SimpleQueryRow::len(Self) -> Int
+pub fn SimpleQueryRow::values(Self) -> ArrayView[String?]
 
 type SimpleQueryStream
 pub async fn SimpleQueryStream::collect(Self) -> Array[SimpleQueryMessage]
@@ -253,12 +241,10 @@ pub(all) enum SslMode {
   VerifyFull
 } derive(Eq, @debug.Debug)
 
-pub struct Statement {
-  params : Array[Type]
-  columns : Array[Column]
-  // private fields
-}
+type Statement
 pub async fn Statement::close(Self) -> Unit
+pub fn Statement::columns(Self) -> ArrayView[Column]
+pub fn Statement::params(Self) -> ArrayView[Type]
 
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit

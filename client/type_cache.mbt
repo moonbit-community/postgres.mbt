@@ -54,8 +54,11 @@ async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
       let relid : @proto.Oid = row.get(6)
       // Match PostgreSQL's richer type families first before falling back to a
       // plain scalar descriptor.
+      // Catalog helpers return fresh arrays. Once cached as views, their
+      // backing storage has no mutable alias left in the client.
       let kind = if typtype == "e" {
-        Kind::Enum(query_enum_labels(context, oid))
+        let labels = query_enum_labels(context, oid)
+        Kind::Enum(labels[:])
       } else if typtype == "p" {
         Pseudo
       } else if base_oid != 0U {
@@ -63,7 +66,8 @@ async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
       } else if elem_oid != 0U {
         Array(elem_oid)
       } else if relid != 0U {
-        Composite(query_composite_fields(context, relid))
+        let fields = query_composite_fields(context, relid)
+        Composite(fields[:])
       } else {
         match range_subtype {
           Some(subtype) => Range(subtype)

@@ -195,17 +195,28 @@ priv struct Driver {
 ///|
 /// Prepared statement stored on the PostgreSQL server.
 ///
-/// The public `params` and `columns` fields expose the server-inferred
-/// parameter and result metadata so callers can inspect what PostgreSQL
-/// resolved during preparation.
-pub struct Statement {
-  priv client : Client
-  priv name : Bytes
+/// Read-only metadata views expose the server-inferred parameter and result
+/// types so callers can inspect what PostgreSQL resolved during preparation.
+struct Statement {
+  client : Client
+  name : Bytes
   /// Parameter types in server order.
   params : Array[Type]
   /// Result columns produced by executing the statement.
   columns : Array[Column]
-  priv closed : @ref.Ref[Bool]
+  closed : @ref.Ref[Bool]
+}
+
+///|
+/// Return a read-only view of the server-inferred parameter types.
+pub fn Statement::params(self : Statement) -> ArrayView[Type] {
+  self.params[:]
+}
+
+///|
+/// Return a read-only view of the statement's result columns.
+pub fn Statement::columns(self : Statement) -> ArrayView[Column] {
+  self.columns[:]
 }
 
 ///|
@@ -214,11 +225,17 @@ pub struct Statement {
 /// Portals are created and used through an open transaction. Fetch rows
 /// incrementally with
 /// `Transaction::query_portal` or `Transaction::with_portal_stream`.
-pub struct Portal {
-  priv name : Bytes
+struct Portal {
+  name : Bytes
   /// Result columns currently associated with the portal.
   columns : Array[Column]
-  priv closed : @ref.Ref[Bool]
+  closed : @ref.Ref[Bool]
+}
+
+///|
+/// Return a read-only view of the portal's result columns.
+pub fn Portal::columns(self : Portal) -> ArrayView[Column] {
+  self.columns[:]
 }
 
 ///|

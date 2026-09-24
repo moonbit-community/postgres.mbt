@@ -5,16 +5,17 @@
 ///
 /// Most user-facing codecs only care whether a type is a simple scalar or an
 /// array, but the richer variants let the client cache enough metadata for
-/// advanced introspection and future extension points.
+/// advanced introspection and future extension points. Inspect this read-only
+/// classification through `Type::kind`.
 pub enum Kind {
   /// A plain scalar type such as `int4` or `timestamp`.
   Simple
   /// An array type whose element type is identified by OID.
   Array(@proto.Oid)
-  /// An enum type with the full ordered label set cached locally.
-  Enum(Array[String])
+  /// An enum type with its ordered labels.
+  Enum(ArrayView[String])
   /// A composite/record-like type with named fields.
-  Composite(Array[Field])
+  Composite(ArrayView[Field])
   /// A domain that wraps another base type.
   Domain(@proto.Oid)
   /// A range type whose subtype is identified by OID.
@@ -26,7 +27,7 @@ pub enum Kind {
 } derive(Debug, Eq)
 
 ///|
-/// Field descriptor stored inside `Kind::Composite`.
+/// Field descriptor returned through `Kind::Composite`.
 pub struct Field {
   /// Field name as reported by PostgreSQL system catalogs.
   name : String

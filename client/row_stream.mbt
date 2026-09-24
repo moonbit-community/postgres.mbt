@@ -19,21 +19,28 @@ pub struct QuerySummary {
 /// reaches its terminal `ReadyForQuery`, so callers should either consume the
 /// stream to exhaustion, call `finish`, or call `detach`. A transaction also
 /// drains any registered stream before its own commit or rollback.
-pub struct RowStream {
+struct RowStream {
   /// The latest resolved column metadata. This becomes available after the
   /// driver sees a `RowDescription`.
   mut columns : Array[Column]
-  priv control : DrainControl
-  priv responses : @async.Queue[@backend.Message]
-  priv cleanup : StreamCleanup?
-  priv permit : OperationPermit?
-  priv mut command_tag : String
-  priv mut row_count : Int
-  priv mut suspended : Bool
-  priv mut database_error : DatabaseError?
-  priv mut detached : Bool
-  priv mut detached_done : Completion?
-  priv mut summary : QuerySummary?
+  control : DrainControl
+  responses : @async.Queue[@backend.Message]
+  cleanup : StreamCleanup?
+  permit : OperationPermit?
+  mut command_tag : String
+  mut row_count : Int
+  mut suspended : Bool
+  mut database_error : DatabaseError?
+  mut detached : Bool
+  mut detached_done : Completion?
+  mut summary : QuerySummary?
+}
+
+///|
+/// Return the latest resolved column metadata as a read-only view.
+/// Obtain a new view after advancing the stream to see a later description.
+pub fn RowStream::columns(self : RowStream) -> ArrayView[Column] {
+  self.columns[:]
 }
 
 ///|

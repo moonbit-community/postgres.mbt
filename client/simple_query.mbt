@@ -5,12 +5,24 @@
 ///
 /// Simple-query rows always carry text-format values because PostgreSQL's
 /// simple query protocol does not support selecting per-column binary formats.
-pub struct SimpleQueryRow {
+struct SimpleQueryRow {
   /// Column labels from the most recent `RowDescription`.
   columns : Array[String]
   /// Text values for the row. `None` represents SQL `NULL`.
   values : Array[String?]
 } derive(Debug, Eq)
+
+///|
+/// Return a read-only view of the column labels for this result row.
+pub fn SimpleQueryRow::columns(self : SimpleQueryRow) -> ArrayView[String] {
+  self.columns[:]
+}
+
+///|
+/// Return a read-only view of this result row's text values.
+pub fn SimpleQueryRow::values(self : SimpleQueryRow) -> ArrayView[String?] {
+  self.values[:]
+}
 
 ///|
 /// Return the number of values in this row.
@@ -55,7 +67,7 @@ pub fn SimpleQueryRow::get_name(
 /// surfaces all three explicitly.
 pub enum SimpleQueryMessage {
   /// Announces the column labels for subsequent `Row` messages.
-  RowDescription(Array[String])
+  RowDescription(ArrayView[String])
   /// One result row in text format.
   Row(SimpleQueryRow)
   /// Terminal message for one statement inside the simple-query batch.
@@ -102,7 +114,7 @@ async fn SimpleQueryStream::next_inner(
         // Each statement inside a simple-query batch can introduce a fresh row
         // shape, so later `DataRow` frames read from this updated column list.
         self.columns = parse_column_names(body)
-        return Some(RowDescription(self.columns))
+        return Some(RowDescription(self.columns[:]))
       }
       DataRow(body) => return Some(Row(parse_text_row(body, self.columns)))
       CommandComplete(body) => {
