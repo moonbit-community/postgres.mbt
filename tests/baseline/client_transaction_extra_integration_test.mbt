@@ -8,6 +8,40 @@ fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int] raise {
 }
 
 ///|
+/// Quoted savepoint names round-trip through PostgreSQL without running text
+/// embedded in the name as a second SQL command.
+async test "integration quoted savepoint identifiers and SQL text" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let client = start_client(
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-savepoint-identifiers",
+      ),
+      group,
+    )
+    client.batch_execute("create temp table marker(value int4)")
+    let tx = client.transaction()
+    let released = tx.savepoint("MiXeD \"名字\"; work")
+    released.commit()
+    let injected = tx.savepoint("x; INSERT INTO pg_temp.marker VALUES (1); --")
+    let before_rollback : Int = injected
+    .query("select count(*)::int4 from marker")
+    .collect()[0].get(0)
+    assert_eq(before_rollback, 0)
+    injected.rollback()
+    let rolled_back = tx.savepoint("Rollback \"雪\"; work")
+    rolled_back.rollback()
+    let after_rollback : Int = tx
+    .query("select count(*)::int4 from marker")
+    .collect()[0].get(0)
+    assert_eq(after_rollback, 0)
+    tx.commit()
+    client.close()
+  })
+}
+
+///|
 /// This verifies the client-side transaction helpers around explicit options, savepoints, prepared statements, portals, and rollback.
 /// The test starts one option-configured transaction, exercises both named and unnamed savepoints, and then opens a second plain transaction to cover the default `BEGIN` path.
 async test "integration transaction options savepoints and raw statement helpers" {
@@ -23,7 +57,7 @@ async test "integration transaction options savepoints and raw statement helpers
 
     let tx = client.transaction(
       options=TransactionOptions(
-        isolation_level="SERIALIZABLE",
+        isolation_level=@client.IsolationLevel::serializable(),
         read_only=false,
         deferrable=false,
       ),

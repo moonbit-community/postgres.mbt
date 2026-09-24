@@ -55,17 +55,6 @@ pub fn Config::get_pool_config(Self) -> PoolConfig raise
 type Connector
 pub fn Connector::Connector(async (@client.Config) -> (@client.Client, @client.ClientExecutor)) -> Self
 
-pub enum IsolationLevel {
-  ReadUncommitted
-  ReadCommitted
-  RepeatableRead
-  Serializable
-} derive(Eq, @debug.Debug)
-pub fn IsolationLevel::read_committed() -> Self
-pub fn IsolationLevel::read_uncommitted() -> Self
-pub fn IsolationLevel::repeatable_read() -> Self
-pub fn IsolationLevel::serializable() -> Self
-
 pub(all) enum LoadBalanceHosts {
   Disable
   Random
@@ -229,13 +218,14 @@ pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type]
 pub impl GenericClient for Transaction
 
 pub struct TransactionOptions {
-  isolation_level : IsolationLevel?
+  isolation_level : @client.IsolationLevel?
   read_only : Bool?
   deferrable : Bool?
 } derive(Eq, @debug.Debug)
-pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
+pub fn TransactionOptions::TransactionOptions(isolation_level? : @client.IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
 // Type aliases
+pub using @client {type IsolationLevel}
 
 // Traits
 pub(open) trait GenericClient {

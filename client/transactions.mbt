@@ -1,10 +1,54 @@
 // Transaction and savepoint helpers layered on top of the client API.
 
 ///|
+/// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
+pub enum IsolationLevel {
+  ReadUncommitted
+  ReadCommitted
+  RepeatableRead
+  Serializable
+} derive(Eq, Debug)
+
+///|
+/// Construct `READ UNCOMMITTED`.
+pub fn IsolationLevel::read_uncommitted() -> IsolationLevel {
+  ReadUncommitted
+}
+
+///|
+/// Construct `READ COMMITTED`.
+pub fn IsolationLevel::read_committed() -> IsolationLevel {
+  ReadCommitted
+}
+
+///|
+/// Construct `REPEATABLE READ`.
+pub fn IsolationLevel::repeatable_read() -> IsolationLevel {
+  RepeatableRead
+}
+
+///|
+/// Construct `SERIALIZABLE`.
+pub fn IsolationLevel::serializable() -> IsolationLevel {
+  Serializable
+}
+
+///|
+/// Return one fixed SQL spelling for a transaction isolation level.
+fn isolation_level_sql(level : IsolationLevel) -> String {
+  match level {
+    ReadUncommitted => "READ UNCOMMITTED"
+    ReadCommitted => "READ COMMITTED"
+    RepeatableRead => "REPEATABLE READ"
+    Serializable => "SERIALIZABLE"
+  }
+}
+
+///|
 /// Options for the `BEGIN` command used when opening a transaction.
 pub struct TransactionOptions {
-  /// Optional SQL fragment after `ISOLATION LEVEL`, such as `"SERIALIZABLE"`.
-  isolation_level : String?
+  /// Optional transaction isolation level.
+  isolation_level : IsolationLevel?
   /// `Some(true)` emits `READ ONLY`; `Some(false)` emits `READ WRITE`.
   read_only : Bool?
   /// `Some(true)` emits `DEFERRABLE`; `Some(false)` emits `NOT DEFERRABLE`.
@@ -14,7 +58,7 @@ pub struct TransactionOptions {
 ///|
 /// Build transaction options for a future `BEGIN` command.
 pub fn TransactionOptions::TransactionOptions(
-  isolation_level? : String,
+  isolation_level? : IsolationLevel,
   read_only? : Bool,
   deferrable? : Bool,
 ) -> TransactionOptions {
@@ -59,7 +103,7 @@ async fn OpContext::begin_transaction(
 ) -> Transaction {
   let clauses : Array[String] = []
   match options.isolation_level {
-    Some(level) => clauses.push("ISOLATION LEVEL \{level}")
+    Some(level) => clauses.push("ISOLATION LEVEL \{isolation_level_sql(level)}")
     None => ()
   }
   match options.read_only {
@@ -156,7 +200,8 @@ pub async fn[T] Transaction::with_transaction(
 }
 
 ///|
-/// Like `with_transaction`, using a named PostgreSQL savepoint.
+/// Like `with_transaction`, using a named PostgreSQL savepoint. The name is a
+/// case-sensitive quoted identifier; spaces, quotes, and punctuation are safe.
 pub async fn[T] Transaction::with_savepoint(
   self : Transaction,
   name : String,
@@ -268,7 +313,8 @@ pub async fn Transaction::close_portal(
 }
 
 ///|
-/// Create a named savepoint while the transaction is open.
+/// Create a named savepoint while the transaction is open. The name is a
+/// case-sensitive quoted identifier. Empty names and NUL characters are rejected.
 pub async fn Transaction::savepoint(
   self : Transaction,
   name : String,
@@ -281,6 +327,7 @@ async fn Transaction::begin_savepoint(
   self : Transaction,
   name : String,
 ) -> Transaction {
+  let name = quote_savepoint_name(name)
   let (parent_permit, pending) = self.begin_child_creation()
   let created = @ref.new(false)
   let creation_error : @ref.Ref[Error?] = @ref.new(None)
@@ -346,6 +393,23 @@ async fn Transaction::begin_savepoint(
   self.child.val = Some(Nested(transaction))
   pending.complete(None)
   transaction
+}
+
+///|
+/// Validate and quote a savepoint name once for creation and every cleanup path.
+fn quote_savepoint_name(name : String) -> String raise {
+  let bytes = @utf8.encode(name)
+  if bytes.is_empty() {
+    raise ClientError::InvalidSavepointName("savepoint name must not be empty")
+  }
+  for byte in bytes {
+    if byte == b'\x00' {
+      raise ClientError::InvalidSavepointName(
+        "savepoint name must not contain NUL",
+      )
+    }
+  }
+  @utf8.decode(@escape.escape_identifier(bytes))
 }
 
 ///|

@@ -1,17 +1,6 @@
 // Pooled transaction APIs.
 
 ///|
-/// Convert one pooled isolation level into the SQL clause expected by `BEGIN`.
-fn isolation_level_sql(level : IsolationLevel) -> String {
-  match level {
-    ReadUncommitted => "READ UNCOMMITTED"
-    ReadCommitted => "READ COMMITTED"
-    RepeatableRead => "REPEATABLE READ"
-    Serializable => "SERIALIZABLE"
-  }
-}
-
-///|
 /// Start one transaction using PostgreSQL's default `BEGIN` settings or the
 /// given `BEGIN` options.
 ///
@@ -24,7 +13,7 @@ async fn Session::transaction(
   let (client, connection) = self.state.begin_transaction_scope()
   errdefer self.state.finish_transaction_scope()
   let client_options = @client.TransactionOptions::TransactionOptions(
-    isolation_level?=options.isolation_level.map(isolation_level_sql),
+    isolation_level?=options.isolation_level,
     read_only?=options.read_only,
     deferrable?=options.deferrable,
   )
@@ -245,7 +234,8 @@ async fn Transaction::transaction(self : Transaction) -> Transaction {
 ///|
 /// Start one nested transaction backed by a named savepoint.
 ///
-/// `name` is passed directly to the underlying client savepoint API.
+/// `name` is passed to the client as a case-sensitive savepoint identifier.
+/// The client quotes it and rejects empty names or NUL characters.
 async fn Transaction::savepoint(
   self : Transaction,
   name : String,
@@ -279,7 +269,8 @@ pub async fn[T] Transaction::with_transaction(
 /// Run one callback inside a named savepoint-backed nested transaction.
 ///
 /// On success the nested transaction is committed if still unfinished; on error
-/// or cancellation it is rolled back best-effort.
+/// or cancellation it is rolled back best-effort. The client quotes `name` as
+/// a case-sensitive identifier and rejects empty names or NUL characters.
 pub async fn[T] Transaction::with_savepoint(
   self : Transaction,
   name : String,

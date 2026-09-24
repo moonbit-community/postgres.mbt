@@ -100,20 +100,22 @@ async test "cancelled SAVEPOINT restores the parent scope before releasing owner
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let outer = begin_task.wait()
     let delivered = @ref.new(false)
+    let name = "Cancelled; \"名字 with space\""
+    let quoted = "\"Cancelled; \"\"名字 with space\"\"\""
     let task = group.spawn(allow_failure=true, () => {
-      let nested = outer.savepoint("cancelled")
+      let nested = outer.savepoint(name)
       delivered.val = true
       nested.commit()
     })
     let savepoint = next_request()
-    assert_eq(savepoint.bytes, simple_query_bytes("SAVEPOINT cancelled"))
+    assert_eq(savepoint.bytes, simple_query_bytes("SAVEPOINT \{quoted}"))
     task.cancel()
     savepoint.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let rollback = next_request()
     assert_eq(
       rollback.bytes,
       simple_query_bytes(
-        "ROLLBACK TO SAVEPOINT cancelled; RELEASE SAVEPOINT cancelled",
+        "ROLLBACK TO SAVEPOINT \{quoted}; RELEASE SAVEPOINT \{quoted}",
       ),
     )
     assert_false(delivered.val)

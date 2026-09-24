@@ -24,16 +24,6 @@ pub extend TimeoutKind with Eq::{not_equal, equal}
 ///|
 #deprecated
 #doc(hidden)
-pub extend IsolationLevel with @debug.Debug::{to_repr}
-
-///|
-#deprecated
-#doc(hidden)
-pub extend IsolationLevel with Eq::{not_equal, equal}
-
-///|
-#deprecated
-#doc(hidden)
 pub extend TransactionOptions with @debug.Debug::{to_repr}
 
 ///|

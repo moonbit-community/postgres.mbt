@@ -18,6 +18,7 @@ pub suberror ClientError {
   Closed(String)
   Protocol(String)
   InvalidConfig(String)
+  InvalidSavepointName(String)
   Ssl(String)
   Encode(String)
   Decode(String)
@@ -143,6 +144,17 @@ pub struct Field {
   name : String
   type_oid : UInt
 } derive(Eq, @debug.Debug)
+
+pub enum IsolationLevel {
+  ReadUncommitted
+  ReadCommitted
+  RepeatableRead
+  Serializable
+} derive(Eq, @debug.Debug)
+pub fn IsolationLevel::read_committed() -> Self
+pub fn IsolationLevel::read_uncommitted() -> Self
+pub fn IsolationLevel::repeatable_read() -> Self
+pub fn IsolationLevel::serializable() -> Self
 
 pub enum Kind {
   Simple
@@ -274,11 +286,11 @@ pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&ToSql], 
 pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
 
 pub struct TransactionOptions {
-  isolation_level : String?
+  isolation_level : IsolationLevel?
   read_only : Bool?
   deferrable : Bool?
 } derive(Eq, @debug.Debug)
-pub fn TransactionOptions::TransactionOptions(isolation_level? : String, read_only? : Bool, deferrable? : Bool) -> Self
+pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
 pub struct Type {
   oid : UInt

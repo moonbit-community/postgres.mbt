@@ -1,6 +1,7 @@
 import {
   "moonbit-community/postgres/protocol" @proto,
   "moonbit-community/postgres/protocol/authentication" @auth,
+  "moonbit-community/postgres/protocol/escape",
   "moonbit-community/postgres/protocol/message/backend",
   "moonbit-community/postgres/protocol/message/frontend",
   "moonbit-community/postgres/protocol/types",

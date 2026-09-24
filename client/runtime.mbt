@@ -262,6 +262,7 @@ struct Transaction {
   closing : @ref.Ref[Completion?]
   root_permit : OperationPermit?
   parent_permit : OperationPermit?
+  // The savepoint name is already quoted for PostgreSQL SQL text.
   savepoint : String?
   finished : @ref.Ref[Bool]
 }
