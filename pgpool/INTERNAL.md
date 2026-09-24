@@ -36,5 +36,6 @@ only then may it allocate a request ID and mark a new request active.
 Streaming callbacks finish or abandon their raw handles before returning the
 connection. Detached drains save expected connection closure for `finish()`;
 database errors remain in stream state, and unexpected protocol errors fail the
-owning client executor and then the pool executor. Ordinary task cancellation
-does not imply a PostgreSQL cancel packet, automatic retry, or physical abort.
+owning client executor. The pool retires that physical connection on return or
+its next checkout. Ordinary task cancellation does not imply a PostgreSQL
+cancel packet, automatic retry, or physical abort.

@@ -53,9 +53,12 @@ temporary prepared-statement cleanup.
 
 ## Driver And Queues
 
-The driver processes one `Request` at a time:
+The driver keeps one reader task on the socket for the entire established
+connection, including idle periods. It routes notices, notifications, and
+parameter updates immediately. Ordinary backend responses pass through a
+one-message queue to the request loop, which processes one `Request` at a time:
 
-1. receive and retain the next accepted operation request before any socket I/O
+1. receive and retain the next accepted operation request
 2. write its frontend bytes
 3. route every ordinary response to that request's bounded response queue
 4. continue until `ReadyForQuery` or the request's protocol-specific terminal
@@ -65,15 +68,15 @@ The driver processes one `Request` at a time:
 There is no pending-request list, opportunistic pipeline decision, or
 oldest-request response routing.
 
-Each request response queue remains bounded (currently eight messages).
-Backpressure therefore stops socket reads for the active request rather than
-growing memory without limit. Because execution is single-flight, a stalled
-consumer cannot be bypassed by a later request.
+Each request response queue remains bounded (currently eight messages). The
+one-message reader handoff keeps socket reads bounded when an active response
+consumer stalls. Because execution is single-flight, a later request cannot
+bypass that consumer.
 
 COPY IN is the protocol exception that requires bidirectional coordination.
 Its producer queue is bounded to eight actions. After PostgreSQL enters COPY
 mode, the driver starts exactly one request-local writer for data, finish, or
-abort actions while the driver itself remains the sole backend reader. An early
+abort actions while its reader task remains the sole backend reader. An early
 `ErrorResponse` is forwarded to the sink, the input queue is cleared and closed,
 and the writer stops after its current complete frame. The driver joins that
 writer before forwarding the final `ReadyForQuery` or starting another request.
@@ -192,7 +195,8 @@ Out-of-band backend messages never enter an operation response queue:
 
 They update shared state and are published through the Client async-message
 queue. `Client::next_message()` has one-consumer semantics and returns `None`
-when the driver terminates.
+when the driver terminates. The reader continues delivering these messages
+without a query in flight.
 
 Before starting a physical connection, `pgpool` installs the internal async
 message handler. That handler forwards messages to the pool's buffer instead

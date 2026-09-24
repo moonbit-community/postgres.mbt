@@ -91,6 +91,73 @@ async test "pool messages retain newest items with source IDs after close" {
 }
 
 ///|
+async fn serve_pool_idle_disconnect_test_connection(
+  socket : @socket.Tcp,
+  connection_id : Int,
+  close_first : @async.Queue[Unit],
+) -> Unit {
+  defer socket.close()
+  let startup = socket.read_exactly(4)
+  ignore(
+    socket.read_exactly(@proto.ByteReader::new(startup[:]).read_i32_be() - 4),
+  )
+  socket.write(b"R\x00\x00\x00\x08\x00\x00\x00\x00Z\x00\x00\x00\x05I")
+  assert_eq(socket.read_exactly(5), b"S\x00\x00\x00\x04")
+  socket.write(b"Z\x00\x00\x00\x05I")
+  if connection_id == 1 {
+    close_first.get()
+  } else {
+    assert_eq(socket.read_exactly(5), b"X\x00\x00\x00\x04")
+  }
+}
+
+///|
+async test "idle connection failure does not close the pool" {
+  @async.with_task_group(group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    defer server.close()
+    let close_first : @async.Queue[Unit] = Queue(kind=Unbounded)
+    let next_id = @ref.new(0)
+    group.spawn_bg(no_wait=true, () => {
+      while true {
+        let (socket, _) = server.accept()
+        next_id.val += 1
+        let connection_id = next_id.val
+        group.spawn_bg(no_wait=true, () => {
+          serve_pool_idle_disconnect_test_connection(
+            socket, connection_id, close_first,
+          )
+        })
+      }
+    })
+    let pool = start_test_pool(
+      Config(
+        [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
+        user="moon",
+        dbname="moondb",
+        ssl_mode=Disable,
+        application_name="pool-idle-disconnect-wbtest",
+        pool=PoolConfig(1),
+      ),
+      group,
+    )
+    @async.with_timeout(3000, () => {
+      pool.check_connection()
+      let old_client = pool.shared.connections[0].client.val.unwrap()
+      close_first.put(())
+      while !old_client.is_closed() {
+        @async.pause()
+      }
+      assert_false(pool.is_closed())
+      pool.check_connection()
+      assert_eq(pool.shared.connections[0].id, 2)
+      assert_eq(pool.status().size, 1)
+      pool.close()
+    })
+  })
+}
+
+///|
 async test "pool hook handle expires and rejects a leaked transaction" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))

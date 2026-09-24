@@ -12,6 +12,10 @@
 async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
   let mut active : Request? = None
   let mut cleaned_up = false
+  // The reader must survive the transition between idle time and a request.
+  // Cancelling an in-progress frame read there would lose protocol alignment.
+  let incoming : @async.Queue[@backend.Message] = Queue(kind=Blocking(1))
+  let reading_request = @ref.new(false)
   fn cleanup(error : Error?) {
     if cleaned_up {
       return
@@ -43,6 +47,15 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
       self.shared.control.close()
     }
   }
+  let reader = group.spawn(no_wait=true, allow_failure=true, () => {
+    self.receive_messages(incoming, reading_request)
+  })
+  defer @async.protect_from_cancel(() => {
+    reader.cancel()
+    reader.wait() catch {
+      _ => ()
+    }
+  })
   try {
     while true {
       let request = self.shared.requests.get()
@@ -55,8 +68,9 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
           return
         }
         Messages | CopyIn => {
+          reading_request.val = true
           self.stream.write(request.bytes)
-          self.drain_request(request, group)
+          self.drain_request(request, incoming, group)
           self.close_request(request, None)
           active = None
         }
@@ -64,6 +78,48 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
     }
   } catch {
     err => cleanup(Some(err))
+  }
+}
+
+///|
+/// Keep one owner of socket reads even when no request is in flight.
+async fn Driver::receive_messages(
+  self : Driver,
+  incoming : @async.Queue[@backend.Message],
+  reading_request : @ref.Ref[Bool],
+) -> Unit {
+  let mut failure : Error? = None
+  try {
+    while true {
+      let message = self.read_message()
+      if self.handle_async_message(message) {
+        continue
+      }
+      if !reading_request.val {
+        match message {
+          ErrorResponse(body) =>
+            raise ClientError::Database(parse_database_error(body.fields()))
+          _ =>
+            raise ClientError::UnexpectedMessage(
+              "backend response without an active request",
+            )
+        }
+      }
+      if message is ReadyForQuery(_) {
+        reading_request.val = false
+      }
+      incoming.put(message)
+    }
+  } catch {
+    error => failure = Some(error)
+  }
+  match failure {
+    Some(error) => {
+      // Preserve queued requests for Driver::cleanup to close their own queues.
+      incoming.close(error~, clear=true)
+      self.shared.requests.close(error~)
+    }
+    None => ()
   }
 }
 
@@ -83,17 +139,15 @@ pub async fn Client::next_message(self : Client) -> AsyncMessage? {
 async fn Driver::drain_request(
   self : Driver,
   request : Request,
+  incoming : @async.Queue[@backend.Message],
   group : @async.TaskGroup[Unit],
 ) -> Unit {
   if request.kind is CopyIn {
-    self.drain_copy_in_request(request, group)
+    self.drain_copy_in_request(request, incoming, group)
     return
   }
   while true {
-    let message = self.read_message()
-    if self.handle_async_message(message) {
-      continue
-    }
+    let message = incoming.get()
     match request.kind {
       Messages => self.forward_message_to_request(request, message)
       CopyIn => abort("COPY IN requests use drain_copy_in_request")
@@ -131,6 +185,7 @@ async fn Driver::forward_message_to_request(
 async fn Driver::drain_copy_in_request(
   self : Driver,
   request : Request,
+  incoming : @async.Queue[@backend.Message],
   group : @async.TaskGroup[Unit],
 ) -> Unit {
   let copy_input = request.copy_input.unwrap()
@@ -138,10 +193,7 @@ async fn Driver::drain_copy_in_request(
   let writer_stopped = @ref.new(false)
   let mut writer : @async.Task[Unit]? = None
   while true {
-    let message = self.read_message()
-    if self.handle_async_message(message) {
-      continue
-    }
+    let message = incoming.get()
     match message {
       CopyInResponse(_) => {
         guard writer is None else {

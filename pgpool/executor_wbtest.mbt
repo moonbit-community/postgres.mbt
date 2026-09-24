@@ -113,7 +113,7 @@ async test "cancelling a pool executor closes the pool" {
 }
 
 ///|
-async test "unexpected physical driver failure fails the whole pool" {
+async test "unexpected physical driver failure retires one checked-out client" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
@@ -144,11 +144,13 @@ async test "unexpected physical driver failure fails the whole pool" {
     @async.with_timeout(2000, () => {
       pool.ready()
       let session = pool.checkout_session()
-      defer session.release()
       disconnect.put(())
       let _ = session.check_connection() catch { _ => () }
-      ignore(expect_pgpool_error_async(() => task.wait()))
-      assert_true(pool.is_closed())
+      session.release()
+      assert_false(pool.is_closed())
+      assert_eq(pool.status().size, 0)
+      pool.close()
+      task.wait()
     })
   })
 }

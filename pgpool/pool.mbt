@@ -173,7 +173,9 @@ async fn serve_creations(
 }
 
 ///|
-/// Startup errors belong to checkout; failures after readiness fail the pool.
+/// Startup errors belong to checkout. A physical connection that fails after
+/// readiness is retired on return or on its next checkout, without closing the
+/// other connections in the pool.
 async fn run_physical_executor(
   client : @client.Client,
   executor : @client.ClientExecutor,
@@ -183,12 +185,7 @@ async fn run_physical_executor(
     error => failure = Some(error)
   }
   match failure {
-    Some(error) => {
-      client.ready() catch {
-        _ => return
-      }
-      raise error
-    }
+    Some(_) => client.ready() catch { _ => return }
     None => ()
   }
 }
