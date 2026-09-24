@@ -176,7 +176,7 @@ async test "connect captures startup state and close waits for the driver" {
 
     let token = client.cancel_token()
     @debug.assert_eq(token.process_id(), 321)
-    @debug.assert_eq(token.secret_key(), 654)
+    @debug.assert_eq(token.secret_key.val, 654)
 
     client.shared.types[99999U] = Type::unknown(99999U, name="tmp")
     client.clear_type_cache()
@@ -293,7 +293,7 @@ async test "cancel token returns early when connection is already closed" {
   let token = client.cancel_token()
   token.cancel()
   @debug.assert_eq(token.process_id(), 321)
-  @debug.assert_eq(token.secret_key(), 654)
+  @debug.assert_eq(token.secret_key.val, 654)
 }
 
 ///|

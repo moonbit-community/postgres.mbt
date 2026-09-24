@@ -39,7 +39,6 @@ pub enum AsyncMessage {
 type CancelToken
 pub async fn CancelToken::cancel(Self) -> Unit
 pub fn CancelToken::process_id(Self) -> Int
-pub fn CancelToken::secret_key(Self) -> Int
 
 pub(all) enum ChannelBinding {
   Disable

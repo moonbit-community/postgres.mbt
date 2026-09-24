@@ -365,7 +365,9 @@ waiting for the consumer. Current server parameters remain available through
 
 `Client::cancel_token()` creates a best-effort PostgreSQL cancellation token.
 Cancellation targets the current backend operation; it does not replace normal
-task cancellation or stream cleanup.
+task cancellation or stream cleanup. Call `CancelToken::cancel()` from another
+task or a timeout handler to send the request. `process_id()` exposes the backend
+process ID for diagnostics; the cancellation key stays inside the token.
 
 Task cancellation still waits for protected protocol work and cleanup to reach
 a safe boundary. `execute` drains its results before closing its temporary
