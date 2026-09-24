@@ -489,17 +489,17 @@ async test "integration protocol startup packet header parsing" {
 }
 
 ///|
-/// This verifies how the cancel-request packet works together with the high-level cancel token.
-/// The client produces the pid and secret key, the protocol frontend builds the cancel request, and the database should answer with a cancellation error.
+/// This verifies a manually constructed cancel-request packet.
+/// The wire connection learns its pid and secret key during startup, the protocol frontend builds the cancel request, and the database should answer with a cancellation error.
 async test "integration cancel request uses protocol frontend" {
   guard integration_config() is Some(config) else { return }
 
+  let wire = wire_connect(
+    config,
+    application_name="moonbit-postgres-cancel-main",
+  )
+  defer wire.close()
   let result = @async.with_task_group(group => {
-    let client = start_client(
-      as_client_config(config, application_name="moonbit-postgres-cancel-main"),
-      group,
-    )
-
     let observer = start_client(
       as_client_config(
         config,
@@ -509,27 +509,30 @@ async test "integration cancel request uses protocol frontend" {
     )
 
     // The observer connection only confirms that the target query is really running.
-    let token = client.cancel_token()
-    let backend_pid : Int = client
-      .query_one("select pg_backend_pid()::int4 as pid")
-      .get_name("pid")
-
-    let task = group.spawn(() => {
-      expect_error_async(() => client.query_one("select pg_sleep(5)"))
-    })
-    wait_for_backend_query(observer, backend_pid, "select pg_sleep(5)")
+    let task = group.spawn(() => wire.simple_query("select pg_sleep(5)"))
+    wait_for_backend_query(observer, wire.process_id, "select pg_sleep(5)")
     let cancel = @socket.Tcp::connect_to_host(config.host, port=config.port)
     defer cancel.close()
     let buf = Buffer()
-    @frontend.cancel_request(token.process_id(), token.secret_key(), buf)
+    @frontend.cancel_request(wire.process_id, wire.secret_key, buf)
     cancel.write(buf.to_bytes())
-    let err = expect_database_error(task.wait())
-    @debug.assert_eq(err.code, Some("57014"))
-    let ping : Int = client
-      .query_one("select 1::int4 as value")
-      .get_name("value")
-    assert_eq(ping, 1)
-    client.close()
+    let cancelled = task.wait()
+    let mut saw_cancel_error = false
+    for message in cancelled {
+      if message is ErrorResponse(body) {
+        let err = parse_wire_database_error(body.fields())
+        saw_cancel_error = err.code == Some("57014")
+      }
+    }
+    assert_true(saw_cancel_error)
+    assert_true(cancelled[cancelled.length() - 1] is ReadyForQuery(_))
+
+    let ping = wire.simple_query("select 1::int4 as value")
+    match ping[1] {
+      DataRow(body) => @debug.assert_eq(data_row_texts(body), [Some("1")])
+      _ => fail("expected DataRow after cancellation")
+    }
+    assert_true(ping[3] is ReadyForQuery(_))
     observer.close()
   })
   ignore(result)

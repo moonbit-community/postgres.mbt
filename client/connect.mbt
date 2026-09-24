@@ -349,12 +349,6 @@ pub fn CancelToken::process_id(self : CancelToken) -> Int {
 }
 
 ///|
-/// Return the backend secret key embedded in the cancellation token.
-pub fn CancelToken::secret_key(self : CancelToken) -> Int {
-  self.secret_key.val
-}
-
-///|
 /// Reset the shared type cache to the built-in PostgreSQL descriptors only.
 ///
 /// Use this when the application expects server-side type definitions to change
