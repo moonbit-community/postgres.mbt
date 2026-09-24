@@ -127,6 +127,20 @@ async fn _query_example(client : @client.Client) -> Int {
 }
 ```
 
+Inspect result data and metadata through `Row::columns()`, `Row::values()`,
+`RowStream::columns()`, `SimpleQueryRow::columns()`, and
+`SimpleQueryRow::values()`. These return read-only `ArrayView` values; use
+`to_owned()` when an editable copy is needed. `RowStream::columns()` reflects
+the latest row description when called, so obtain a new view after advancing
+the stream. `SimpleQueryMessage::RowDescription` also carries a read-only
+column-label view. `CopyOutStream::formats()` exposes the COPY wire formats in
+the same way.
+
+Prepared statements, portals, and their scoped handles expose `params()` and
+`columns()` metadata views where applicable. Type descriptors expose their
+`Kind` through `Type::kind()`; enum labels and composite fields are read-only
+views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
+
 `query_typed` supplies PostgreSQL parameter types explicitly. The former
 `query_typed_raw` compatibility alias has been removed.
 

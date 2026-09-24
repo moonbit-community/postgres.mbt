@@ -177,12 +177,28 @@ struct Session {
 ///
 /// The handle may wrap either a temporary statement or a lease on a cached
 /// statement entry. It becomes invalid once the owning callback ends.
-pub struct PreparedStatement {
+struct PreparedStatement {
   /// Parameter types resolved by PostgreSQL.
   params : Array[@client.Type]
   /// Result columns produced by executing the statement.
   columns : Array[@client.Column]
-  priv state : PreparedStatementState
+  state : PreparedStatementState
+}
+
+///|
+/// Return a read-only view of the prepared statement's parameter types.
+pub fn PreparedStatement::params(
+  self : PreparedStatement,
+) -> ArrayView[@client.Type] {
+  self.params[:]
+}
+
+///|
+/// Return a read-only view of the prepared statement's result columns.
+pub fn PreparedStatement::columns(
+  self : PreparedStatement,
+) -> ArrayView[@client.Column] {
+  self.columns[:]
 }
 
 ///|
@@ -358,8 +374,8 @@ fn PreparedStatement::new(
   statement : @client.Statement,
 ) -> PreparedStatement {
   {
-    params: statement.params,
-    columns: statement.columns,
+    params: statement.params().to_owned(),
+    columns: statement.columns().to_owned(),
     state: {
       scope,
       handle,

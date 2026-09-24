@@ -18,12 +18,12 @@ priv struct ScopedStatementState {
 /// A prepared statement usable only during its `with_prepared` callback.
 /// Keep operations inside this handle so streams finish before the statement
 /// is closed. A saved handle reports `Closed` after its callback ends.
-pub struct ScopedStatement {
+struct ScopedStatement {
   /// Parameter types resolved by PostgreSQL.
   params : Array[Type]
   /// Result columns resolved by PostgreSQL.
   columns : Array[Column]
-  priv state : ScopedStatementState
+  state : ScopedStatementState
 }
 
 ///|
@@ -36,10 +36,28 @@ priv struct ScopedPortalState {
 
 ///|
 /// A bound portal usable only during its `with_portal` callback.
-pub struct ScopedPortal {
+struct ScopedPortal {
   /// Result columns associated with the portal.
   columns : Array[Column]
-  priv state : ScopedPortalState
+  state : ScopedPortalState
+}
+
+///|
+/// Return a read-only view of the scoped statement's parameter types.
+pub fn ScopedStatement::params(self : ScopedStatement) -> ArrayView[Type] {
+  self.params[:]
+}
+
+///|
+/// Return a read-only view of the scoped statement's result columns.
+pub fn ScopedStatement::columns(self : ScopedStatement) -> ArrayView[Column] {
+  self.columns[:]
+}
+
+///|
+/// Return a read-only view of the scoped portal's result columns.
+pub fn ScopedPortal::columns(self : ScopedPortal) -> ArrayView[Column] {
+  self.columns[:]
 }
 
 ///|

@@ -1041,7 +1041,7 @@ async test "integration row stream is FIFO single-flight" {
     let stream = client.query(
       "select generate_series(1, 3)::int4 as value order by value",
     )
-    let columns = stream.columns
+    let columns = stream.columns()
     assert_eq(columns.length(), 1)
     assert_eq(columns[0].name, "value")
     guard stream.next() is Some(first_row) else { fail("expected first row") }
@@ -1504,7 +1504,7 @@ async test "integration copy out" {
         }
       }
     }
-    assert_true(stream.formats == [Text, Text])
+    assert_true(stream.formats() == [Text, Text])
     assert_true(chunks.length() >= 1)
     assert_eq(payload.contents(), b"1\tjim\n2\tjoe\n")
 
@@ -1531,7 +1531,7 @@ async test "integration copy out is FIFO single-flight" {
     let stream = client.copy_out(
       "copy moon_driver_copy_out_finish (id, name) to stdout",
     )
-    assert_true(stream.formats == [Text, Text])
+    assert_true(stream.formats() == [Text, Text])
     guard stream.next() is Some(chunk) else { fail("expected copy chunk") }
     assert_true(chunk.length() > 0)
 
@@ -2135,7 +2135,7 @@ async test "integration resolves custom type metadata" {
     let mood_stream = client.query(
       "select 'happy'::pg_temp.moon_driver_mood as mood",
     )
-    let mood_type = mood_stream.columns[0].type_
+    let mood_type = mood_stream.columns()[0].type_
     ignore(mood_stream.finish())
     assert_eq(mood_type.name, "moon_driver_mood")
     guard mood_type.kind is Enum(labels) else {
@@ -2146,20 +2146,20 @@ async test "integration resolves custom type metadata" {
     let pair_stream = client.query(
       "select row(1, 'hi')::pg_temp.moon_driver_pair as pair",
     )
-    let pair_type = pair_stream.columns[0].type_
+    let pair_type = pair_stream.columns()[0].type_
     ignore(pair_stream.finish())
     assert_eq(pair_type.name, "moon_driver_pair")
     guard pair_type.kind is Composite(fields) else {
       fail("expected composite type metadata")
     }
-    @debug.assert_eq(fields.map(field => field.name), [
+    @debug.assert_eq(fields.to_owned().map(field => field.name), [
       "left_value", "right_value",
     ])
-    @debug.assert_eq(fields.map(field => field.type_oid), [23U, 25U])
+    @debug.assert_eq(fields.to_owned().map(field => field.type_oid), [23U, 25U])
 
-    let domain_type = client.prepare(
-        "select $1::pg_temp.moon_driver_name as name",
-      ).params[0]
+    let domain_type = client
+      .prepare("select $1::pg_temp.moon_driver_name as name")
+      .params()[0]
     assert_eq(domain_type.name, "moon_driver_name")
     guard domain_type.kind is Domain(base_oid) else {
       fail("expected domain type metadata")
@@ -2167,7 +2167,7 @@ async test "integration resolves custom type metadata" {
     assert_eq(base_oid, 25U)
 
     let range_stream = client.query("select int4range(1, 3) as r")
-    let range_type = range_stream.columns[0].type_
+    let range_type = range_stream.columns()[0].type_
     ignore(range_stream.finish())
     assert_eq(range_type.name, "int4range")
     guard range_type.kind is Range(subtype_oid) else {

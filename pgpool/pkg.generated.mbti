@@ -123,12 +123,10 @@ pub struct PoolOptions {
 }
 pub fn PoolOptions::PoolOptions(connector? : Connector, post_create? : async (Operation) -> Unit, pre_recycle? : async (Operation) -> Unit, post_recycle? : async (Operation) -> Unit) -> Self
 
-pub struct PreparedStatement {
-  params : Array[@client.Type]
-  columns : Array[@client.Column]
-  // private fields
-}
+type PreparedStatement
+pub fn PreparedStatement::columns(Self) -> ArrayView[@client.Column]
 pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql]) -> Int
+pub fn PreparedStatement::params(Self) -> ArrayView[@client.Type]
 pub async fn PreparedStatement::query_all(Self, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn PreparedStatement::query_opt(Self, params? : Array[&@client.ToSql]) -> @client.Row?
