@@ -194,6 +194,10 @@ They update shared state and are published through the Client async-message
 queue. `Client::next_message()` has one-consumer semantics and returns `None`
 when the driver terminates.
 
+Before starting a physical connection, `pgpool` installs the internal async
+message handler. That handler forwards messages to the pool's buffer instead
+of the Client queue, so the pool consumes them through `Pool::next_message()`.
+
 ## Failure And Close
 
 A fatal socket/protocol error is terminal shared state. The driver:

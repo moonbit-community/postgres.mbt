@@ -61,7 +61,6 @@ pub fn Client::create_with_async_message_capacity(Config, Int) -> (Self, ClientE
 pub fn Client::dropped_async_messages(Self) -> Int64
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
-pub fn Client::install_async_message_handler(Self, (AsyncMessage) -> Unit) -> Unit raise
 pub fn Client::is_closed(Self) -> Bool
 pub fn Client::is_transaction_idle(Self) -> Bool
 pub async fn Client::next_message(Self) -> AsyncMessage?

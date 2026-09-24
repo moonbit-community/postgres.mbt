@@ -63,8 +63,10 @@ pub fn Client::dropped_async_messages(self : Client) -> Int64 {
 }
 
 ///|
-/// Route asynchronous messages to a connection owner's buffer before `run`.
-/// This low-level entry is intended for pool connectors.
+/// Route asynchronous messages to the pool before `run`.
+/// Installed handlers receive messages instead of the `next_message()` buffer.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
 pub fn Client::install_async_message_handler(
   self : Client,
   handler : (AsyncMessage) -> Unit,
