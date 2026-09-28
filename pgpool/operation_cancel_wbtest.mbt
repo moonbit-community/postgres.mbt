@@ -132,7 +132,8 @@ async test "pooled operation boundary propagates cancellation after protected wo
     task.cancel()
     release_work.put(())
     assert_true(
-      expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+      expect_pgpool_error_async(() => task.wait())
+      is @async.WaitedTaskAlreadyCancelled,
     )
     assert_false(returned.val)
     assert_false(state.request_in_flight.val)
@@ -168,7 +169,8 @@ async test "session boundaries recheck cancellation outside their outer protecti
       task.cancel()
       release_work.put(())
       assert_true(
-        expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+        expect_pgpool_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
       )
       assert_false(returned.val)
       assert_eq(session.state.active_ops.val, 0)

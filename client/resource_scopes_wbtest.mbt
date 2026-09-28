@@ -122,7 +122,10 @@ async test "prepared scopes preserve cancellation and close before releasing own
           status=if in_transaction { b'T' } else { b'I' },
         ),
       )
-      assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
+      assert_true(
+        expect_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
+      )
       if transaction is Some(tx) {
         let rollback = group.spawn(() => tx.rollback())
         next_request().responses.put(copy_test_ready_for_query_message())
@@ -239,7 +242,9 @@ async test "bind cancellation closes an undelivered portal" {
     assert_true(task.try_wait() is None)
     close.responses.put(copy_test_close_complete_message())
     close.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
+    assert_true(
+      expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+    )
     let rollback = group.spawn(() => transaction.rollback())
     next_request().responses.put(copy_test_ready_for_query_message())
     rollback.wait()
@@ -278,7 +283,9 @@ async test "portal scope preserves cancellation and closes before transaction ro
     assert_true(task.try_wait() is None)
     close.responses.put(copy_test_close_complete_message())
     close.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
+    assert_true(
+      expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+    )
     let rollback = group.spawn(() => transaction.rollback())
     next_request().responses.put(copy_test_ready_for_query_message())
     rollback.wait()
@@ -349,7 +356,10 @@ async test "statement close rejects root transaction waiting for client permit" 
       ),
     )
     waiter.cancel()
-    assert_true(expect_error_async(() => waiter.wait()) is @async.WaitedTaskAlreadyCancelled)
+    assert_true(
+      expect_error_async(() => waiter.wait())
+      is @async.WaitedTaskAlreadyCancelled,
+    )
     assert_eq(shared.root_transaction_occupancy.val, 0)
     owner.release()
   })

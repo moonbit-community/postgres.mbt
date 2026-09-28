@@ -83,7 +83,9 @@ async test "pending cancellation prevents starting another protected operation" 
     entered.get()
     task.cancel()
     release_start.put(())
-    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
+    assert_true(
+      expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+    )
     assert_false(submitted.val)
     assert_true(shared.operation_gate.mutex.try_acquire())
     shared.operation_gate.mutex.release()

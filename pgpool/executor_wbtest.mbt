@@ -102,7 +102,8 @@ async test "cancelling a pool executor closes the pool" {
     pool.ready()
     task.cancel()
     assert_true(
-      expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+      expect_pgpool_error_async(() => task.wait())
+      is @async.WaitedTaskAlreadyCancelled,
     )
     assert_true(pool.is_closed())
     assert_true(
