@@ -40,7 +40,7 @@ async fn cancel_during_locked_sql(
     observer.batch_execute("select pg_advisory_unlock(91827, \{pid})")
     assert_true(
       expect_error_async(() => @async.with_timeout(5000, () => task.wait()))
-      is @async.TaskCancelled,
+      is @async.WaitedTaskAlreadyCancelled,
     )
   })
 }

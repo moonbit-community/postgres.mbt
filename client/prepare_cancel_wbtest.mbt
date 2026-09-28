@@ -52,7 +52,7 @@ async test "cancelled client and transaction prepare close before releasing the 
           ),
         )
         assert_true(
-          expect_error_async(() => task.wait()) is @async.TaskCancelled,
+          expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
         )
         assert_false(delivered.val)
         assert_true(close.responses.try_get() is None)
@@ -129,7 +129,7 @@ async test "failed Close while delivering a cancelled prepare aborts the connect
             )
           }
           assert_true(
-            expect_error_async(() => task.wait()) is @async.TaskCancelled,
+            expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
           )
           assert_false(delivered.val)
           assert_true(shared.aborted.val)

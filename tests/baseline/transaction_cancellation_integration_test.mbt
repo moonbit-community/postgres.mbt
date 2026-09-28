@@ -18,7 +18,7 @@ async fn cancel_transaction_callback(
     let error = expect_error_async(() => {
       @async.with_timeout(5000, () => task.wait())
     })
-    assert_true(error is @async.TaskCancelled)
+    assert_true(error is @async.WaitedTaskAlreadyCancelled)
   })
 }
 

@@ -79,7 +79,7 @@ async test "transaction cancellation drains unfinished query before rollback" {
     let rollback = next_request()
     assert_eq(rollback.bytes, simple_query_bytes("ROLLBACK"))
     rollback.responses.put(copy_test_ready_for_query_message())
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
   })
 }
 
@@ -353,7 +353,7 @@ async test "cancellation after stream drain leaves manual commit rollbackable" {
     commit.cancel()
     execute.responses.put(copy_test_data_row_message(Some(b"discard")))
     execute.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    assert_true(expect_error_async(() => commit.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => commit.wait()) is @async.WaitedTaskAlreadyCancelled)
     assert_false(tx.finished.val)
     assert_true(client.shared.requests.try_get() is None)
     let rollback = group.spawn(() => tx.rollback())
@@ -541,7 +541,7 @@ async test "transaction stream scope leaves its callback cancellable" {
     let rollback = next_request()
     assert_eq(rollback.bytes, simple_query_bytes("ROLLBACK"))
     rollback.responses.put(copy_test_ready_for_query_message())
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
     assert_false(statement.closed.val)
   })
 }

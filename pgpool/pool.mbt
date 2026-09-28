@@ -195,9 +195,9 @@ async fn serve_closes(shared : Shared, group : @async.TaskGroup[Unit]) -> Unit {
   while true {
     let client = shared.close_requests.get() catch { _ => return }
     group.spawn_bg(allow_failure=true, () => {
-      client.close() catch {
-        _ => client.abort()
-      }
+      // Abort on failure or cancellation; `catch` no longer sees cancellation.
+      errdefer client.abort()
+      client.close()
     })
   }
 }

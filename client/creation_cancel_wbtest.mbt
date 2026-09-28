@@ -66,7 +66,7 @@ async test "transaction cancellation during SQL rolls back before releasing owne
       assert_eq(rollback.bytes, simple_query_bytes("ROLLBACK"))
       assert_false(client.shared.operation_gate.mutex.try_acquire())
       rollback.responses.put(copy_test_ready_for_query_message())
-      assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+      assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
     })
   }
 }
@@ -89,7 +89,7 @@ async test "cancelled BEGIN rolls back before handing out a transaction" {
     assert_false(delivered.val)
     assert_false(client.shared.operation_gate.mutex.try_acquire())
     rollback.responses.put(copy_test_ready_for_query_message())
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
   })
 }
 
@@ -121,7 +121,7 @@ async test "cancelled SAVEPOINT restores the parent scope before releasing owner
     assert_false(delivered.val)
     assert_false(outer.scope_gate.mutex.try_acquire())
     rollback.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
     let complete = group.spawn(() => outer.commit())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
@@ -141,7 +141,7 @@ async test "cancellation after COMMIT submission still completes the transaction
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
     task.cancel()
     commit.responses.put(copy_test_ready_for_query_message())
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
     assert_true(client.shared.requests.try_get() is None)
   })
 }
@@ -180,7 +180,7 @@ async test "query creation cancellation transfers the stream and permit to drain
       prepare.responses.put(parse_backend_message(b"n\x00\x00\x00\x04"))
       prepare.responses.put(copy_test_ready_for_query_message())
       let execute = next_request()
-      assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+      assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
       assert_false(delivered.val)
       // More than the response queue capacity proves a consumer owns cleanup.
       for _ in 0..<32 {
@@ -214,7 +214,7 @@ async test "COPY OUT creation cancellation drains and releases its permit" {
     let request = next_request()
     task.cancel()
     request.responses.put(copy_test_copy_out_response_message([0]))
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled)
     assert_false(delivered.val)
     for _ in 0..<32 {
       request.responses.put(copy_test_copy_data_message(b"row\n"))
@@ -284,7 +284,7 @@ async test "pending cancellation prevents new client and transaction stream requ
         task.cancel()
         release_start.put(())
         assert_true(
-          expect_error_async(() => task.wait()) is @async.TaskCancelled,
+          expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
         )
         assert_true(client.shared.requests.try_get() is None)
       }

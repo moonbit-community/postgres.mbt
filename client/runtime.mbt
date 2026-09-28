@@ -27,8 +27,8 @@ fn Stream::close(self : Stream) -> Unit {
 /// Forward raw reads to the active transport implementation.
 impl @io.Reader for Stream with fn _direct_read(self, buf, offset~, max_len~) {
   match self {
-    Plain(conn) => conn._direct_read(buf, offset~, max_len~)
-    Secure(tls, _) => tls._direct_read(buf, offset~, max_len~)
+    Plain(conn) => @io.Reader::_direct_read(conn, buf, offset~, max_len~)
+    Secure(tls, _) => @io.Reader::_direct_read(tls, buf, offset~, max_len~)
   }
 }
 
@@ -36,8 +36,8 @@ impl @io.Reader for Stream with fn _direct_read(self, buf, offset~, max_len~) {
 /// Reuse the underlying transport's internal read buffer.
 impl @io.Reader for Stream with fn _get_internal_buffer(self) {
   match self {
-    Plain(conn) => conn._get_internal_buffer()
-    Secure(tls, _) => tls._get_internal_buffer()
+    Plain(conn) => @io.Reader::_get_internal_buffer(conn)
+    Secure(tls, _) => @io.Reader::_get_internal_buffer(tls)
   }
 }
 

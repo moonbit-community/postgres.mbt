@@ -132,7 +132,7 @@ pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {
   }) catch {
     error =>
       if !self.shared.aborted.val &&
-        !(self.shared.close_requested.val && error is @async.TaskCancelled) {
+        !(self.shared.close_requested.val && error is @async.WaitedTaskAlreadyCancelled) {
         failure = Some(error)
       }
   }

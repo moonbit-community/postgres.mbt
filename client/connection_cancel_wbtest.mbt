@@ -36,7 +36,7 @@ async test "connection cancellation closes idle runtime before joining protected
       let error = expect_error_async(() => {
         @async.with_timeout(1000, () => driver.wait())
       })
-      assert_true(error is @async.TaskCancelled)
+      assert_true(error is @async.WaitedTaskAlreadyCancelled)
       listener.wait()
       assert_true(client.is_closed())
       assert_true(client.shared.closing.val)
@@ -102,7 +102,7 @@ async test "connection cancellation closes pending and queued COPY requests" {
       let error = expect_error_async(() => {
         @async.with_timeout(1000, () => driver.wait())
       })
-      assert_true(error is @async.TaskCancelled)
+      assert_true(error is @async.WaitedTaskAlreadyCancelled)
       pending_waiter.wait()
       queued_waiter.wait()
       producer.wait()

@@ -179,7 +179,7 @@ async test "prepared callback cancellation exits without releasing its user wait
       session.state.gate.release()
       task.cancel()
       assert_true(
-        expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+        expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
       )
       assert_eq(
         count_callback_requests(requests, b'C'),
@@ -233,7 +233,7 @@ async test "stream and COPY callbacks cancel while waiting for user work" {
       assert_false(session.state.gate.try_acquire())
       task.cancel()
       assert_true(
-        expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+        expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
       )
       if mode == 0 {
         assert_eq(count_callback_requests(requests, b'C'), 1)
@@ -277,7 +277,7 @@ async test "run_cancellable callback cancels its user wait and expires its token
     assert_false(session.state.gate.try_acquire())
     token.state.cancel_in_flight.val = 0
     assert_true(
-      expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+      expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
     )
     token.cancel()
     assert_eq(session.state.active_ops.val, 0)
@@ -389,7 +389,7 @@ async test "transaction prepared callback cancellation rolls back before release
       entered.get()
       task.cancel()
       assert_true(
-        expect_pgpool_error_async(() => task.wait()) is @async.TaskCancelled,
+        expect_pgpool_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
       )
       assert_eq(count_callback_requests(requests, b'Q'), 2)
       assert_eq(
