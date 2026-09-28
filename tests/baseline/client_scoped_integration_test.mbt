@@ -101,7 +101,10 @@ async test "integration scoped COPY IN aborts unfinished returns errors and canc
       })
       entered.get()
       task.cancel()
-      assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+      assert_true(
+        expect_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
+      )
 
       let count : Int = client
         .query_one("select count(*)::int4 from scoped_copy")

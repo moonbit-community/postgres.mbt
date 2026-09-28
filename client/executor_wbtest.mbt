@@ -145,7 +145,9 @@ async test "cancelling a running client executor closes the socket" {
     let task = group.spawn(allow_failure=true, () => executor.run())
     client.ready()
     task.cancel()
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(
+      expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+    )
     assert_true(client.is_closed())
     assert_true(backend.wait() is None)
   })

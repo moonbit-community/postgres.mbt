@@ -76,7 +76,7 @@ async fn check_execute_cancellation(raw~ : Bool) -> Unit {
       let error = expect_error_async(() => {
         @async.with_timeout(1000, () => task.wait())
       })
-      assert_true(error is @async.TaskCancelled)
+      assert_true(error is @async.WaitedTaskAlreadyCancelled)
       if raw {
         assert_false(statement.closed.val)
       }
@@ -135,7 +135,7 @@ async test "execute_raw cancellation survives a drain error" {
     let error = expect_error_async(() => {
       @async.with_timeout(1000, () => task.wait())
     })
-    assert_true(error is @async.TaskCancelled)
+    assert_true(error is @async.WaitedTaskAlreadyCancelled)
     assert_false(statement.closed.val)
   })
 }

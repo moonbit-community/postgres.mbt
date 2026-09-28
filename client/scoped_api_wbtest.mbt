@@ -170,7 +170,8 @@ async test "scoped rows propagate cancellation at acquisition callback and clean
         close.responses.put(copy_test_error_response_message("close failed"))
         close.responses.put(copy_test_ready_for_query_message())
         assert_true(
-          expect_error_async(() => task.wait()) is @async.TaskCancelled,
+          expect_error_async(() => task.wait())
+          is @async.WaitedTaskAlreadyCancelled,
         )
       })
     }
@@ -189,7 +190,9 @@ async test "scoped acquisition waits for the client permit cancellably" {
     })
     started.get()
     task.cancel()
-    assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+    assert_true(
+      expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,
+    )
     assert_true(client.shared.requests.try_get() is None)
     request.responses.put(copy_test_ready_for_query_message())
     active.finish()
@@ -377,7 +380,8 @@ async test "scoped COPY IN commits only on explicit finish and aborts other call
           )
         _ =>
           assert_true(
-            expect_error_async(() => task.wait()) is @async.TaskCancelled,
+            expect_error_async(() => task.wait())
+            is @async.WaitedTaskAlreadyCancelled,
           )
       }
       assert_true(input.try_get() is None)
@@ -414,7 +418,10 @@ async test "scoped COPY startup cancellation cleans up before propagating" {
       assert_true(task.try_wait() is None)
       assert_false(client.shared.operation_gate.mutex.try_acquire())
       request.responses.put(copy_test_ready_for_query_message())
-      assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+      assert_true(
+        expect_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
+      )
     })
   }
 }
@@ -460,7 +467,10 @@ async test "scoped COPY IN awaits abandoned cleanup when send or finish is cance
       assert_false(client.shared.operation_gate.mutex.try_acquire())
       request.responses.put(copy_test_error_response_message("COPY abandoned"))
       request.responses.put(copy_test_ready_for_query_message())
-      assert_true(expect_error_async(() => task.wait()) is @async.TaskCancelled)
+      assert_true(
+        expect_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
+      )
       assert_true(request.responses.try_get() is None)
     })
   }

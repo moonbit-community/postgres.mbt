@@ -90,7 +90,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       assert_true(pool.shared.slots.try_get() is None)
       checkout.cancel()
       try @async.with_timeout(1000, () => checkout.wait()) catch {
-        error => assert_true(error is @async.TaskCancelled)
+        error => assert_true(error is @async.WaitedTaskAlreadyCancelled)
       } noraise {
         lease => {
           lease.release()
