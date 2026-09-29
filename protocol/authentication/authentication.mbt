@@ -19,14 +19,14 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 
 ///|
 /// Normalize a password for SCRAM.
-/// Applies SASLprep-style mapping plus modern Unicode NFKC normalization.
-/// This uses the public normalization API from `tonyfettes/unicode`, so it is
-/// intentionally closer to modern Unicode behavior than strict RFC 4013.
+/// Applies SASLprep-style mapping and prohibited-character checks, using
+/// Unicode 16.0 NFKC rather than the Unicode 3.2 profile required by RFC 4013.
+/// This is not a complete RFC 4013 implementation: bidirectional-string and
+/// Unicode 3.2 unassigned-code-point checks are not performed.
 ///
-/// PostgreSQL's server-side behavior is slightly more permissive: if the
-/// password bytes are not valid UTF-8, it falls back to using the raw bytes
-/// instead of rejecting them. This client implementation is stricter and
-/// requires valid UTF-8 input.
+/// PostgreSQL falls back to the raw password bytes when SASLprep cannot be
+/// applied, including invalid UTF-8 and prohibited-character cases. This
+/// client instead rejects those inputs.
 ///
 /// See:
 /// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-SCRAM-SHA-256
