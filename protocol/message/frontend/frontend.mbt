@@ -38,7 +38,7 @@ fn[T] write_counted(
   let mut count = 0
   for item in items {
     serializer(item, payload)
-    count = count + 1
+    count += 1
   }
   let count_i16 = @proto.i16_from_usize(count)
   buf.write_uint16_be(count_i16.reinterpret_as_uint16())

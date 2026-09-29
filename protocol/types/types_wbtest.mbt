@@ -27,12 +27,11 @@ fn assert_overflow(
 fn collect_hstore(entries : HstoreEntries) -> Array[(Bytes, Bytes?)] raise {
   let out : Array[(Bytes, Bytes?)] = []
   for entry = entries.next() {
-    match entry {
-      None => break out
-      Some(entry) => {
-        out.push(entry)
-        continue entries.next()
-      }
+    if entry is Some(entry) {
+      out.push(entry)
+      continue entries.next()
+    } else {
+      break out
     }
   }
 }
@@ -41,12 +40,11 @@ fn collect_hstore(entries : HstoreEntries) -> Array[(Bytes, Bytes?)] raise {
 fn collect_dimensions(dims : ArrayDimensions) -> Array[ArrayDimension] raise {
   let out : Array[ArrayDimension] = []
   for dim = dims.next() {
-    match dim {
-      None => break out
-      Some(dim) => {
-        out.push(dim)
-        continue dims.next()
-      }
+    if dim is Some(dim) {
+      out.push(dim)
+      continue dims.next()
+    } else {
+      break out
     }
   }
 }
@@ -55,12 +53,11 @@ fn collect_dimensions(dims : ArrayDimensions) -> Array[ArrayDimension] raise {
 fn collect_array_values(values : ArrayValues) -> Array[Bytes?] raise {
   let out : Array[Bytes?] = []
   for value = values.next() {
-    match value {
-      None => break out
-      Some(value) => {
-        out.push(value)
-        continue values.next()
-      }
+    if value is Some(value) {
+      out.push(value)
+      continue values.next()
+    } else {
+      break out
     }
   }
 }
@@ -69,12 +66,11 @@ fn collect_array_values(values : ArrayValues) -> Array[Bytes?] raise {
 fn collect_path_points(points : PathPoints) -> Array[(Double, Double)] raise {
   let out : Array[(Double, Double)] = []
   for point = points.next() {
-    match point {
-      None => break out
-      Some(point) => {
-        out.push((point.x, point.y))
-        continue points.next()
-      }
+    if point is Some(point) {
+      out.push((point.x, point.y))
+      continue points.next()
+    } else {
+      break out
     }
   }
 }
@@ -90,12 +86,11 @@ fn encode_array(
     25U,
     values.iter(),
     (value, payload) => {
-      match value {
-        None => Yes
-        Some(value) => {
-          payload.write_bytes(value)
-          No
-        }
+      if value is Some(value) {
+        payload.write_bytes(value)
+        No
+      } else {
+        Yes
       }
     },
     buf,

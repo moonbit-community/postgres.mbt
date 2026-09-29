@@ -101,7 +101,7 @@ fn ByteReader::ensure(self : ByteReader, n : Int) -> Unit raise ProtocolError {
 pub fn ByteReader::read_u8(self : ByteReader) -> Byte raise ProtocolError {
   self.ensure(1)
   let b = self.buf[self.idx]
-  self.idx = self.idx + 1
+  self.idx += 1
   b
 }
 
@@ -111,7 +111,7 @@ pub fn ByteReader::read_u16_be(self : ByteReader) -> UInt16 raise ProtocolError 
   self.ensure(2)
   let b0 = self.buf[self.idx].to_uint16()
   let b1 = self.buf[self.idx + 1].to_uint16()
-  self.idx = self.idx + 2
+  self.idx += 2
   (b0 << 8) | b1
 }
 
@@ -131,7 +131,7 @@ pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt raise ProtocolError {
   let b1 = self.buf[self.idx + 1].to_uint()
   let b2 = self.buf[self.idx + 2].to_uint()
   let b3 = self.buf[self.idx + 3].to_uint()
-  self.idx = self.idx + 4
+  self.idx += 4
   (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
 }
 
@@ -154,7 +154,7 @@ pub fn ByteReader::read_u64_be(self : ByteReader) -> UInt64 raise ProtocolError 
   let b5 = self.buf[self.idx + 5].to_uint64()
   let b6 = self.buf[self.idx + 6].to_uint64()
   let b7 = self.buf[self.idx + 7].to_uint64()
-  self.idx = self.idx + 8
+  self.idx += 8
   (b0 << 56) |
   (b1 << 48) |
   (b2 << 40) |
@@ -222,7 +222,7 @@ fn find_null(buf : BytesView, start : Int) -> Int raise ProtocolError {
     if buf[i] == 0 {
       return i
     }
-    i = i + 1
+    i += 1
   }
   raise UnexpectedEof("unexpected EOF")
 }
