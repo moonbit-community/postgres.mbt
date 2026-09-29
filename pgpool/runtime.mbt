@@ -313,9 +313,10 @@ fn Session::new(pool : Shared, connection : ConnectionState) -> Session {
 fn make_pooled_operation(
   connection : ConnectionState,
 ) -> (Operation, OperationCancelToken) raise {
-  let client = match connection.client.val {
-    Some(client) => client
-    None => raise PoolError::ScopeExpired
+  let client = if connection.client.val is Some(client) {
+    client
+  } else {
+    raise PoolError::ScopeExpired
   }
   let state = {
     connection,

@@ -288,9 +288,10 @@ pub struct Config {
 ///|
 /// Keep pool diagnostics useful without rendering the password.
 pub impl @debug.Debug for Config with fn to_repr(self) {
-  let password : String? = match self.password {
-    None => None
-    Some(_) => Some("<hidden>")
+  let password : String? = if self.password is Some(_) {
+    Some("<hidden>")
+  } else {
+    None
   }
   @debug.Repr::record({
     "user": @debug.Repr(self.user),
@@ -419,12 +420,10 @@ fn validate_pool_config(config : PoolConfig) -> Unit raise {
 ///|
 /// Validate that an optional timeout is non-negative.
 fn validate_timeout(name : String, timeout_ms : Int?) -> Unit raise {
-  match timeout_ms {
-    Some(timeout_ms) =>
-      if timeout_ms < 0 {
-        raise PoolError::InvalidConfig("pool \{name} must be non-negative")
-      }
-    None => ()
+  if timeout_ms is Some(timeout_ms) {
+    if timeout_ms < 0 {
+      raise PoolError::InvalidConfig("pool \{name} must be non-negative")
+    }
   }
 }
 
@@ -489,9 +488,10 @@ fn validate_connection_targets(targets : Array[ConnectionTarget]) -> Unit raise 
 
 ///|
 fn is_non_empty_string(value : String?) -> Bool {
-  match value {
-    Some(value) => value != ""
-    None => false
+  if value is Some(value) {
+    value != ""
+  } else {
+    false
   }
 }
 
@@ -500,13 +500,11 @@ fn validate_tls_config(
   ssl_mode : @client.SslMode,
   ssl_root_cert : String?,
 ) -> Unit raise {
-  match ssl_root_cert {
-    Some(root_cert) =>
-      if root_cert == "system" && ssl_mode != VerifyFull {
-        raise ConfigError::InvalidConfig(
-          "sslrootcert=system requires sslmode=verify-full",
-        )
-      }
-    None => ()
+  if ssl_root_cert is Some(root_cert) {
+    if root_cert == "system" && ssl_mode != VerifyFull {
+      raise ConfigError::InvalidConfig(
+        "sslrootcert=system requires sslmode=verify-full",
+      )
+    }
   }
 }

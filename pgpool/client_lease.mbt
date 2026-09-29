@@ -13,15 +13,12 @@ async fn ClientLeaseState::begin_operation(
     self.gate.release()
     raise PoolError::ScopeExpired
   }
-  match self.connection.client.val {
-    Some(client) => {
-      self.active_ops.val += 1
-      client
-    }
-    None => {
-      self.gate.release()
-      raise PoolError::ScopeExpired
-    }
+  if self.connection.client.val is Some(client) {
+    self.active_ops.val += 1
+    client
+  } else {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -96,15 +93,12 @@ async fn ClientLeaseState::begin_cancellable_scope(
     self.gate.release()
     raise PoolError::ScopeExpired
   }
-  match self.connection.client.val {
-    Some(_) => {
-      self.active_ops.val += 1
-      self.connection
-    }
-    None => {
-      self.gate.release()
-      raise PoolError::ScopeExpired
-    }
+  if self.connection.client.val is Some(_) {
+    self.active_ops.val += 1
+    self.connection
+  } else {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -127,15 +121,12 @@ async fn ClientLeaseState::begin_transaction_scope(
     self.gate.release()
     raise PoolError::ScopeExpired
   }
-  match self.connection.client.val {
-    Some(client) => {
-      self.active_ops.val += 1
-      (client, self.connection)
-    }
-    None => {
-      self.gate.release()
-      raise PoolError::ScopeExpired
-    }
+  if self.connection.client.val is Some(client) {
+    self.active_ops.val += 1
+    (client, self.connection)
+  } else {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -208,8 +199,9 @@ fn ClientLeaseState::scoped_client(
   if self.released.val {
     raise PoolError::ScopeExpired
   }
-  match self.connection.client.val {
-    Some(client) => client
-    None => raise PoolError::ScopeExpired
+  if self.connection.client.val is Some(client) {
+    client
+  } else {
+    raise PoolError::ScopeExpired
   }
 }

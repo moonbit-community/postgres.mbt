@@ -66,12 +66,11 @@ async fn TransactionState::begin_operation(
     self.gate.release()
     raise PoolError::ScopeExpired
   }
-  match self.transaction.val {
-    Some(transaction) => transaction
-    None => {
-      self.gate.release()
-      raise PoolError::ScopeExpired
-    }
+  if self.transaction.val is Some(transaction) {
+    transaction
+  } else {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -94,12 +93,11 @@ async fn TransactionState::begin_nested_scope(
     self.gate.release()
     raise PoolError::ScopeExpired
   }
-  match self.transaction.val {
-    Some(transaction) => (transaction, self.connection)
-    None => {
-      self.gate.release()
-      raise PoolError::ScopeExpired
-    }
+  if self.transaction.val is Some(transaction) {
+    (transaction, self.connection)
+  } else {
+    self.gate.release()
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -117,9 +115,10 @@ fn TransactionState::scoped_transaction(
   if self.finished.val {
     raise PoolError::ScopeExpired
   }
-  match self.transaction.val {
-    Some(transaction) => transaction
-    None => raise PoolError::ScopeExpired
+  if self.transaction.val is Some(transaction) {
+    transaction
+  } else {
+    raise PoolError::ScopeExpired
   }
 }
 
@@ -148,13 +147,12 @@ async fn Transaction::take_for_completion(
   }
   check_pending_cancellation()
   self.state.finished.val = true
-  match self.state.transaction.val {
-    Some(transaction) => {
-      self.state.transaction.val = None
-      self.state.gate.release()
-      transaction
-    }
-    None => raise PoolError::ScopeExpired
+  if self.state.transaction.val is Some(transaction) {
+    self.state.transaction.val = None
+    self.state.gate.release()
+    transaction
+  } else {
+    raise PoolError::ScopeExpired
   }
 }
 
