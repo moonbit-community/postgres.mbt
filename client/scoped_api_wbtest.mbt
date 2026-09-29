@@ -226,9 +226,10 @@ async test "scoped statement and portal streams leave caller resources open and 
       }
       for _ in 0..<2 {
         let task = group.spawn(() => {
-          match transaction {
-            Some(tx) => tx.with_portal_stream(portal, 1, _ => 42)
-            None => client.with_statement_stream(statement, _ => 42)
+          if transaction is Some(tx) {
+            tx.with_portal_stream(portal, 1, _ => 42)
+          } else {
+            client.with_statement_stream(statement, _ => 42)
           }
         })
         let request = next_request()

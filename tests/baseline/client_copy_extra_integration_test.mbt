@@ -9,7 +9,8 @@ async fn copy_in_early_error(sink : @client.CopyInSink) -> Error {
     let data = if first { b"not-an-int\n" } else { b"1\n" }
     first = false
     sink.send(data[:]) catch {
-      error => break error
+      @client.ClientError::Database(_) as error => break error
+      error => raise error
     }
   }
 }

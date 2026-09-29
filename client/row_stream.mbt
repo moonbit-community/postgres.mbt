@@ -57,9 +57,8 @@ pub async fn RowStream::next(self : RowStream) -> Row? {
 ///|
 async fn RowStream::next_inner(self : RowStream) -> Row? {
   self.assert_attached()
-  match self.summary {
-    Some(_) => return self.raise_terminal_error_or_none()
-    None => ()
+  if self.summary is Some(_) {
+    return self.raise_terminal_error_or_none()
   }
   for res = self.responses.get() {
     match res {
@@ -127,12 +126,11 @@ async fn RowStream::next_inner(self : RowStream) -> Row? {
 pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
   let rows : Array[Row] = []
   for row = self.next() {
-    match row {
-      None => break rows
-      Some(row) => {
-        rows.push(row)
-        continue self.next()
-      }
+    if row is Some(row) {
+      rows.push(row)
+      continue self.next()
+    } else {
+      break rows
     }
   }
 }
@@ -142,19 +140,18 @@ pub async fn RowStream::collect(self : RowStream) -> Array[Row] {
 pub async fn RowStream::one(self : RowStream) -> Row {
   let first = self.next()
   let summary = self.finish()
-  match first {
-    Some(row) =>
-      if summary.row_count == 1 {
-        row
-      } else {
-        raise ClientError::RowCount(
-          "expected exactly one row, got \{summary.row_count.to_string()}",
-        )
-      }
-    None =>
+  if first is Some(row) {
+    if summary.row_count == 1 {
+      row
+    } else {
       raise ClientError::RowCount(
         "expected exactly one row, got \{summary.row_count.to_string()}",
       )
+    }
+  } else {
+    raise ClientError::RowCount(
+      "expected exactly one row, got \{summary.row_count.to_string()}",
+    )
   }
 }
 
@@ -181,20 +178,20 @@ pub async fn RowStream::opt(self : RowStream) -> Row? {
 /// closure or database error. If no background task could start, it drains here.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
   if self.detached {
-    match self.detached_done {
-      Some(done) => done.wait()
-      None => {
-        defer self.release_permit()
-        self.drain_discard()
-      }
+    if self.detached_done is Some(done) {
+      done.wait()
+    } else {
+      defer self.release_permit()
+      self.drain_discard()
     }
     ignore(self.raise_terminal_error_or_none())
     return self.summary.unwrap()
   }
   for row = self.next() {
-    match row {
-      Some(_) => continue self.next()
-      None => break self.summary.unwrap()
+    if row is Some(_) {
+      continue self.next()
+    } else {
+      break self.summary.unwrap()
     }
   }
 }
@@ -239,19 +236,17 @@ fn RowStream::abandon_after_error(self : RowStream) -> Unit {
 /// Temporary statements created by helper APIs are closed lazily here so the
 /// driver never interrupts the active request while rows are still in flight.
 async fn RowStream::run_cleanup(self : RowStream) -> Unit {
-  match self.cleanup {
-    Some(cleanup) =>
-      if !cleanup.done {
-        cleanup.done = true
-        // Deferred cleanup is modeled as another request inside the same
-        // logical-operation permit.
-        let responses = cleanup.context.client.send_request(
-          Messages,
-          cleanup.bytes,
-        )
-        drain_close_response(responses)
-      }
-    None => ()
+  if self.cleanup is Some(cleanup) {
+    if !cleanup.done {
+      cleanup.done = true
+      // Deferred cleanup is modeled as another request inside the same
+      // logical-operation permit.
+      let responses = cleanup.context.client.send_request(
+        Messages,
+        cleanup.bytes,
+      )
+      drain_close_response(responses)
+    }
   }
 }
 
@@ -262,66 +257,66 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
 /// command tags, portal suspension, deferred cleanup, and delayed database
 /// errors. It intentionally skips `DataRow` decoding and row allocation.
 async fn RowStream::drain_discard(self : RowStream) -> Unit {
-  match self.summary {
-    Some(_) => ()
-    None =>
-      for res = self.responses.get() {
-        match res {
-          ParseComplete
-          | BindComplete
-          | CloseComplete
-          | ParameterDescription(_)
-          | NoData
-          | RowDescription(_) => continue self.responses.get()
-          DataRow(_) => {
-            // Detached drains intentionally skip row decoding because the
-            // caller can no longer observe individual payloads. They still
-            // contribute to the final summary's observed row count.
-            self.row_count += 1
-            continue self.responses.get()
-          }
-          CommandComplete(body) => {
-            self.command_tag = body.tag_str()
-            continue self.responses.get()
-          }
-          PortalSuspended => {
-            self.suspended = true
-            continue self.responses.get()
-          }
-          ErrorResponse(body) => {
-            self.database_error = Some(parse_database_error(body.fields()))
-            continue self.responses.get()
-          }
-          ReadyForQuery(_) => {
-            self.summary = Some({
-              command_tag: self.command_tag,
-              row_count: self.row_count,
-              suspended: self.suspended,
-            })
-            // Detached drains still run cleanup so temporary statements do not
-            // leak on the server after the caller stops waiting.
-            defer self.release_permit()
-            @async.protect_from_cancel(() => self.run_cleanup())
-            match self.database_error {
-              Some(err) => raise ClientError::Database(err)
-              None => return
-            }
-          }
-          _ =>
-            fail_response_stream(
-              self.responses,
-              ClientError::UnexpectedMessage("unexpected query response"),
-            )
+  if self.summary is Some(_) {
+    ()
+  } else {
+    for res = self.responses.get() {
+      match res {
+        ParseComplete
+        | BindComplete
+        | CloseComplete
+        | ParameterDescription(_)
+        | NoData
+        | RowDescription(_) => continue self.responses.get()
+        DataRow(_) => {
+          // Detached drains intentionally skip row decoding because the
+          // caller can no longer observe individual payloads. They still
+          // contribute to the final summary's observed row count.
+          self.row_count += 1
+          continue self.responses.get()
         }
+        CommandComplete(body) => {
+          self.command_tag = body.tag_str()
+          continue self.responses.get()
+        }
+        PortalSuspended => {
+          self.suspended = true
+          continue self.responses.get()
+        }
+        ErrorResponse(body) => {
+          self.database_error = Some(parse_database_error(body.fields()))
+          continue self.responses.get()
+        }
+        ReadyForQuery(_) => {
+          self.summary = Some({
+            command_tag: self.command_tag,
+            row_count: self.row_count,
+            suspended: self.suspended,
+          })
+          // Detached drains still run cleanup so temporary statements do not
+          // leak on the server after the caller stops waiting.
+          defer self.release_permit()
+          @async.protect_from_cancel(() => self.run_cleanup())
+          if self.database_error is Some(err) {
+            raise ClientError::Database(err)
+          } else {
+            return
+          }
+        }
+        _ =>
+          fail_response_stream(
+            self.responses,
+            ClientError::UnexpectedMessage("unexpected query response"),
+          )
       }
+    }
   }
 }
 
 ///|
 fn RowStream::release_permit(self : RowStream) -> Unit {
-  match self.permit {
-    Some(permit) => permit.release()
-    None => ()
+  if self.permit is Some(permit) {
+    permit.release()
   }
 }
 
@@ -336,8 +331,9 @@ fn RowStream::assert_attached(self : RowStream) -> Unit raise {
 ///|
 /// Return the captured database error, or `None` once the stream is finished.
 fn RowStream::raise_terminal_error_or_none(self : RowStream) -> Row? raise {
-  match self.database_error {
-    Some(err) => raise ClientError::Database(err)
-    None => None
+  if self.database_error is Some(err) {
+    raise ClientError::Database(err)
+  } else {
+    None
   }
 }

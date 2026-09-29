@@ -30,12 +30,12 @@ fn Completion::complete(self : Completion, error : Error?) -> Unit {
 async fn Completion::wait(self : Completion) -> Unit {
   if !self.done.val {
     ignore(self.signal.get()) catch {
-      _ => ()
+      @aqueue.QueueAlreadyClosed => ()
+      error => raise error
     }
   }
-  match self.error.val {
-    Some(error) => raise error
-    None => ()
+  if self.error.val is Some(error) {
+    raise error
   }
 }
 

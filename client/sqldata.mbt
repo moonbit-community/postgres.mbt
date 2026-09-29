@@ -86,36 +86,40 @@ impl FromSql with fn from_sql_null(type_, _) {
 ///|
 /// Optional parameters encode `None` as SQL `NULL` and delegate `Some` values.
 pub impl[T : ToSql] ToSql for T? with fn format(self, type_) {
-  match self {
-    None => Binary
-    Some(value) => value.format(type_)
+  if self is Some(value) {
+    value.format(type_)
+  } else {
+    Binary
   }
 }
 
 ///|
 /// Optional parameters accept every PostgreSQL type when the value is `None`.
 pub impl[T : ToSql] ToSql for T? with fn accepts(self, type_) {
-  match self {
-    None => true
-    Some(value) => value.accepts(type_)
+  if self is Some(value) {
+    value.accepts(type_)
+  } else {
+    true
   }
 }
 
 ///|
 /// Optional parameters include the wrapped type name in diagnostics when present.
 pub impl[T : ToSql] ToSql for T? with fn moonbit_type_name(self) {
-  match self {
-    None => "Option"
-    Some(value) => "\{value.moonbit_type_name()}?"
+  if self is Some(value) {
+    "\{value.moonbit_type_name()}?"
+  } else {
+    "Option"
   }
 }
 
 ///|
 /// Optional parameters serialize `None` as SQL `NULL`.
 pub impl[T : ToSql] ToSql for T? with fn to_sql(self, type_, buf) {
-  match self {
-    None => Yes
-    Some(value) => value.to_sql(type_, buf)
+  if self is Some(value) {
+    value.to_sql(type_, buf)
+  } else {
+    Yes
   }
 }
 
@@ -153,9 +157,10 @@ pub impl[T : ToSql] ToSql for Array[T] with fn format(_, _) {
 
 ///|
 pub impl[T : ToSql] ToSql for Array[T] with fn accepts(self, type_) {
-  match array_element_type(type_) {
-    None => false
-    Some(element_type) => self.all(element => element.accepts(element_type))
+  if array_element_type(type_) is Some(element_type) {
+    self.all(element => element.accepts(element_type))
+  } else {
+    false
   }
 }
 
@@ -184,9 +189,10 @@ pub impl[T : ToSql] ToSql for Array[T] with fn to_sql(self, type_, buf) {
 
 ///|
 pub impl[T : FromSql] FromSql for Array[T] with fn accepts(type_) {
-  match array_element_type(type_) {
-    None => false
-    Some(element_type) => T::accepts(element_type)
+  if array_element_type(type_) is Some(element_type) {
+    T::accepts(element_type)
+  } else {
+    false
   }
 }
 
@@ -278,7 +284,7 @@ fn[T : ToSql] write_array_payload(
         raise ClientError::Encode("too many array elements")
       }
     }
-    expected_elements = expected_elements * dimension.len
+    expected_elements *= dimension.len
     payload.write_int_be(@proto.checked_i32(dimension.len))
     payload.write_int_be(@proto.checked_i32(dimension.lower_bound))
   }

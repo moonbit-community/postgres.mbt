@@ -16,19 +16,16 @@ async test "cancelled client and transaction prepare close before releasing the 
         let types = if typed { [Type::int4()] } else { [] }
         let delivered = @ref.new(false)
         let task = group.spawn(allow_failure=true, () => {
-          let statement = match transaction {
-            Some(tx) =>
-              if typed {
-                tx.prepare_typed(sql, types)
-              } else {
-                tx.prepare(sql)
-              }
-            None =>
-              if typed {
-                client.prepare_typed(sql, types)
-              } else {
-                client.prepare(sql)
-              }
+          let statement = if transaction is Some(tx) {
+            if typed {
+              tx.prepare_typed(sql, types)
+            } else {
+              tx.prepare(sql)
+            }
+          } else if typed {
+            client.prepare_typed(sql, types)
+          } else {
+            client.prepare(sql)
           }
           delivered.val = true
           ignore(statement)
@@ -94,19 +91,16 @@ async test "failed Close while delivering a cancelled prepare aborts the connect
           let types = if typed { [Type::int4()] } else { [] }
           let delivered = @ref.new(false)
           let task = group.spawn(allow_failure=true, () => {
-            let statement = match transaction {
-              Some(tx) =>
-                if typed {
-                  tx.prepare_typed(sql, types)
-                } else {
-                  tx.prepare(sql)
-                }
-              None =>
-                if typed {
-                  client.prepare_typed(sql, types)
-                } else {
-                  client.prepare(sql)
-                }
+            let statement = if transaction is Some(tx) {
+              if typed {
+                tx.prepare_typed(sql, types)
+              } else {
+                tx.prepare(sql)
+              }
+            } else if typed {
+              client.prepare_typed(sql, types)
+            } else {
+              client.prepare(sql)
             }
             delivered.val = true
             ignore(statement)

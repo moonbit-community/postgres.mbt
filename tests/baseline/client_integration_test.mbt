@@ -114,12 +114,11 @@ async fn[T] wait_for_task_or_fail(
 ) -> T {
   let mut remaining = polls
   while remaining > 0 {
-    match task.try_wait() {
-      Some(value) => return value
-      None => {
-        remaining -= 1
-        @async.sleep(10)
-      }
+    if task.try_wait() is Some(value) {
+      return value
+    } else {
+      remaining -= 1
+      @async.sleep(10)
     }
   }
   fail(message)
@@ -135,12 +134,11 @@ async fn[T] assert_task_stays_pending(
 ) -> Unit {
   let mut remaining = polls
   while remaining > 0 {
-    match task.try_wait() {
-      Some(_) => fail(message)
-      None => {
-        remaining -= 1
-        @async.sleep(10)
-      }
+    if task.try_wait() is Some(_) {
+      fail(message)
+    } else {
+      remaining -= 1
+      @async.sleep(10)
     }
   }
 }
@@ -1495,13 +1493,12 @@ async test "integration copy out" {
     let chunks : Array[Bytes] = []
     let payload = Buffer()
     for chunk = stream.next() {
-      match chunk {
-        None => break ()
-        Some(chunk) => {
-          chunks.push(chunk)
-          payload.write_bytes(chunk)
-          continue stream.next()
-        }
+      if chunk is Some(chunk) {
+        chunks.push(chunk)
+        payload.write_bytes(chunk)
+        continue stream.next()
+      } else {
+        break ()
       }
     }
     assert_true(stream.formats() == [Text, Text])

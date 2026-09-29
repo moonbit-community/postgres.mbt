@@ -70,15 +70,9 @@ async fn close_temporary_statement_after_error(
   context : OpContext,
   name : Bytes,
 ) -> Unit {
-  let close_error : Error? = try {
-    close_temporary_statement(context, name)
-    None
-  } catch {
-    error => Some(error)
-  }
-  match close_error {
-    Some(ClientError::Database(_)) | None => ()
-    Some(_) => context.client.abort()
+  close_temporary_statement(context, name) catch {
+    ClientError::Database(_) => ()
+    _ => context.client.abort()
   }
 }
 
@@ -110,10 +104,10 @@ async fn start_copy_out(
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None =>
-            raise ClientError::UnexpectedMessage("expected CopyOutResponse")
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          raise ClientError::UnexpectedMessage("expected CopyOutResponse")
         }
       _ =>
         fail_response_stream(
@@ -156,17 +150,16 @@ async fn read_prepare_response(
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => {
-            // Resolve cached type metadata once, at the end, so callers see a
-            // fully enriched result without partial-success bookkeeping.
-            let result = (
-              resolve_parameter_types(context, param_oids),
-              resolve_columns(context, columns),
-            )
-            break result
-          }
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          // Resolve cached type metadata once, at the end, so callers see a
+          // fully enriched result without partial-success bookkeeping.
+          let result = (
+            resolve_parameter_types(context, param_oids),
+            resolve_columns(context, columns),
+          )
+          break result
         }
       _ =>
         fail_response_stream(
@@ -198,9 +191,10 @@ async fn collect_copy_in_completion(
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => break rows_affected(command_tag)
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          break rows_affected(command_tag)
         }
       _ =>
         fail_response_stream(
@@ -225,9 +219,10 @@ async fn drain_close_response(
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => break ()
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          break ()
         }
       _ =>
         fail_response_stream(
@@ -270,9 +265,10 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => break ()
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          break ()
         }
       _ =>
         fail_response_stream(
@@ -286,9 +282,12 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 ///|
 /// Extract the trailing numeric row count from a PostgreSQL command tag.
 fn rows_affected(command_tag : String) -> Int {
-  match command_tag.split(" ").last() {
-    None => 0
-    Some(last) => @string.parse_int(last) catch { _ => 0 }
+  if command_tag.split(" ").last() is Some(last) {
+    @string.parse_int(last) catch {
+      _ => 0
+    }
+  } else {
+    0
   }
 }
 

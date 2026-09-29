@@ -53,9 +53,10 @@ pub fn SimpleQueryRow::get_name(
   self : SimpleQueryRow,
   name : String,
 ) -> String? raise {
-  match self.index_of(name) {
-    None => raise ClientError::ColumnNotFound(name)
-    Some(index) => self.values[index]
+  if self.index_of(name) is Some(index) {
+    self.values[index]
+  } else {
+    raise ClientError::ColumnNotFound(name)
   }
 }
 
@@ -155,12 +156,11 @@ pub async fn SimpleQueryStream::collect(
 ) -> Array[SimpleQueryMessage] {
   let messages : Array[SimpleQueryMessage] = []
   for msg = self.next() {
-    match msg {
-      None => break messages
-      Some(message) => {
-        messages.push(message)
-        continue self.next()
-      }
+    if msg is Some(message) {
+      messages.push(message)
+      continue self.next()
+    } else {
+      break messages
     }
   }
 }
@@ -171,20 +171,20 @@ pub async fn SimpleQueryStream::collect(
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
   if self.detached {
-    match self.detached_done {
-      Some(done) => done.wait()
-      None => {
-        defer self.release_permit()
-        self.drain_discard()
-      }
+    if self.detached_done is Some(done) {
+      done.wait()
+    } else {
+      defer self.release_permit()
+      self.drain_discard()
     }
     ignore(self.raise_terminal_error_or_none())
     return
   }
   for msg = self.next() {
-    match msg {
-      Some(_) => continue self.next()
-      None => break ()
+    if msg is Some(_) {
+      continue self.next()
+    } else {
+      break ()
     }
   }
 }
@@ -226,9 +226,10 @@ fn SimpleQueryStream::abandon_after_error(self : SimpleQueryStream) -> Unit {
 /// Drain the remaining protocol frames without constructing row values.
 async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
   if self.finished {
-    match self.database_error {
-      Some(err) => raise ClientError::Database(err)
-      None => return
+    if self.database_error is Some(err) {
+      raise ClientError::Database(err)
+    } else {
+      return
     }
   }
   for response = self.responses.get() {
@@ -246,9 +247,10 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
       ReadyForQuery(_) => {
         self.finished = true
         self.release_permit()
-        match self.database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => return
+        if self.database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          return
         }
       }
       _ =>
@@ -262,9 +264,8 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
 
 ///|
 fn SimpleQueryStream::release_permit(self : SimpleQueryStream) -> Unit {
-  match self.permit {
-    Some(permit) => permit.release()
-    None => ()
+  if self.permit is Some(permit) {
+    permit.release()
   }
 }
 
@@ -281,8 +282,9 @@ fn SimpleQueryStream::assert_attached(self : SimpleQueryStream) -> Unit raise {
 fn SimpleQueryStream::raise_terminal_error_or_none(
   self : SimpleQueryStream,
 ) -> SimpleQueryMessage? raise {
-  match self.database_error {
-    Some(err) => raise ClientError::Database(err)
-    None => None
+  if self.database_error is Some(err) {
+    raise ClientError::Database(err)
+  } else {
+    None
   }
 }

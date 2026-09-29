@@ -99,9 +99,10 @@ pub struct Config {
 ///|
 /// Keep connection diagnostics useful without rendering the password.
 pub impl @debug.Debug for Config with fn to_repr(self) {
-  let password : String? = match self.password {
-    None => None
-    Some(_) => Some("<hidden>")
+  let password : String? = if self.password is Some(_) {
+    Some("<hidden>")
+  } else {
+    None
   }
   @debug.Repr::record({
     "host": @debug.Repr(self.host),

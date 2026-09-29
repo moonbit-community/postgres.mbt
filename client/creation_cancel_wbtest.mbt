@@ -171,14 +171,12 @@ async test "query creation cancellation transfers the stream and permit to drain
       }
       let delivered = @ref.new(false)
       let task = group.spawn(allow_failure=true, () => {
-        let stream = match transaction {
-          Some(tx) => tx.query("select 1")
-          None =>
-            if mode == 0 {
-              client.query("select 1")
-            } else {
-              client.query_typed("select 1", [])
-            }
+        let stream = if transaction is Some(tx) {
+          tx.query("select 1")
+        } else if mode == 0 {
+          client.query("select 1")
+        } else {
+          client.query_typed("select 1", [])
         }
         delivered.val = true
         ignore(stream.finish())
@@ -272,26 +270,25 @@ async test "pending cancellation prevents new client and transaction stream requ
             entered.put(())
             release_start.get()
           })
-          match transaction {
-            Some(tx) =>
-              match mode {
-                0 => ignore(tx.query("select 1"))
-                1 => tx.batch_execute("select 1")
-                2 => ignore(tx.savepoint("cancelled"))
-                3 => ignore(tx.query_statement(statement))
-                4 => ignore(tx.query_portal(portal, 1))
-                5 => tx.commit()
-                _ => tx.rollback()
-              }
-            None =>
-              match mode {
-                0 => ignore(client.query("select 1"))
-                1 => ignore(client.simple_query("select 1"))
-                2 => ignore(client.copy_out("COPY t TO STDOUT"))
-                3 => ignore(client.copy_in("COPY t FROM STDIN"))
-                4 => ignore(client.query_typed("select 1", []))
-                _ => ignore(client.query_statement(statement))
-              }
+          if transaction is Some(tx) {
+            match mode {
+              0 => ignore(tx.query("select 1"))
+              1 => tx.batch_execute("select 1")
+              2 => ignore(tx.savepoint("cancelled"))
+              3 => ignore(tx.query_statement(statement))
+              4 => ignore(tx.query_portal(portal, 1))
+              5 => tx.commit()
+              _ => tx.rollback()
+            }
+          } else {
+            match mode {
+              0 => ignore(client.query("select 1"))
+              1 => ignore(client.simple_query("select 1"))
+              2 => ignore(client.copy_out("COPY t TO STDOUT"))
+              3 => ignore(client.copy_in("COPY t FROM STDIN"))
+              4 => ignore(client.query_typed("select 1", []))
+              _ => ignore(client.query_statement(statement))
+            }
           }
         })
         entered.get()

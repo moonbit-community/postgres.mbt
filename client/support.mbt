@@ -217,15 +217,12 @@ fn close_runtime(shared : Shared, error? : Error) -> Unit {
   // consistent "no new work" state even if queue closure races with them.
   shared.closed.val = true
   shared.closing.val = true
-  match error {
-    None => {
-      shared.requests.close()
-      shared.async_messages.close()
-    }
-    Some(err) => {
-      shared.requests.close(error=err, clear=true)
-      shared.async_messages.close()
-    }
+  if error is Some(err) {
+    shared.requests.close(error=err, clear=true)
+    shared.async_messages.close()
+  } else {
+    shared.requests.close()
+    shared.async_messages.close()
   }
 }
 

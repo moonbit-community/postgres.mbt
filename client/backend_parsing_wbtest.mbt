@@ -61,12 +61,11 @@ fn make_data_row_body(values : Array[Bytes?]) -> @backend.DataRowBody raise {
   let payload = Buffer()
   payload.write_int16_be(@proto.checked_i16(values.length()))
   for value in values {
-    match value {
-      None => payload.write_int_be(-1)
-      Some(value) => {
-        payload.write_int_be(@proto.i32_from_usize(value.length()))
-        payload.write_bytes(value)
-      }
+    if value is Some(value) {
+      payload.write_int_be(@proto.i32_from_usize(value.length()))
+      payload.write_bytes(value)
+    } else {
+      payload.write_int_be(-1)
     }
   }
   match

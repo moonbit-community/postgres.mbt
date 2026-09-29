@@ -22,9 +22,10 @@ fn env_var(name : String) -> String? {
 fn integration_config() -> IntegrationConfig? raise {
   guard env_var("RUN_POSTGRES_INTEGRATION") == Some("1") else { return None }
   let host = env_var("POSTGRES_HOST").unwrap_or("127.0.0.1")
-  let port = match env_var("POSTGRES_PORT") {
-    None => 5432
-    Some(port) => @string.parse_int(port)
+  let port = if env_var("POSTGRES_PORT") is Some(port) {
+    @string.parse_int(port)
+  } else {
+    5432
   }
   let user = env_var("POSTGRES_USER").unwrap_or("moon")
   let password = env_var("POSTGRES_PASSWORD").unwrap_or("moonpass")
@@ -76,28 +77,27 @@ fn auth_client_config(
   channel_binding? : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
-  match password {
-    Some(password) =>
-      Config(
-        config.host,
-        user~,
-        database=config.database,
-        password~,
-        port=config.port,
-        ssl_mode~,
-        channel_binding~,
-        application_name~,
-      )
-    None =>
-      Config(
-        config.host,
-        user~,
-        database=config.database,
-        port=config.port,
-        ssl_mode~,
-        channel_binding~,
-        application_name~,
-      )
+  if password is Some(password) {
+    Config(
+      config.host,
+      user~,
+      database=config.database,
+      password~,
+      port=config.port,
+      ssl_mode~,
+      channel_binding~,
+      application_name~,
+    )
+  } else {
+    Config(
+      config.host,
+      user~,
+      database=config.database,
+      port=config.port,
+      ssl_mode~,
+      channel_binding~,
+      application_name~,
+    )
   }
 }
 
