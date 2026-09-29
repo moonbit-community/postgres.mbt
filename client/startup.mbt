@@ -26,9 +26,12 @@ let channel_binding_required_not_used_message = "channel binding required, but s
 ///|
 /// Resolve the socket host for the current connection target.
 fn Config::connect_host(self : Config) -> String {
-  match self.hostaddr {
-    Some(hostaddr) => hostaddr
-    None => if self.host == "" { "127.0.0.1" } else { self.host }
+  if self.hostaddr is Some(hostaddr) {
+    hostaddr
+  } else if self.host == "" {
+    "127.0.0.1"
+  } else {
+    self.host
   }
 }
 
@@ -46,14 +49,12 @@ fn Config::tls_verify_host(self : Config) -> String? raise {
     VerifyFull =>
       if self.host != "" {
         Some(self.host)
+      } else if self.hostaddr is Some(hostaddr) {
+        Some(hostaddr)
       } else {
-        match self.hostaddr {
-          Some(hostaddr) => Some(hostaddr)
-          None =>
-            raise ClientError::Ssl(
-              "sslmode=verify-full requires explicit host or hostaddr",
-            )
-        }
+        raise ClientError::Ssl(
+          "sslmode=verify-full requires explicit host or hostaddr",
+        )
       }
     Disable | VerifyCa => None
   }
@@ -61,27 +62,23 @@ fn Config::tls_verify_host(self : Config) -> String? raise {
 
 ///|
 fn Config::tls_root_cert_file(self : Config) -> String? {
-  match self.ssl_root_cert {
-    Some(root_cert) =>
-      if root_cert == "system" {
-        None
-      } else {
-        Some(root_cert)
-      }
-    None => None
+  if self.ssl_root_cert is Some(root_cert) {
+    if root_cert == "system" {
+      None
+    } else {
+      Some(root_cert)
+    }
+  } else {
+    None
   }
 }
 
 ///|
 fn Config::validate_tls_config(self : Config) -> Unit raise {
-  match self.ssl_root_cert {
-    Some(root_cert) =>
-      if root_cert == "system" && self.ssl_mode != VerifyFull {
-        raise ClientError::Ssl(
-          "sslrootcert=system requires sslmode=verify-full",
-        )
-      }
-    None => ()
+  if self.ssl_root_cert is Some(root_cert) {
+    if root_cert == "system" && self.ssl_mode != VerifyFull {
+      raise ClientError::Ssl("sslrootcert=system requires sslmode=verify-full")
+    }
   }
   if self.ssl_mode is VerifyFull {
     ignore(self.tls_verify_host())
@@ -92,11 +89,10 @@ fn Config::validate_tls_config(self : Config) -> Unit raise {
 fn Config::tls_trusted_root(self : Config) -> @tls.TrustedRoot {
   if !self.ssl_mode.requires_tls() {
     NoVerification
+  } else if self.tls_root_cert_file() is Some(file) {
+    CustomPemFile(file)
   } else {
-    match self.tls_root_cert_file() {
-      Some(file) => CustomPemFile(file)
-      None => SystemRoot
-    }
+    SystemRoot
   }
 }
 
@@ -162,13 +158,22 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
             host?=config.tls_verify_host(),
             trust=config.tls_trusted_root(),
           ) catch {
-            err => raise ClientError::Ssl(tls_error_message(err))
+            @tls.TlsError::TlsError(_) as err =>
+              raise ClientError::Ssl(tls_error_message(err))
+            @tls.ConnectionClosed as err =>
+              raise ClientError::Ssl(tls_error_message(err))
+            err => raise err
           }
           let channel_binding = TlsChannelBinding::from_tls(tls) catch {
-            err => {
+            @tls.TlsError::TlsError(_) as err => {
               tls.close()
               raise ClientError::Ssl(tls_error_message(err))
             }
+            @tls.ConnectionClosed as err => {
+              tls.close()
+              raise ClientError::Ssl(tls_error_message(err))
+            }
+            err => raise err
           }
           transferred.val = true
           { stream: Secure(tls, conn), channel_binding, }
@@ -205,10 +210,8 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
     (b"client_encoding"[:], b"UTF8"[:]),
     (b"application_name"[:], @proto.utf8_encode(config.application_name)[:]),
   ]
-  match config.options {
-    Some(options) =>
-      parameters.push((b"options"[:], @proto.utf8_encode(options)[:]))
-    None => ()
+  if config.options is Some(options) {
+    parameters.push((b"options"[:], @proto.utf8_encode(options)[:]))
   }
   let buf = Buffer()
   @frontend.startup_message(parameters.iter(), buf)
@@ -333,9 +336,10 @@ async fn read_message(stream : Stream) -> @backend.Message {
   let packet = Buffer(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
-  match @backend.Message::parse(packet.to_bytes()[:]) {
-    Some(parsed) => parsed.message
-    None => raise ClientError::UnexpectedMessage("incomplete backend message")
+  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
+    parsed.message
+  } else {
+    raise ClientError::UnexpectedMessage("incomplete backend message")
   }
 }
 
@@ -400,21 +404,22 @@ fn finish_scram(scram : @auth.ScramSha256?, data : BytesView) -> Unit raise {
 ///|
 /// Require that a password is present in the connection config.
 fn require_password(password : String?) -> String raise {
-  match password {
-    Some(password) => password
-    None => raise ClientError::Authentication("server requires a password")
+  if password is Some(password) {
+    password
+  } else {
+    raise ClientError::Authentication("server requires a password")
   }
 }
 
 ///|
 /// Require that a SCRAM exchange has already been started.
 fn require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
-  match scram {
-    Some(scram) => scram
-    None =>
-      raise ClientError::UnexpectedMessage(
-        "received SCRAM continuation without an active SCRAM exchange",
-      )
+  if scram is Some(scram) {
+    scram
+  } else {
+    raise ClientError::UnexpectedMessage(
+      "received SCRAM continuation without an active SCRAM exchange",
+    )
   }
 }
 
@@ -486,14 +491,14 @@ fn supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   // PostgreSQL may advertise multiple SASL mechanisms; accept as soon as the
   // standard SCRAM-SHA-256 entry appears.
   for mechanism = mechanisms.next() {
-    match mechanism {
-      None => break false
-      Some(mechanism) =>
-        if mechanism == @auth.SCRAM_SHA_256 {
-          break true
-        } else {
-          continue mechanisms.next()
-        }
+    if mechanism is Some(mechanism) {
+      if mechanism == @auth.SCRAM_SHA_256 {
+        break true
+      } else {
+        continue mechanisms.next()
+      }
+    } else {
+      break false
     }
   }
 }
@@ -503,14 +508,14 @@ fn supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 fn supports_scram_plus(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
   for mechanism = mechanisms.next() {
-    match mechanism {
-      None => break false
-      Some(mechanism) =>
-        if mechanism == @auth.SCRAM_SHA_256_PLUS {
-          break true
-        } else {
-          continue mechanisms.next()
-        }
+    if mechanism is Some(mechanism) {
+      if mechanism == @auth.SCRAM_SHA_256_PLUS {
+        break true
+      } else {
+        continue mechanisms.next()
+      }
+    } else {
+      break false
     }
   }
 }

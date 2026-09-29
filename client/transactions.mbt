@@ -80,8 +80,9 @@ pub async fn Client::transaction(
   errdefer {
     defer permit.release()
     if started.val && !self.shared.closed.val {
-      let _ = @async.protect_from_cancel(() => context.batch_execute("ROLLBACK")) catch {
-        _ => ()
+      @async.protect_from_cancel(() => context.batch_execute("ROLLBACK")) catch {
+        ClientError::Closed(_) => ()
+        _ => self.abort()
       }
     }
   }
@@ -102,9 +103,8 @@ async fn OpContext::begin_transaction(
   permit : OperationPermit,
 ) -> Transaction {
   let clauses : Array[String] = []
-  match options.isolation_level {
-    Some(level) => clauses.push("ISOLATION LEVEL \{isolation_level_sql(level)}")
-    None => ()
+  if options.isolation_level is Some(level) {
+    clauses.push("ISOLATION LEVEL \{isolation_level_sql(level)}")
   }
   match options.read_only {
     Some(true) => clauses.push("READ ONLY")
@@ -153,7 +153,12 @@ pub async fn[T] Client::with_transaction(
   errdefer @async.protect_from_cancel(() => {
     if !transaction.finished.val {
       transaction.wait_for_resource_scopes()
-      let _ = transaction.rollback() catch { _ => () }
+      transaction.rollback() catch {
+        // SQL rollback errors have completed their protocol exchange; the
+        // callback error remains the one returned to its caller.
+        ClientError::Database(_) | ClientError::Closed(_) => ()
+        _ => self.abort()
+      }
     }
   })
   let result = f(transaction)
@@ -187,7 +192,10 @@ pub async fn[T] Transaction::with_transaction(
   errdefer @async.protect_from_cancel(() => {
     if !child.finished.val {
       child.wait_for_resource_scopes()
-      let _ = child.rollback() catch { _ => () }
+      child.rollback() catch {
+        ClientError::Closed(_) => ()
+        _ => self.client.abort()
+      }
     }
   })
   let result = f(child)
@@ -211,7 +219,10 @@ pub async fn[T] Transaction::with_savepoint(
   errdefer @async.protect_from_cancel(() => {
     if !child.finished.val {
       child.wait_for_resource_scopes()
-      let _ = child.rollback() catch { _ => () }
+      child.rollback() catch {
+        ClientError::Closed(_) => ()
+        _ => self.client.abort()
+      }
     }
   })
   let result = f(child)
@@ -342,50 +353,40 @@ async fn Transaction::begin_savepoint(
           "ROLLBACK TO SAVEPOINT \{name}; RELEASE SAVEPOINT \{name}",
         )
       }) catch {
+        ClientError::Database(_) as error => creation_error.val = Some(error)
         error => {
           creation_error.val = Some(error)
-          if !(error is ClientError::Database(_)) {
-            self.client.abort()
-          }
+          self.client.abort()
         }
       }
     }
   }
-  let made : @ref.Ref[Transaction?] = @ref.new(None)
-  let startup_error : Error? = try {
-    made.val = Some(
-      @async.protect_from_cancel(() => {
-        self.context.batch_execute("SAVEPOINT \{name}")
-        created.val = true
-        {
-          client: self.client,
-          context: self.context,
-          scope_gate: OperationGate::new(),
-          child: @ref.new(None),
-          scoped_resources: @ref.new(0),
-          closing: @ref.new(None),
-          root_permit: None,
-          parent_permit: Some(parent_permit),
-          savepoint: Some(name),
-          finished: @ref.new(false),
-        }
-      }),
-    )
-    None
-  } catch {
-    error => Some(error)
-  }
-  match startup_error {
-    Some(error) => {
+  let transaction = @async.protect_from_cancel(() => {
+    self.context.batch_execute("SAVEPOINT \{name}")
+    created.val = true
+    {
+      client: self.client,
+      context: self.context,
+      scope_gate: OperationGate::new(),
+      child: @ref.new(None),
+      scoped_resources: @ref.new(0),
+      closing: @ref.new(None),
+      root_permit: None,
+      parent_permit: Some(parent_permit),
+      savepoint: Some(name),
+      finished: @ref.new(false),
+    }
+  }) catch {
+    ClientError::Database(_) as error => {
       creation_error.val = Some(error)
-      if !(error is ClientError::Database(_)) {
-        self.client.abort()
-      }
       raise error
     }
-    None => ()
+    error => {
+      creation_error.val = Some(error)
+      self.client.abort()
+      raise error
+    }
   }
-  let transaction = made.val.unwrap()
   check_pending_cancellation()
   if self.closing.val is Some(_) {
     raise ClientError::Closed("transaction is closing")
@@ -466,6 +467,7 @@ pub async fn Transaction::bind(
   })
   errdefer @async.protect_from_cancel(() => {
     self.context.close_portal(portal) catch {
+      ClientError::Database(_) => ()
       _ => self.client.abort()
     }
   })
@@ -509,6 +511,8 @@ async fn[T] with_transaction_stream(
   errdefer @async.protect_from_cancel(() => {
     stream.detach()
     ignore(stream.finish()) catch {
+      // Cleanup must not replace the callback's original error.
+      ClientError::Database(_) => ()
       _ => ()
     }
   })
@@ -588,39 +592,36 @@ async fn Transaction::start_stream(
   let creation_error : @ref.Ref[Error?] = @ref.new(None)
   errdefer {
     self.clear_creating_child(pending, creation_error.val)
-    match completed.val {
-      Some(stream) => stream.detach()
-      None => permit.release()
+    if completed.val is Some(stream) {
+      stream.detach()
+    } else {
+      permit.release()
     }
   }
-  let startup_error : Error? = try {
-    completed.val = Some(@async.protect_from_cancel(() => build(permit)))
-    None
-  } catch {
-    error => Some(error)
-  }
-  match startup_error {
-    Some(error) => {
+  let stream = @async.protect_from_cancel(() => build(permit)) catch {
+    ClientError::Database(_) as error => {
       creation_error.val = Some(error)
-      if !(error is ClientError::Database(_)) && !local_child_error(error) {
+      raise error
+    }
+    error => {
+      creation_error.val = Some(error)
+      if !local_child_error(error) {
         self.client.abort()
       }
       raise error
     }
-    None => ()
   }
-  let stream = completed.val.unwrap()
+  completed.val = Some(stream)
   self.child.val = Some(Stream(stream))
   pending.complete(None)
   check_pending_cancellation()
-  match self.closing.val {
-    Some(done) => {
-      // The closer owns the registered stream and drains it before this
-      // creator reports that the handle could not be delivered.
-      @async.protect_from_cancel(() => done.wait())
-      raise ClientError::Closed("transaction is closing")
-    }
-    None => stream
+  if self.closing.val is Some(done) {
+    // The closer owns the registered stream and drains it before this
+    // creator reports that the handle could not be delivered.
+    @async.protect_from_cancel(() => done.wait())
+    raise ClientError::Closed("transaction is closing")
+  } else {
+    stream
   }
 }
 
@@ -646,9 +647,8 @@ async fn Transaction::cleanup_child(self : Transaction) -> Bool {
       }
       let unfinished = !child.finished.val
       if unfinished {
-        match child.closing.val {
-          Some(done) => done.wait()
-          None => ()
+        if child.closing.val is Some(done) {
+          done.wait()
         }
         if !child.finished.val {
           child.rollback()
@@ -707,6 +707,10 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
   let cleanup_error : @ref.Ref[Error?] = @ref.new(None)
   @async.protect_from_cancel(() => {
     unfinished_child.val = self.cleanup_child() catch {
+      ClientError::Database(_) as error => {
+        cleanup_error.val = Some(error)
+        false
+      }
       error => {
         cleanup_error.val = Some(error)
         false
@@ -760,7 +764,7 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
   })
   @async.protect_from_cancel(() => {
     submitted.val = true
-    let command_error : Error? = try {
+    try {
       match (command, self.savepoint) {
         ("commit", None) => self.context.batch_execute("COMMIT")
         ("commit", Some(name)) =>
@@ -772,24 +776,18 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
           )
         _ => abort("invalid transaction action")
       }
-      None
     } catch {
-      error => Some(error)
-    }
-    match command_error {
-      Some(ClientError::Database(_) as error) => raise error
-      Some(error) => {
+      ClientError::Database(_) as error => raise error
+      error => {
         self.client.abort()
         raise error
       }
-      None => ()
     }
     self.finished.val = true
     self.release_owner_permit()
   })
-  match cleanup_error.val {
-    Some(error) => raise error
-    None => ()
+  if cleanup_error.val is Some(error) {
+    raise error
   }
   if action == "commit" && unfinished_child.val {
     raise ClientError::UnfinishedChildTransaction
@@ -806,17 +804,12 @@ fn Transaction::invalidate_if_connection_closed(self : Transaction) -> Unit {
 
 ///|
 fn Transaction::release_owner_permit(self : Transaction) -> Unit {
-  match self.parent_permit {
-    Some(parent_permit) => parent_permit.release()
-    None =>
-      match self.root_permit {
-        Some(root_permit) => {
-          if !root_permit.released.val {
-            self.client.shared.root_transaction_occupancy.val -= 1
-          }
-          root_permit.release()
-        }
-        None => ()
-      }
+  if self.parent_permit is Some(parent_permit) {
+    parent_permit.release()
+  } else if self.root_permit is Some(root_permit) {
+    if !root_permit.released.val {
+      self.client.shared.root_transaction_occupancy.val -= 1
+    }
+    root_permit.release()
   }
 }

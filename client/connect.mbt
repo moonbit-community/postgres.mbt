@@ -99,11 +99,10 @@ pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {
     let terminal_error : Error? = if !self.shared.ready.done.val {
       if self.shared.aborted.val {
         Some(ClientError::Closed("connection aborted"))
+      } else if failure is Some(error) {
+        Some(error)
       } else {
-        match failure {
-          Some(error) => Some(error)
-          None => Some(ClientError::Closed("executor stopped before startup"))
-        }
+        Some(ClientError::Closed("executor stopped before startup"))
       }
     } else {
       failure
@@ -130,16 +129,14 @@ pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {
     self.shared.driver_task.val = Some(task)
     task.wait()
   }) catch {
-    error =>
-      if !self.shared.aborted.val &&
-        !(self.shared.close_requested.val &&
-        error is @async.WaitedTaskAlreadyCancelled) {
+    @async.WaitedTaskAlreadyCancelled as error =>
+      if !self.shared.aborted.val && !self.shared.close_requested.val {
         failure = Some(error)
       }
+    error => if !self.shared.aborted.val { failure = Some(error) }
   }
-  match failure {
-    Some(error) => raise error
-    None => ()
+  if failure is Some(error) {
+    raise error
   }
 }
 
@@ -158,14 +155,14 @@ async fn ClientExecutor::run_connection(
   })
   group.spawn_bg(() => run_control_queue(self.shared.control, group))
   let config = self.shared.config
-  let (setup, state) = match config.connect_timeout_ms {
-    Some(timeout_ms) =>
-      @async.with_timeout(
-        timeout_ms,
-        () => connect_authenticated(config),
-        error=ClientError::Protocol("connection timed out"),
-      )
-    None => connect_authenticated(config)
+  let (setup, state) = if config.connect_timeout_ms is Some(timeout_ms) {
+    @async.with_timeout(
+      timeout_ms,
+      () => connect_authenticated(config),
+      error=ClientError::Protocol("connection timed out"),
+    )
+  } else {
+    connect_authenticated(config)
   }
   let transferred = @ref.new(false)
   defer (if !transferred.val { setup.stream.close() })
@@ -206,7 +203,10 @@ async fn run_control_queue(
   group : @async.TaskGroup[Unit],
 ) -> Unit {
   while true {
-    let work = control.queue.get() catch { _ => return }
+    let work = control.queue.get() catch {
+      @aqueue.QueueAlreadyClosed => return
+      error => raise error
+    }
     group.spawn_bg(work)
   }
 }
@@ -244,33 +244,29 @@ pub fn Client::is_transaction_idle(self : Client) -> Bool {
 ///
 /// Close is an operation barrier: it waits behind work already accepted by the
 /// FIFO gate, rejects later work, sends `Terminate`, and returns only after the
-/// private driver has closed the transport.
+/// private driver has closed the transport. Cancellation of the caller still
+/// propagates while executor failure after shutdown is ignored.
 pub async fn Client::close(self : Client) -> Unit {
   let permit = self.shared.operation_gate.acquire()
   defer permit.release()
   if self.shared.closing.val {
-    self.shared.done.wait() catch {
-      _ => ()
-    }
+    self.wait_for_shutdown()
     return
   }
   self.shared.close_requested.val = true
   self.shared.closing.val = true
   if !self.shared.ready.done.val {
-    match self.shared.driver_task.val {
-      Some(task) => task.cancel()
-      None => {
-        self.shared.ready.complete(
-          Some(ClientError::Closed("connection is closed")),
-        )
-        close_runtime(self.shared)
-        self.shared.control.close()
-        self.shared.done.complete(None)
-      }
+    if self.shared.driver_task.val is Some(task) {
+      task.cancel()
+    } else {
+      self.shared.ready.complete(
+        Some(ClientError::Closed("connection is closed")),
+      )
+      close_runtime(self.shared)
+      self.shared.control.close()
+      self.shared.done.complete(None)
     }
-    self.shared.done.wait() catch {
-      _ => ()
-    }
+    self.wait_for_shutdown()
     return
   }
   let responses = @async.Queue(kind=Unbounded)
@@ -281,8 +277,12 @@ pub async fn Client::close(self : Client) -> Unit {
     copy_input: None,
     copy_error: None,
   }) catch {
-    _ => {
+    @aqueue.QueueAlreadyClosed => {
       close_runtime(self.shared)
+      false
+    }
+    error => {
+      close_runtime(self.shared, error~)
       false
     }
   }
@@ -290,7 +290,15 @@ pub async fn Client::close(self : Client) -> Unit {
     responses.close()
     return
   }
+  self.wait_for_shutdown()
+}
+
+///|
+/// Wait for transport shutdown while keeping executor failure separate from
+/// cancellation of the caller that is closing the client.
+async fn Client::wait_for_shutdown(self : Client) -> Unit {
   self.shared.done.wait() catch {
+    @async.WaitedTaskAlreadyCancelled as error => raise error
     _ => ()
   }
 }
@@ -315,13 +323,12 @@ pub fn Client::abort(self : Client) -> Unit {
   // request-local response queue with the same abort error.
   self.shared.requests.close(error~)
   self.shared.async_messages.close()
-  match self.shared.driver_task.val {
-    Some(task) => task.cancel()
-    None => {
-      self.shared.ready.complete(Some(error))
-      self.shared.control.close(error~)
-      self.shared.done.complete(None)
-    }
+  if self.shared.driver_task.val is Some(task) {
+    task.cancel()
+  } else {
+    self.shared.ready.complete(Some(error))
+    self.shared.control.close(error~)
+    self.shared.done.complete(None)
   }
 }
 

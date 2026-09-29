@@ -131,12 +131,11 @@ fn copy_test_row_description_message() -> @backend.Message raise {
 fn copy_test_data_row_message(value : Bytes?) -> @backend.Message raise {
   let payload = Buffer()
   payload.write_int16_be(1)
-  match value {
-    None => payload.write_int_be(-1)
-    Some(value) => {
-      payload.write_int_be(@proto.i32_from_usize(value.length()))
-      payload.write_bytes(value)
-    }
+  if value is Some(value) {
+    payload.write_int_be(@proto.i32_from_usize(value.length()))
+    payload.write_bytes(value)
+  } else {
+    payload.write_int_be(-1)
   }
   copy_test_parse_backend_message(
     copy_test_backend_packet(@backend.DATA_ROW_TAG, payload),
@@ -152,10 +151,10 @@ fn copy_test_shared(
   let ready = Completion::new()
   ready.complete(None)
   let control = DrainControl::new()
-  match background_group.val {
-    Some(group) =>
-      group.spawn_bg(no_wait=true, () => run_control_queue(control, group))
-    None => control.close()
+  if background_group.val is Some(group) {
+    group.spawn_bg(no_wait=true, () => run_control_queue(control, group))
+  } else {
+    control.close()
   }
   {
     config: Config(

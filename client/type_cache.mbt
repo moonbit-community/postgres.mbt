@@ -15,15 +15,14 @@ let typeinfo_composite_query = "select attname::text, atttypid::oid from pg_cata
 ///|
 /// Return a cached `Type`, querying PostgreSQL catalogs only on cache misses.
 async fn cached_type(context : OpContext, oid : @proto.Oid) -> Type {
-  match context.client.shared.types.get(oid) {
-    Some(type_) => type_
-    None => {
-      // Cache misses are resolved once and written back so later row/parameter
-      // decoding for the same OID stays local.
-      let type_ = lookup_type(context, oid)
-      context.client.shared.types[oid] = type_
-      type_
-    }
+  if context.client.shared.types.get(oid) is Some(type_) {
+    type_
+  } else {
+    // Cache misses are resolved once and written back so later row/parameter
+    // decoding for the same OID stays local.
+    let type_ = lookup_type(context, oid)
+    context.client.shared.types[oid] = type_
+    type_
   }
 }
 
@@ -31,51 +30,50 @@ async fn cached_type(context : OpContext, oid : @proto.Oid) -> Type {
 /// Fetch rich metadata for a PostgreSQL type OID.
 ///
 /// The driver first checks built-ins, then falls back to catalog queries. If
-/// those fail or return no rows, it preserves the OID inside an `Unknown`
-/// descriptor so later error messages remain informative.
+/// a catalog query returns a PostgreSQL error or no rows, it preserves the OID
+/// inside an `Unknown` descriptor so later error messages remain informative.
 async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
-  match builtin_type(oid) {
-    Some(type_) => type_
-    None => {
-      let rows = query_oid_catalog(context, typeinfo_query, oid) catch {
-        _ => []
-      }
-      // Catalog lookup is best-effort; falling back to `Unknown` preserves the
-      // raw OID for later diagnostics without blocking query execution.
-      if rows.is_empty() {
-        return Type::unknown(oid, name="oid_\{oid.to_string()}")
-      }
-      let row = rows[0]
-      let name : String = row.get(0)
-      let typtype : String = row.get(1)
-      let elem_oid : @proto.Oid = row.get(2)
-      let range_subtype : @proto.Oid? = row.get(3)
-      let base_oid : @proto.Oid = row.get(4)
-      let relid : @proto.Oid = row.get(6)
-      // Match PostgreSQL's richer type families first before falling back to a
-      // plain scalar descriptor.
-      // Catalog helpers return fresh arrays. Once cached as views, their
-      // backing storage has no mutable alias left in the client.
-      let kind = if typtype == "e" {
-        let labels = query_enum_labels(context, oid)
-        Kind::Enum(labels[:])
-      } else if typtype == "p" {
-        Pseudo
-      } else if base_oid != 0U {
-        Domain(base_oid)
-      } else if elem_oid != 0U {
-        Array(elem_oid)
-      } else if relid != 0U {
-        let fields = query_composite_fields(context, relid)
-        Composite(fields[:])
-      } else {
-        match range_subtype {
-          Some(subtype) => Range(subtype)
-          None => Simple
-        }
-      }
-      { oid, name, kind, }
+  if builtin_type(oid) is Some(type_) {
+    type_
+  } else {
+    let rows = query_oid_catalog(context, typeinfo_query, oid) catch {
+      ClientError::Database(_) => []
+      err => raise err
     }
+    // A PostgreSQL catalog error is recoverable here. Transport and protocol
+    // errors still propagate; neither leaves a trustworthy type descriptor.
+    if rows.is_empty() {
+      return Type::unknown(oid, name="oid_\{oid.to_string()}")
+    }
+    let row = rows[0]
+    let name : String = row.get(0)
+    let typtype : String = row.get(1)
+    let elem_oid : @proto.Oid = row.get(2)
+    let range_subtype : @proto.Oid? = row.get(3)
+    let base_oid : @proto.Oid = row.get(4)
+    let relid : @proto.Oid = row.get(6)
+    // Match PostgreSQL's richer type families first before falling back to a
+    // plain scalar descriptor.
+    // Catalog helpers return fresh arrays. Once cached as views, their
+    // backing storage has no mutable alias left in the client.
+    let kind = if typtype == "e" {
+      let labels = query_enum_labels(context, oid)
+      Kind::Enum(labels[:])
+    } else if typtype == "p" {
+      Pseudo
+    } else if base_oid != 0U {
+      Domain(base_oid)
+    } else if elem_oid != 0U {
+      Array(elem_oid)
+    } else if relid != 0U {
+      let fields = query_composite_fields(context, relid)
+      Composite(fields[:])
+    } else if range_subtype is Some(subtype) {
+      Range(subtype)
+    } else {
+      Simple
+    }
+    { oid, name, kind, }
   }
 }
 
@@ -101,7 +99,8 @@ async fn query_enum_labels(
   oid : @proto.Oid,
 ) -> Array[String] {
   let rows = query_oid_catalog(context, typeinfo_enum_query, oid) catch {
-    _ => []
+    ClientError::Database(_) => []
+    err => raise err
   }
   rows.map(row => row.get(0))
 }
@@ -113,7 +112,8 @@ async fn query_composite_fields(
   oid : @proto.Oid,
 ) -> Array[Field] {
   let rows = query_oid_catalog(context, typeinfo_composite_query, oid) catch {
-    _ => []
+    ClientError::Database(_) => []
+    err => raise err
   }
   rows.map(row => { name: row.get(0), type_oid: row.get(1), })
 }
@@ -126,12 +126,11 @@ fn parse_parameter_oids(
   let types : Array[@proto.Oid] = []
   let params = body.parameters()
   for param = params.next() {
-    match param {
-      None => break types
-      Some(oid) => {
-        types.push(oid)
-        continue params.next()
-      }
+    if param is Some(oid) {
+      types.push(oid)
+      continue params.next()
+    } else {
+      break types
     }
   }
 }

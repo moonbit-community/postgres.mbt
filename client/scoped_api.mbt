@@ -15,7 +15,10 @@ async fn[R, T] Client::with_scoped_resource(
     @async.protect_from_cancel(() => acquire(context, permit))
   }
   errdefer @async.protect_from_cancel(() => {
-    let _ = finalize(resource) catch { _ => () }
+    finalize(resource) catch {
+      ClientError::Database(_) => ()
+      _ => self.abort()
+    }
   })
   check_pending_cancellation()
   let result = f(resource)

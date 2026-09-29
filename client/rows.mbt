@@ -80,9 +80,10 @@ pub fn Row::get_raw(self : Row, index : Int) -> Bytes? {
 ///|
 /// Return the raw field bytes for the named column.
 pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
-  match self.index_of(name) {
-    None => raise ClientError::ColumnNotFound(name)
-    Some(index) => self.get_raw(index)
+  if self.index_of(name) is Some(index) {
+    self.get_raw(index)
+  } else {
+    raise ClientError::ColumnNotFound(name)
   }
 }
 
@@ -97,18 +98,20 @@ pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
   guard T::accepts(column.type_) else {
     raise wrong_type_error(T::moonbit_type_name(), column.type_)
   }
-  match self.values[index] {
-    None => FromSql::from_sql_null(column.type_, column.format)
-    Some(value) => FromSql::from_sql(column.type_, column.format, value[:])
+  if self.values[index] is Some(value) {
+    FromSql::from_sql(column.type_, column.format, value[:])
+  } else {
+    FromSql::from_sql_null(column.type_, column.format)
   }
 }
 
 ///|
 /// Decode the named column as `T`.
 pub fn[T : FromSql] Row::get_name(self : Row, name : String) -> T raise {
-  match self.index_of(name) {
-    None => raise ClientError::ColumnNotFound(name)
-    Some(index) => self.get(index)
+  if self.index_of(name) is Some(index) {
+    self.get(index)
+  } else {
+    raise ClientError::ColumnNotFound(name)
   }
 }
 
@@ -124,9 +127,10 @@ pub fn[T : FromSql] Row::try_get(self : Row, index : Int) -> T? raise {
 ///|
 /// Decode the named column as `T`, returning `None` when the column is absent.
 pub fn[T : FromSql] Row::try_get_name(self : Row, name : String) -> T? raise {
-  match self.index_of(name) {
-    None => None
-    Some(index) => Some(self.get(index))
+  if self.index_of(name) is Some(index) {
+    Some(self.get(index))
+  } else {
+    None
   }
 }
 

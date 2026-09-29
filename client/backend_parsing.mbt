@@ -10,22 +10,21 @@ fn parse_columns(body : @backend.RowDescriptionBody) -> Array[Column] raise {
   let columns : Array[Column] = []
   let fields = body.fields()
   for field = fields.next() {
-    match field {
-      None => break columns
-      Some(field) => {
-        // `resolve_type` may only know the builtin shape at parse time; later
-        // cache lookups can enrich the descriptor without changing raw OIDs.
-        columns.push({
-          name: field.name_str(),
-          table_oid: field.table_oid,
-          column_id: field.column_id,
-          type_: resolve_type(field.type_oid),
-          type_size: field.type_size,
-          type_modifier: field.type_modifier,
-          format: decode_wire_format(field.format),
-        })
-        continue fields.next()
-      }
+    if field is Some(field) {
+      // `resolve_type` may only know the builtin shape at parse time; later
+      // cache lookups can enrich the descriptor without changing raw OIDs.
+      columns.push({
+        name: field.name_str(),
+        table_oid: field.table_oid,
+        column_id: field.column_id,
+        type_: resolve_type(field.type_oid),
+        type_size: field.type_size,
+        type_modifier: field.type_modifier,
+        format: decode_wire_format(field.format),
+      })
+      continue fields.next()
+    } else {
+      break columns
     }
   }
 }
@@ -89,12 +88,11 @@ fn parse_column_names(
   let columns : Array[String] = []
   let fields = body.fields()
   for field = fields.next() {
-    match field {
-      None => break columns
-      Some(field) => {
-        columns.push(field.name_str())
-        continue fields.next()
-      }
+    if field is Some(field) {
+      columns.push(field.name_str())
+      continue fields.next()
+    } else {
+      break columns
     }
   }
 }
@@ -106,12 +104,11 @@ fn parse_copy_formats(
 ) -> Array[WireFormat] raise {
   let out : Array[WireFormat] = []
   for format = formats.next() {
-    match format {
-      None => break out
-      Some(format) => {
-        out.push(decode_wire_format(format))
-        continue formats.next()
-      }
+    if format is Some(format) {
+      out.push(decode_wire_format(format))
+      continue formats.next()
+    } else {
+      break out
     }
   }
 }
@@ -129,26 +126,24 @@ fn parse_database_error(
   // Preserve the subset of PostgreSQL error fields that the public
   // `DatabaseError` struct exposes; all other tags are intentionally ignored.
   for field = fields.next() {
-    match field {
-      None =>
-        break {
-          severity,
-          code,
-          message: message.unwrap_or("database error"),
-          detail,
-          hint,
-        }
-      Some(field) => {
-        let value = decode_utf8(field.value_bytes())
-        match field.type_ {
-          b'S' | b'V' => severity = Some(value)
-          b'C' => code = Some(value)
-          b'M' => message = Some(value)
-          b'D' => detail = Some(value)
-          b'H' => hint = Some(value)
-          _ => ()
-        }
-        continue fields.next()
+    if field is Some(field) {
+      let value = decode_utf8(field.value_bytes())
+      match field.type_ {
+        b'S' | b'V' => severity = Some(value)
+        b'C' => code = Some(value)
+        b'M' => message = Some(value)
+        b'D' => detail = Some(value)
+        b'H' => hint = Some(value)
+        _ => ()
+      }
+      continue fields.next()
+    } else {
+      break {
+        severity,
+        code,
+        message: message.unwrap_or("database error"),
+        detail,
+        hint,
       }
     }
   }

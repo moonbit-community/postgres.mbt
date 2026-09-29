@@ -14,9 +14,10 @@
 pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   let (_context, permit) = self.begin_stream_operation()
   let completed : @ref.Ref[CopyOutStream?] = @ref.new(None)
-  errdefer (match completed.val {
-    Some(stream) => stream.detach()
-    None => permit.release()
+  errdefer (if completed.val is Some(stream) {
+    stream.detach()
+  } else {
+    permit.release()
   })
   let stream = @async.protect_from_cancel(() => {
     let responses = self.send_request(Messages, simple_query_bytes(sql))
@@ -79,10 +80,10 @@ async fn OpContext::copy_in(
       }
       ReadyForQuery(_) => {
         terminal.val = true
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None =>
-            raise ClientError::UnexpectedMessage("expected CopyInResponse")
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          raise ClientError::UnexpectedMessage("expected CopyInResponse")
         }
       }
       _ =>
@@ -121,10 +122,9 @@ async fn CopyInSink::enqueue_action(
     )
   })
   self.input.put(action) catch {
-    err => {
-      guard err is ClientError::Database(database_error) else { raise err }
+    ClientError::Database(database_error) =>
       self.raise_early_database_error(database_error)
-    }
+    err => raise err
   }
 }
 
@@ -180,7 +180,8 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
 ///
 /// PostgreSQL still sends a completion sequence after an abort. The driver
 /// drains it internally and suppresses the returned row count because the COPY
-/// did not complete successfully.
+/// did not complete successfully. Unexpected transport or protocol errors
+/// still propagate to the caller.
 pub async fn CopyInSink::abort(
   self : CopyInSink,
   message? : String = "COPY aborted",
@@ -198,22 +199,24 @@ pub async fn CopyInSink::abort(
   })
   try {
     self.input.put(Fail(message)) catch {
-      err => {
-        guard err is ClientError::Database(database_error) else { raise err }
-        let _ = self.raise_early_database_error(database_error) catch {
-          _ => ()
-        }
+      ClientError::Database(database_error) => {
+        self.raise_early_database_error(database_error)
         return
       }
+      err => raise err
     }
-    // Abort is best-effort from the caller's perspective: once `CopyFail` is
-    // queued, only protocol cleanup remains and its row count is irrelevant.
+    // Known COPY shutdown errors are best-effort once `CopyFail` is queued;
+    // the cleanup row count is irrelevant.
     let _ = collect_copy_in_completion(self.responses) catch {
-      err => if err is ClientError::Database(_) { 0 } else { raise err }
+      ClientError::Database(_) => 0
+      err => raise err
     }
     self.permit.release()
   } catch {
-    _ => ()
+    ClientError::Database(_)
+    | ClientError::Closed(_)
+    | @aqueue.QueueAlreadyClosed => ()
+    error => raise error
   }
 }
 
@@ -343,12 +346,11 @@ async fn CopyOutStream::next_inner(self : CopyOutStream) -> Bytes? {
 pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
   let chunks : Array[Bytes] = []
   for chunk = self.next() {
-    match chunk {
-      None => break chunks
-      Some(chunk) => {
-        chunks.push(chunk)
-        continue self.next()
-      }
+    if chunk is Some(chunk) {
+      chunks.push(chunk)
+      continue self.next()
+    } else {
+      break chunks
     }
   }
 }
@@ -359,12 +361,11 @@ pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
   if self.detached {
-    match self.detached_done {
-      Some(done) => done.wait()
-      None => {
-        defer self.release_permit()
-        self.drain_discard()
-      }
+    if self.detached_done is Some(done) {
+      done.wait()
+    } else {
+      defer self.release_permit()
+      self.drain_discard()
     }
     ignore(self.raise_terminal_error_or_none())
     return
@@ -415,9 +416,10 @@ fn CopyOutStream::abandon_after_error(self : CopyOutStream) -> Unit {
 /// Drain the remaining COPY OUT protocol messages without buffering payloads.
 async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
   if self.finished {
-    match self.database_error {
-      Some(err) => raise ClientError::Database(err)
-      None => return
+    if self.database_error is Some(err) {
+      raise ClientError::Database(err)
+    } else {
+      return
     }
   }
   for response = self.responses.get() {
@@ -434,9 +436,10 @@ async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
       ReadyForQuery(_) => {
         self.finished = true
         self.release_permit()
-        match self.database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => return
+        if self.database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          return
         }
       }
       _ =>
@@ -450,9 +453,8 @@ async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
 
 ///|
 fn CopyOutStream::release_permit(self : CopyOutStream) -> Unit {
-  match self.permit {
-    Some(permit) => permit.release()
-    None => ()
+  if self.permit is Some(permit) {
+    permit.release()
   }
 }
 
@@ -469,8 +471,9 @@ fn CopyOutStream::assert_attached(self : CopyOutStream) -> Unit raise {
 fn CopyOutStream::raise_terminal_error_or_none(
   self : CopyOutStream,
 ) -> Bytes? raise {
-  match self.database_error {
-    Some(err) => raise ClientError::Database(err)
-    None => None
+  if self.database_error is Some(err) {
+    raise ClientError::Database(err)
+  } else {
+    None
   }
 }

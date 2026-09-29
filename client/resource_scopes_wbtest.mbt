@@ -97,17 +97,16 @@ async test "prepared scopes preserve cancellation and close before releasing own
       let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
       defer waiting.close()
       let task = group.spawn(allow_failure=true, () => {
-        match transaction {
-          Some(tx) =>
-            tx.with_prepared("select value", _ => {
-              entered.put(())
-              waiting.get()
-            })
-          None =>
-            client.with_prepared("select value", _ => {
-              entered.put(())
-              waiting.get()
-            })
+        if transaction is Some(tx) {
+          tx.with_prepared("select value", _ => {
+            entered.put(())
+            waiting.get()
+          })
+        } else {
+          client.with_prepared("select value", _ => {
+            entered.put(())
+            waiting.get()
+          })
         }
       })
       scoped_test_prepare(next_request())

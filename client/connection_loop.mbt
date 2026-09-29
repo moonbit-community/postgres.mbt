@@ -31,9 +31,8 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
     } else {
       error.unwrap_or(ClientError::Closed("connection is closed"))
     }
-    match active {
-      Some(request) => self.close_request(request, Some(error))
-      None => ()
+    if active is Some(request) {
+      self.close_request(request, Some(error))
     }
     self.drain_queued_requests(Some(error))
     close_runtime(self.shared, error~)
@@ -53,7 +52,8 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
   defer @async.protect_from_cancel(() => {
     reader.cancel()
     reader.wait() catch {
-      _ => ()
+      @async.WaitedTaskAlreadyCancelled => ()
+      error => cleanup(Some(error))
     }
   })
   try {
@@ -77,6 +77,7 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
       }
     }
   } catch {
+    @async.WaitedTaskAlreadyCancelled => cleanup(None)
     err => cleanup(Some(err))
   }
 }
@@ -111,15 +112,13 @@ async fn Driver::receive_messages(
       incoming.put(message)
     }
   } catch {
+    @async.WaitedTaskAlreadyCancelled => ()
     error => failure = Some(error)
   }
-  match failure {
-    Some(error) => {
-      // Preserve queued requests for Driver::cleanup to close their own queues.
-      incoming.close(error~, clear=true)
-      self.shared.requests.close(error~)
-    }
-    None => ()
+  if failure is Some(error) {
+    // Preserve queued requests for Driver::cleanup to close their own queues.
+    incoming.close(error~, clear=true)
+    self.shared.requests.close(error~)
   }
 }
 
@@ -130,7 +129,8 @@ async fn Driver::receive_messages(
 pub async fn Client::next_message(self : Client) -> AsyncMessage? {
   self.ready()
   Some(self.shared.async_messages.get()) catch {
-    _ => None
+    @aqueue.QueueAlreadyClosed => None
+    error => raise error
   }
 }
 
@@ -215,9 +215,8 @@ async fn Driver::drain_copy_in_request(
         }
       }
       ReadyForQuery(body) => {
-        match writer {
-          Some(writer) => writer.wait()
-          None => ()
+        if writer is Some(writer) {
+          writer.wait()
         }
         self.shared.transaction_status.val = body.status
         request.responses.put(message)
@@ -250,6 +249,7 @@ async fn Driver::drain_copy_input(
 ) -> Unit {
   while true {
     let act = input.get() catch {
+      @async.WaitedTaskAlreadyCancelled as error => raise error
       err => if stopped.val { return } else { raise err }
     }
     match act {
@@ -287,47 +287,41 @@ fn Driver::close_request(
   error : Error?,
 ) -> Unit {
   ignore(self)
-  match error {
-    None => request.responses.close()
-    Some(err) => request.responses.close(error=err, clear=true)
+  if error is Some(err) {
+    request.responses.close(error=err, clear=true)
+  } else {
+    request.responses.close()
   }
-  match request.copy_input {
-    Some(input) =>
-      match error {
-        None =>
-          match request.copy_error {
-            Some(copy_error) =>
-              match copy_error.val {
-                Some(database_error) =>
-                  input.close(
-                    error=ClientError::Database(database_error),
-                    clear=true,
-                  )
-                None => input.close()
-              }
-            None => input.close()
-          }
-        Some(err) => input.close(error=err, clear=true)
+  if request.copy_input is Some(input) {
+    if error is Some(err) {
+      input.close(error=err, clear=true)
+    } else if request.copy_error is Some(copy_error) {
+      if copy_error.val is Some(database_error) {
+        input.close(error=ClientError::Database(database_error), clear=true)
+      } else {
+        input.close()
       }
-    None => ()
+    } else {
+      input.close()
+    }
   }
 }
 
 ///|
 /// Drain and close requests that were queued but never written to the wire.
 fn Driver::drain_queued_requests(self : Driver, error : Error?) -> Unit {
-  let close_error = match error {
-    Some(err) => Some(err)
-    None => Some(ClientError::Closed("connection is closed"))
+  let close_error = if error is Some(err) {
+    Some(err)
+  } else {
+    Some(ClientError::Closed("connection is closed"))
   }
   while true {
     let request = self.shared.requests.try_get() catch { _ => None }
-    match request {
-      None => return
-      Some(request) => {
-        self.close_request(request, close_error)
-        continue
-      }
+    if request is Some(request) {
+      self.close_request(request, close_error)
+      continue
+    } else {
+      return
     }
   }
 }
@@ -372,23 +366,19 @@ fn Driver::push_async_message(self : Driver, message : AsyncMessage) -> Unit {
 
 ///|
 fn Shared::push_async_message(self : Shared, message : AsyncMessage) -> Unit {
-  match self.async_message_handler.val {
-    Some(handler) => handler(message)
-    None => {
-      if (self.async_messages.try_put(message) catch { _ => false }) {
-        return
-      }
-      if self.closed.val {
-        return
-      }
-      match (self.async_messages.try_get() catch { _ => None }) {
-        Some(_) => {
-          self.dropped_async_messages.val += 1L
-          ignore(self.async_messages.try_put(message)) catch {
-            _ => ()
-          }
-        }
-        None => ()
+  if self.async_message_handler.val is Some(handler) {
+    handler(message)
+  } else {
+    if (self.async_messages.try_put(message) catch { _ => false }) {
+      return
+    }
+    if self.closed.val {
+      return
+    }
+    if (self.async_messages.try_get() catch { _ => None }) is Some(_) {
+      self.dropped_async_messages.val += 1L
+      ignore(self.async_messages.try_put(message)) catch {
+        _ => ()
       }
     }
   }
@@ -403,8 +393,9 @@ async fn Driver::read_message(self : Driver) -> @backend.Message {
   let packet = Buffer(size_hint=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
-  match @backend.Message::parse(packet.to_bytes()[:]) {
-    Some(parsed) => parsed.message
-    None => raise ClientError::UnexpectedMessage("incomplete backend message")
+  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
+    parsed.message
+  } else {
+    raise ClientError::UnexpectedMessage("incomplete backend message")
   }
 }

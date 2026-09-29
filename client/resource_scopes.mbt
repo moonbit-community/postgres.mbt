@@ -171,7 +171,8 @@ pub async fn[T] Client::with_prepared_typed(
   let scoped = ScopedStatement::new(ClientOwner(self), statement)
   errdefer @async.protect_from_cancel(() => {
     scoped.state.finish() catch {
-      _ => ()
+      ClientError::Closed(_) => ()
+      _ => self.abort()
     }
   })
   check_pending_cancellation()
@@ -212,7 +213,8 @@ pub async fn[T] Transaction::with_prepared_typed(
   let scoped = ScopedStatement::new(TransactionOwner(self), statement)
   errdefer @async.protect_from_cancel(() => {
     scoped.state.finish() catch {
-      _ => ()
+      ClientError::Closed(_) => ()
+      _ => self.client.abort()
     }
   })
   check_pending_cancellation()
@@ -297,7 +299,8 @@ pub async fn[T] Transaction::with_portal(
   let scoped = ScopedPortal::new(self, portal)
   errdefer @async.protect_from_cancel(() => {
     scoped.state.finish() catch {
-      _ => ()
+      ClientError::Closed(_) => ()
+      _ => self.client.abort()
     }
   })
   check_pending_cancellation()

@@ -74,6 +74,9 @@ async fn OpContext::prepare_for_delivery(
   })
   errdefer @async.protect_from_cancel(() => {
     self.close_statement(statement) catch {
+      // A failed Close invalidates this cancellation handoff even if the
+      // server returned ReadyForQuery.
+      ClientError::Database(_) => self.client.abort()
       _ => self.client.abort()
     }
   })
@@ -147,9 +150,10 @@ pub async fn Client::query(
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
   let completed : @ref.Ref[RowStream?] = @ref.new(None)
-  errdefer (match completed.val {
-    Some(stream) => stream.detach()
-    None => permit.release()
+  errdefer (if completed.val is Some(stream) {
+    stream.detach()
+  } else {
+    permit.release()
   })
   let stream = @async.protect_from_cancel(() => {
     let stream = context.query(sql, params, permit~)
@@ -236,9 +240,10 @@ pub async fn Client::query_typed(
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
   let completed : @ref.Ref[RowStream?] = @ref.new(None)
-  errdefer (match completed.val {
-    Some(stream) => stream.detach()
-    None => permit.release()
+  errdefer (if completed.val is Some(stream) {
+    stream.detach()
+  } else {
+    permit.release()
   })
   let stream = @async.protect_from_cancel(() => {
     let stream = context.query_typed(sql, param_types, params, permit~)
@@ -350,7 +355,10 @@ async fn OpContext::execute(
   let statement = self.prepare_typed(sql, [])
   let rows = {
     errdefer @async.protect_from_cancel(() => {
-      let _ = self.close_statement(statement) catch { _ => () }
+      self.close_statement(statement) catch {
+        ClientError::Database(_) => ()
+        _ => self.client.abort()
+      }
     })
     self.execute_raw(statement, params)
   }
@@ -382,12 +390,15 @@ async fn OpContext::execute_raw(
   let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
     // A decoding failure may already have started a detached drain.
-    match stream.detached_done {
-      Some(done) => {
-        let _ = done.wait() catch { _ => () }
+    if stream.detached_done is Some(done) {
+      done.wait() catch {
+        ClientError::Database(_) => ()
+        _ => self.client.abort()
       }
-      None => {
-        let _ = stream.drain_discard() catch { _ => () }
+    } else {
+      stream.drain_discard() catch {
+        ClientError::Database(_) => ()
+        _ => self.client.abort()
       }
     }
   })
@@ -432,24 +443,24 @@ async fn OpContext::bind(
         continue responses.get()
       }
       ReadyForQuery(_) =>
-        match database_error {
-          Some(err) => raise ClientError::Database(err)
-          None => {
-            let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
-            errdefer @async.protect_from_cancel(() => {
-              self.close_portal(raw_portal) catch {
-                _ => self.client.abort()
-              }
-            })
-            let portal = Portal::{
-              name,
-              // Resolve column OIDs lazily here so callers still get enriched
-              // type descriptors even when portals are bound later.
-              columns: resolve_columns(self, columns),
-              closed: @ref.new(false),
+        if database_error is Some(err) {
+          raise ClientError::Database(err)
+        } else {
+          let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
+          errdefer @async.protect_from_cancel(() => {
+            self.close_portal(raw_portal) catch {
+              ClientError::Database(_) => ()
+              _ => self.client.abort()
             }
-            break portal
+          })
+          let portal = Portal::{
+            name,
+            // Resolve column OIDs lazily here so callers still get enriched
+            // type descriptors even when portals are bound later.
+            columns: resolve_columns(self, columns),
+            closed: @ref.new(false),
           }
+          break portal
         }
       _ =>
         fail_response_stream(

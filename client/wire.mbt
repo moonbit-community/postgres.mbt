@@ -116,12 +116,11 @@ fn write_encoded_param(
   param : EncodedParam,
   payload : @buffer.Buffer,
 ) -> @proto.IsNull {
-  match param.value {
-    None => Yes
-    Some(bytes) => {
-      payload.write_bytes(bytes)
-      No
-    }
+  if param.value is Some(bytes) {
+    payload.write_bytes(bytes)
+    No
+  } else {
+    Yes
   }
 }
 
