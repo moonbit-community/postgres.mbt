@@ -4,7 +4,7 @@ version = "0.1.1"
 
 import {
   "moonbitlang/x@0.4.41",
-  "tonyfettes/unicode@0.3.0",
+  "moonbit-community/unicode@0.5.2",
   "moonbitlang/async@0.22.4",
 }
 
