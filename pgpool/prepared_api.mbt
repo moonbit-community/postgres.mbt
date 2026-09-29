@@ -115,41 +115,37 @@ async fn acquire_cached_statement(
   prepare : async () -> @client.Statement,
   close : async (@client.Statement) -> Unit,
 ) -> CachedStatementLease {
-  match take_and_promote_cached_statement_entry(connection, sql, param_types) {
-    Some(entry) => {
+  if take_and_promote_cached_statement_entry(connection, sql, param_types)
+    is Some(entry) {
+    entry.in_use.val += 1
+    { entry, }
+  } else {
+    let statement = prepare()
+    if take_and_promote_cached_statement_entry(connection, sql, param_types)
+      is Some(entry) {
       entry.in_use.val += 1
-      { entry, }
-    }
-    None => {
-      let statement = prepare()
-      match
-        take_and_promote_cached_statement_entry(connection, sql, param_types) {
-        Some(entry) => {
-          entry.in_use.val += 1
-          close(statement) catch {
-            _ => ()
-          }
-          { entry, }
-        }
-        None => {
-          while statement_cache_needs_eviction(
-                  connection.statement_cache.length(),
-                  connection.statement_cache_capacity,
-                ) {
-            let lru = connection.statement_cache.remove(0)
-            evict_cached_statement_entry(lru, close)
-          }
-          let entry = {
-            sql,
-            param_types: snapshot_statement_cache_param_types(param_types),
-            statement,
-            in_use: @ref.new(1),
-            evicted: @ref.new(false),
-          }
-          connection.statement_cache.push(entry)
-          { entry, }
-        }
+      close(statement) catch {
+        @client.ClientError::Database(_) => ()
+        _ => if connection.client.val is Some(client) { client.abort() }
       }
+      { entry, }
+    } else {
+      while statement_cache_needs_eviction(
+              connection.statement_cache.length(),
+              connection.statement_cache_capacity,
+            ) {
+        let lru = connection.statement_cache.remove(0)
+        evict_cached_statement_entry(lru, close)
+      }
+      let entry = {
+        sql,
+        param_types: snapshot_statement_cache_param_types(param_types),
+        statement,
+        in_use: @ref.new(1),
+        evicted: @ref.new(false),
+      }
+      connection.statement_cache.push(entry)
+      { entry, }
     }
   }
 }
@@ -282,7 +278,8 @@ async fn PreparedStatementState::invalidate_on_error(
 
 ///|
 /// The caller holds the connection's cache gate, or the transaction's
-/// exclusive gate. The original database error takes precedence over Close.
+/// exclusive gate. The original database error takes precedence over Close;
+/// unexpected Close errors abort the physical client.
 async fn PreparedStatementState::evict_invalidated_entry(
   self : PreparedStatementState,
   connection : ConnectionState,
@@ -291,24 +288,22 @@ async fn PreparedStatementState::evict_invalidated_entry(
   if lease.entry.evicted.val {
     return
   }
-  match
-    take_cached_statement_entry(
+  if take_cached_statement_entry(
       connection,
       lease.entry.sql,
       lease.entry.param_types,
-    ) {
-    Some(entry) => {
-      let _ = evict_cached_statement_entry(entry, statement => {
-        match self.scope {
-          ClientScope(_) => statement.close()
-          TransactionScope(state) =>
-            state.scoped_transaction().close_statement(statement)
-        }
-      }) catch {
-        _ => ()
+    )
+    is Some(entry) {
+    evict_cached_statement_entry(entry, statement => {
+      match self.scope {
+        ClientScope(_) => statement.close()
+        TransactionScope(state) =>
+          state.scoped_transaction().close_statement(statement)
       }
+    }) catch {
+      @client.ClientError::Database(_) => ()
+      _ => if connection.client.val is Some(client) { client.abort() }
     }
-    None => ()
   }
 }
 

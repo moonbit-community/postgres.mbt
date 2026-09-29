@@ -22,9 +22,10 @@ async fn OperationScopeState::begin_request(
   if !self.active.val || self.closing.val {
     raise PoolError::ScopeExpired
   }
-  let client = match self.connection.client.val {
-    Some(client) => client
-    None => raise PoolError::ScopeExpired
+  let client = if self.connection.client.val is Some(client) {
+    client
+  } else {
+    raise PoolError::ScopeExpired
   }
   self.next_request_id.val += 1
   self.active_request_id.val = self.next_request_id.val

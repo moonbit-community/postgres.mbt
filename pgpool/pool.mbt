@@ -96,18 +96,20 @@ pub async fn PoolExecutor::run(self : PoolExecutor) -> Unit {
     self.shared.create_requests.close()
     self.shared.close_requests.close()
   }) catch {
-    error => failure = Some(error)
-  }
-  match failure {
-    Some(error) => {
+    @async.WaitedTaskAlreadyCancelled as error => {
       fail_pool(self.shared, error)
       finished.val = true
       raise error
     }
-    None => {
-      self.shared.done.complete(None)
-      finished.val = true
-    }
+    error => failure = Some(error)
+  }
+  if failure is Some(error) {
+    fail_pool(self.shared, error)
+    finished.val = true
+    raise error
+  } else {
+    self.shared.done.complete(None)
+    finished.val = true
   }
 }
 
@@ -123,7 +125,10 @@ async fn serve_creations(
   group : @async.TaskGroup[Unit],
 ) -> Unit {
   while true {
-    let request = shared.create_requests.get() catch { _ => return }
+    let request = shared.create_requests.get() catch {
+      @aqueue.QueueAlreadyClosed => return
+      error => raise error
+    }
     if request.cancelled.val || shared.closed.val {
       request.result.close(error=PoolError::Closed)
       finish_creation(shared, request)
@@ -135,6 +140,10 @@ async fn serve_creations(
         finish_creation(shared, request)
       }
       let (client, executor) = shared.connector.connect(request.target) catch {
+        @async.WaitedTaskAlreadyCancelled => {
+          request.result.close(error=PoolError::Closed)
+          return
+        }
         error => {
           request.result.close(error~)
           return
@@ -150,10 +159,15 @@ async fn serve_creations(
           message,
         })
       }) catch {
-        error => {
+        @client.ClientError::Protocol(_) as error => {
           client.abort()
           request.result.close(error~)
           return
+        }
+        error => {
+          client.abort()
+          request.result.close(error~)
+          raise error
         }
       }
       group.spawn_bg(() => run_physical_executor(client, executor))
@@ -161,7 +175,11 @@ async fn serve_creations(
         client.abort()
       } else {
         ignore(request.result.try_put((client, request.physical_id))) catch {
-          _ => client.abort()
+          @aqueue.QueueAlreadyClosed => client.abort()
+          error => {
+            client.abort()
+            raise error
+          }
         }
       }
     })
@@ -182,22 +200,31 @@ async fn run_physical_executor(
 ) -> Unit {
   let mut failure : Error? = None
   executor.run() catch {
+    @async.WaitedTaskAlreadyCancelled => return
     error => failure = Some(error)
   }
-  match failure {
-    Some(_) => client.ready() catch { _ => return }
-    None => ()
+  if failure is Some(_) {
+    client.ready() catch {
+      @async.WaitedTaskAlreadyCancelled as error => raise error
+      _ => return
+    }
   }
 }
 
 ///|
 async fn serve_closes(shared : Shared, group : @async.TaskGroup[Unit]) -> Unit {
   while true {
-    let client = shared.close_requests.get() catch { _ => return }
+    let client = shared.close_requests.get() catch {
+      @aqueue.QueueAlreadyClosed => return
+      error => raise error
+    }
     group.spawn_bg(allow_failure=true, () => {
       // Abort on failure or cancellation; `catch` no longer sees cancellation.
       errdefer client.abort()
-      client.close()
+      client.close() catch {
+        @client.ClientError::Closed(_) => ()
+        error => raise error
+      }
     })
   }
 }
@@ -231,9 +258,8 @@ fn fail_pool(shared : Shared, error : Error) -> Unit {
   shared.slots.close(error=PoolError::Closed, clear=true)
   for request in shared.active_creations {
     request.cancelled.val = true
-    match request.task.val {
-      Some(task) => task.cancel()
-      None => ()
+    if request.task.val is Some(task) {
+      task.cancel()
     }
     request.result.close(error~, clear=true)
   }
@@ -249,15 +275,12 @@ fn fail_pool(shared : Shared, error : Error) -> Unit {
         ),
       )
     }
-    match connection.client.val {
-      Some(client) => {
-        connection.client.val = None
-        client.abort()
-        if shared.size.val > 0 {
-          shared.size.val -= 1
-        }
+    if connection.client.val is Some(client) {
+      connection.client.val = None
+      client.abort()
+      if shared.size.val > 0 {
+        shared.size.val -= 1
       }
-      None => ()
     }
   }
   shared.create_requests.close(error~, clear=true)
@@ -351,7 +374,8 @@ pub fn Pool::config(self : Pool) -> PoolConfig {
 /// readable after the pool closes.
 pub async fn Pool::next_message(self : Pool) -> PoolAsyncMessage? {
   Some(self.shared.async_messages.get()) catch {
-    _ => None
+    @aqueue.QueueAlreadyClosed => None
+    error => raise error
   }
 }
 
@@ -369,14 +393,11 @@ fn push_pool_async_message(shared : Shared, message : PoolAsyncMessage) -> Unit 
   if (shared.async_messages.try_put(message) catch { _ => false }) {
     return
   }
-  match (shared.async_messages.try_get() catch { _ => None }) {
-    Some(_) => {
-      shared.dropped_async_messages.val += 1L
-      ignore(shared.async_messages.try_put(message)) catch {
-        _ => ()
-      }
+  if (shared.async_messages.try_get() catch { _ => None }) is Some(_) {
+    shared.dropped_async_messages.val += 1L
+    ignore(shared.async_messages.try_put(message)) catch {
+      _ => ()
     }
-    None => ()
   }
 }
 
@@ -417,9 +438,10 @@ pub fn Pool::resize(self : Pool, max_size : Int) -> Unit raise {
   // checkouts past the smaller limit while existing sessions are checked out.
   let mut permits_to_remove = current.max_size - max_size
   while permits_to_remove > 0 {
-    match self.shared.slots.try_get() {
-      Some(_) => permits_to_remove -= 1
-      None => break
+    if self.shared.slots.try_get() is Some(_) {
+      permits_to_remove -= 1
+    } else {
+      break
     }
   }
   self.shared.resize_debt.val += permits_to_remove
@@ -444,9 +466,8 @@ pub fn Pool::close(self : Pool) -> Unit {
   self.shared.slots.close(error=PoolError::Closed, clear=true)
   for request in self.shared.active_creations {
     request.cancelled.val = true
-    match request.task.val {
-      Some(task) => task.cancel()
-      None => ()
+    if request.task.val is Some(task) {
+      task.cancel()
     }
   }
   while self.shared.idle.length() > 0 {
@@ -474,32 +495,32 @@ async fn Pool::acquire_slot(self : Pool, wait_ms : Int?) -> Unit {
     PoolError::Closed => raise PoolError::Closed
     err => raise err
   }
-  match immediate {
-    Some(_) => ()
-    None =>
-      match wait_ms {
-        Some(0) => raise PoolError::Timeout(Wait)
-        Some(wait_ms) => {
-          self.shared.waiting.val += 1
-          defer {
-            self.shared.waiting.val -= 1
-          }
-          ignore(
-            @async.with_timeout(
-              wait_ms,
-              () => self.shared.slots.get(),
-              error=PoolError::Timeout(Wait),
-            ),
-          )
+  if immediate is Some(_) {
+    ()
+  } else {
+    match wait_ms {
+      Some(0) => raise PoolError::Timeout(Wait)
+      Some(wait_ms) => {
+        self.shared.waiting.val += 1
+        defer {
+          self.shared.waiting.val -= 1
         }
-        None => {
-          self.shared.waiting.val += 1
-          defer {
-            self.shared.waiting.val -= 1
-          }
-          ignore(self.shared.slots.get())
-        }
+        ignore(
+          @async.with_timeout(
+            wait_ms,
+            () => self.shared.slots.get(),
+            error=PoolError::Timeout(Wait),
+          ),
+        )
       }
+      None => {
+        self.shared.waiting.val += 1
+        defer {
+          self.shared.waiting.val -= 1
+        }
+        ignore(self.shared.slots.get())
+      }
+    }
   }
 }
 
@@ -549,13 +570,15 @@ async fn Pool::checkout_client(
 ) -> ConnectionState {
   while true {
     self.assert_open()
-    match self.take_idle_client() {
-      Some(connection) =>
-        match self.try_recycle_client(connection, timeouts.recycle_ms) {
-          Some(connection) => return connection
-          None => continue
-        }
-      None => return self.create_client(timeouts.create_ms)
+    if self.take_idle_client() is Some(connection) {
+      if self.try_recycle_client(connection, timeouts.recycle_ms)
+        is Some(connection) {
+        return connection
+      } else {
+        continue
+      }
+    } else {
+      return self.create_client(timeouts.create_ms)
     }
   }
   abort("unreachable: checkout loop exited without returning a client")
@@ -581,12 +604,11 @@ async fn Pool::try_recycle_client(
   connection : ConnectionState,
   recycle_ms : Int?,
 ) -> ConnectionState? {
-  let client = match connection.client.val {
-    Some(client) => client
-    None => {
-      self.discard_client(connection, close_client=false)
-      return None
-    }
+  let client = if connection.client.val is Some(client) {
+    client
+  } else {
+    self.discard_client(connection, close_client=false)
+    return None
   }
   if client.is_closed() {
     self.discard_client(connection, close_client=false)
@@ -612,12 +634,11 @@ async fn Pool::run_recycle(
   recycle_ms : Int?,
   op : async () -> Unit,
 ) -> ConnectionState? {
-  let client = match connection.client.val {
-    Some(client) => client
-    None => {
-      self.discard_client(connection, close_client=false)
-      return None
-    }
+  let client = if connection.client.val is Some(client) {
+    client
+  } else {
+    self.discard_client(connection, close_client=false)
+    return None
   }
   // Cancellation bypasses catch. Checkout separately restores its reserved slot.
   errdefer self.discard_client(connection, close_client=true)
@@ -647,12 +668,7 @@ async fn Pool::create_client(self : Pool, create_ms : Int?) -> ConnectionState {
   let connection = run_with_timeout(
     create_ms,
     Create,
-    on_timeout=() => {
-      match candidate.val {
-        Some(client) => client.abort()
-        None => ()
-      }
-    },
+    on_timeout=() => if candidate.val is Some(client) { client.abort() },
     () => self.create_client_inner(candidate),
   )
   candidate.val = None
@@ -671,6 +687,7 @@ async fn Pool::create_client_inner(
     try {
       return self.connect_target(target, candidate)
     } catch {
+      @async.WaitedTaskAlreadyCancelled as error => raise error
       err => {
         candidate.val = None
         last_error = Some(err)
@@ -678,9 +695,10 @@ async fn Pool::create_client_inner(
       }
     }
   }
-  match last_error {
-    Some(err) => raise err
-    None => raise PoolError::Closed
+  if last_error is Some(err) {
+    raise err
+  } else {
+    raise PoolError::Closed
   }
 }
 
@@ -725,9 +743,8 @@ async fn Pool::schedule_connection(
   self.shared.active_creations.push(request)
   errdefer {
     request.cancelled.val = true
-    match request.task.val {
-      Some(task) => task.cancel()
-      None => ()
+    if request.task.val is Some(task) {
+      task.cancel()
     }
   }
   ignore(self.shared.create_requests.try_put(request))
@@ -747,35 +764,32 @@ fn Pool::discard_client(
 ///|
 /// Return a checked-out client to the pool or close it if it can no longer be reused.
 fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
-  match connection.client.val {
-    Some(client) => {
-      if shared.closed.val {
-        retire_connection(shared, connection, close_client=true)
-        release_capacity(shared)
-        return
-      }
-      if client.is_closed() {
-        retire_connection(shared, connection, close_client=false)
-        release_capacity(shared)
-        return
-      }
-      if !client.is_transaction_idle() {
-        retire_connection(shared, connection, close_client=true)
-        release_capacity(shared)
-        return
-      }
-      if shared.size.val > shared.pool_config.val.max_size {
-        retire_connection(shared, connection, close_client=true)
-        release_capacity(shared)
-        return
-      }
-      shared.idle.push(connection)
+  if connection.client.val is Some(client) {
+    if shared.closed.val {
+      retire_connection(shared, connection, close_client=true)
       release_capacity(shared)
+      return
     }
-    None => {
+    if client.is_closed() {
       retire_connection(shared, connection, close_client=false)
       release_capacity(shared)
+      return
     }
+    if !client.is_transaction_idle() {
+      retire_connection(shared, connection, close_client=true)
+      release_capacity(shared)
+      return
+    }
+    if shared.size.val > shared.pool_config.val.max_size {
+      retire_connection(shared, connection, close_client=true)
+      release_capacity(shared)
+      return
+    }
+    shared.idle.push(connection)
+    release_capacity(shared)
+  } else {
+    retire_connection(shared, connection, close_client=false)
+    release_capacity(shared)
   }
 }
 
@@ -786,12 +800,11 @@ fn ConnectionState::new(
   client : @client.Client,
   id? : Int,
 ) -> ConnectionState {
-  let id = match id {
-    Some(id) => id
-    None => {
-      shared.next_connection_id.val += 1
-      shared.next_connection_id.val
-    }
+  let id = if id is Some(id) {
+    id
+  } else {
+    shared.next_connection_id.val += 1
+    shared.next_connection_id.val
   }
   let connection = {
     id,
@@ -816,19 +829,16 @@ fn retire_connection(
     )
   }
   remove_live_connection(shared, connection.id)
-  match connection.client.val {
-    Some(client) => {
-      connection.client.val = None
-      if shared.size.val > 0 {
-        shared.size.val -= 1
-      }
-      if close_client {
-        ignore(shared.close_requests.try_put(client)) catch {
-          _ => client.abort()
-        }
+  if connection.client.val is Some(client) {
+    connection.client.val = None
+    if shared.size.val > 0 {
+      shared.size.val -= 1
+    }
+    if close_client {
+      ignore(shared.close_requests.try_put(client)) catch {
+        _ => client.abort()
       }
     }
-    None => ()
   }
   maybe_finish_shutdown(shared)
 }
@@ -850,22 +860,19 @@ async fn run_client_hook(
   hook : (async (Operation) -> Unit)?,
   client : @client.Client,
 ) -> Unit {
-  match hook {
-    Some(hook) => {
-      let connection : ConnectionState = {
-        id: 0,
-        client: @ref.new(Some(client)),
-        statement_cache_capacity: 0,
-        statement_cache: [],
-      }
-      errdefer (if !client.is_transaction_idle() { client.abort() })
-      run_cancellable_scope(connection, (operation, _) => hook(operation))
-      if !client.is_transaction_idle() {
-        client.abort()
-        raise PoolError::HookLeftOpenTransaction
-      }
+  if hook is Some(hook) {
+    let connection : ConnectionState = {
+      id: 0,
+      client: @ref.new(Some(client)),
+      statement_cache_capacity: 0,
+      statement_cache: [],
     }
-    None => ()
+    errdefer (if !client.is_transaction_idle() { client.abort() })
+    run_cancellable_scope(connection, (operation, _) => hook(operation))
+    if !client.is_transaction_idle() {
+      client.abort()
+      raise PoolError::HookLeftOpenTransaction
+    }
   }
 }
 
@@ -927,29 +934,27 @@ async fn[T] run_with_timeout(
   on_timeout? : () -> Unit,
   op : async () -> T,
 ) -> T {
-  match timeout_ms {
-    Some(timeout_ms) => {
-      let timed_out = @ref.new(false)
-      @async.with_task_group(group => {
-        group.spawn_bg(no_wait=true, () => {
-          @async.sleep(timeout_ms)
-          timed_out.val = true
-          match on_timeout {
-            Some(on_timeout) => on_timeout()
-            None => ()
-          }
-          raise PoolError::Timeout(kind)
-        })
-        op()
-      }) catch {
-        _ if timed_out.val =>
-          // The aborted operation may wake with `ClientError::Closed` and race
-          // the timer's own failure. Once the timer fired, the public result is
-          // deterministically the configured pool timeout.
-          raise PoolError::Timeout(kind)
-        err => raise err
-      }
+  if timeout_ms is Some(timeout_ms) {
+    let timed_out = @ref.new(false)
+    @async.with_task_group(group => {
+      group.spawn_bg(no_wait=true, () => {
+        @async.sleep(timeout_ms)
+        timed_out.val = true
+        if on_timeout is Some(on_timeout) {
+          on_timeout()
+        }
+        raise PoolError::Timeout(kind)
+      })
+      op()
+    }) catch {
+      _ if timed_out.val =>
+        // The aborted operation may wake with `ClientError::Closed` and race
+        // the timer's own failure. Once the timer fired, the public result is
+        // deterministically the configured pool timeout.
+        raise PoolError::Timeout(kind)
+      err => raise err
     }
-    None => op()
+  } else {
+    op()
   }
 }

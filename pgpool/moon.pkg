@@ -1,6 +1,7 @@
 import {
   "moonbit-community/postgres/client",
   "moonbitlang/async",
+  "moonbitlang/async/aqueue",
   "moonbitlang/core/debug",
   "moonbitlang/core/random",
   "moonbitlang/core/ref",
