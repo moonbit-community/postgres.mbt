@@ -127,6 +127,9 @@ async fn _query_example(client : @client.Client) -> Int {
 }
 ```
 
+`StringView` query parameters use the same text codec as `String`, so a string
+slice can be passed without first materializing an owned string.
+
 Inspect result data and metadata through `Row::columns()`, `Row::values()`,
 `RowStream::columns()`, `SimpleQueryRow::columns()`, and
 `SimpleQueryRow::values()`. These return read-only `ArrayView` values; use
