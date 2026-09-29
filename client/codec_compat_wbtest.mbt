@@ -49,6 +49,10 @@ test "built-in ToSql compatibility remains stable" {
   assert_encode_ok(1.5, Type::float8())
   assert_encode_ok("moonbit", Type::text())
   assert_encode_ok("moonbit", Type::varchar())
+  let text_view = "prefix-moonbit-suffix".exact_view(start=7, end=14)
+  assert_encode_ok(text_view, Type::text())
+  assert_encode_ok(text_view, Type::varchar())
+  assert_encode_wrong_type(text_view, Type::int4())
   assert_encode_ok(b"abc", Type::bytea())
   assert_encode_ok(b"1234567890abcdef", Type::uuid())
   assert_encode_ok(
@@ -65,9 +69,17 @@ test "built-in ToSql compatibility remains stable" {
 test "built-in wire formats remain stable" {
   assert_encode_format(true, Type::bool(), Binary)
   assert_encode_format("moonbit", Type::text(), Text)
+  assert_encode_format("moonbit"[:], Type::text(), Text)
   assert_encode_format(Json::null(), Type::json(), Text)
   assert_encode_format(Json::null(), Type::jsonb(), Text)
   assert_encode_format((None : String?), Type::text(), Binary)
+}
+
+///|
+test "StringView ToSql encodes only the viewed text" {
+  let text_view = "prefix-moonbit-suffix".exact_view(start=7, end=14)
+  let encoded = encode_param(text_view, Type::text())
+  @debug.assert_eq(encoded.value, Some(b"moonbit"))
 }
 
 ///|

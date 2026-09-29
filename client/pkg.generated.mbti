@@ -365,3 +365,4 @@ pub impl[T : ToSql] ToSql for T?
 pub impl ToSql for Bytes
 pub impl[T : ToSql] ToSql for Array[T]
 pub impl ToSql for Json
+pub impl ToSql for StringView

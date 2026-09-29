@@ -248,6 +248,28 @@ pub impl ToSql for String with fn to_sql(self, _, buf) {
 }
 
 ///|
+// `StringView` uses the same text codec as `String` without materializing the view.
+pub impl ToSql for StringView with fn accepts(_, type_) {
+  is_text_type(type_)
+}
+
+///|
+pub impl ToSql for StringView with fn moonbit_type_name(_) {
+  "StringView"
+}
+
+///|
+pub impl ToSql for StringView with fn format(_, _) {
+  Text
+}
+
+///|
+pub impl ToSql for StringView with fn to_sql(self, _, buf) {
+  buf.write_bytes(@utf8.encode(self))
+  No
+}
+
+///|
 pub impl FromSql for String with fn accepts(type_) {
   is_text_type(type_)
 }
