@@ -19,9 +19,9 @@ fn escape_internal(input : BytesView, as_ident : Bool) -> Bytes {
   let mut num_quotes = 0
   for b in input {
     if b == quote_char {
-      num_quotes = num_quotes + 1
+      num_quotes += 1
     } else if b == b'\\' {
-      num_backslashes = num_backslashes + 1
+      num_backslashes += 1
     }
   }
   let mut result_size = input.length() + num_quotes + 2

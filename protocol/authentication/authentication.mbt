@@ -525,7 +525,7 @@ fn Parser::peek(self : Parser) -> Byte? {
 ///|
 fn Parser::eat(self : Parser, target : Byte) -> Unit raise @proto.ProtocolError {
   match self.peek() {
-    Some(c) if c == target => self.idx = self.idx + 1
+    Some(c) if c == target => self.idx += 1
     Some(c) =>
       raise InvalidInput(
         "unexpected character: expected \{target.to_char()} got \{c.to_char()}",
@@ -538,7 +538,7 @@ fn Parser::eat(self : Parser, target : Byte) -> Unit raise @proto.ProtocolError 
 fn Parser::take_while(self : Parser, f : (Byte) -> Bool) -> BytesView {
   let start = self.idx
   while self.idx < self.buf.length() && f(self.buf[self.idx]) {
-    self.idx = self.idx + 1
+    self.idx += 1
   }
   self.buf[start:self.idx]
 }

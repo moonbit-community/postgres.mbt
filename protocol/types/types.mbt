@@ -233,11 +233,12 @@ pub fn hstore_to_sql(
   let mut count = 0
   for entry in values {
     let (key, value) = entry
-    count = count + 1
+    count += 1
     write_pascal_string(key, payload)
-    match value {
-      Some(v) => write_pascal_string(v, payload)
-      None => payload.write_int_be(-1)
+    if value is Some(v) {
+      write_pascal_string(v, payload)
+    } else {
+      payload.write_int_be(-1)
     }
   }
   let count_i32 = @proto.i32_from_usize(count)
@@ -286,7 +287,7 @@ pub fn HstoreEntries::next(
     }
     return None
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let key_len = r.read_i32_be()
   if key_len < 0 {
@@ -468,14 +469,14 @@ pub fn[T] array_to_sql(
     if dimension.len < 0 {
       raise InvalidInput("invalid dimension size")
     }
-    num_dimensions = num_dimensions + 1
+    num_dimensions += 1
     if dimension.len != 0 {
       let max = 0x7fff_ffff / dimension.len
       if expected_elements > max {
         raise InvalidInput("too many array elements")
       }
     }
-    expected_elements = expected_elements * dimension.len
+    expected_elements *= dimension.len
     payload.write_int_be(@proto.checked_i32(dimension.len))
     payload.write_int_be(@proto.checked_i32(dimension.lower_bound))
   }
@@ -485,7 +486,7 @@ pub fn[T] array_to_sql(
   let mut has_nulls = false
   let mut actual_elements = 0
   for element in elements {
-    actual_elements = actual_elements + 1
+    actual_elements += 1
     @proto.write_nullable(
       b => {
         let r = serializer(element, b)
@@ -531,7 +532,7 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
         raise InvalidInput("too many array elements")
       }
     }
-    elements = elements * len
+    elements *= len
   }
   if dimensions == 0 {
     elements = 0
@@ -616,7 +617,7 @@ pub fn ArrayValues::next(
     }
     return None
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let len = r.read_i32_be()
   if len < 0 {
@@ -682,18 +683,15 @@ fn write_bound(
     Exclusive(null) => (Some(null), Exclusive(()))
     Unbounded => (None, Unbounded)
   }
-  match null {
-    Some(n) => {
-      let len = match n {
-        No => @proto.i32_from_usize(payload.length())
-        Yes => -1
-      }
-      buf.write_int_be(len)
-      if n is No {
-        buf.write_bytes(payload.to_bytes())
-      }
+  if null is Some(n) {
+    let len = match n {
+      No => @proto.i32_from_usize(payload.length())
+      Yes => -1
     }
-    None => ()
+    buf.write_int_be(len)
+    if n is No {
+      buf.write_bytes(payload.to_bytes())
+    }
   }
   ret
 }
@@ -832,7 +830,7 @@ pub fn path_to_sql(
   let mut num_points = 0
   for point in points {
     let (x, y) = point
-    num_points = num_points + 1
+    num_points += 1
     payload.write_double_be(x)
     payload.write_double_be(y)
   }
@@ -887,7 +885,7 @@ pub fn PathPoints::next(self : PathPoints) -> Point? raise @proto.ProtocolError 
     }
     return None
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let x = r.read_f64_be()
   let y = r.read_f64_be()

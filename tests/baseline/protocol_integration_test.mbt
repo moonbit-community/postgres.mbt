@@ -53,9 +53,10 @@ async fn WireConnection::read_message(
   self : WireConnection,
 ) -> @backend.Message {
   let packet = read_socket_packet(self.socket)
-  match @backend.Message::parse(packet[:]) {
-    Some(parsed) => parsed.message
-    None => fail("incomplete backend message")
+  if @backend.Message::parse(packet[:]) is Some(parsed) {
+    parsed.message
+  } else {
+    fail("incomplete backend message")
   }
 }
 
@@ -253,9 +254,10 @@ fn wire_finish_scram(
 ///|
 /// Turn optional SCRAM state into a required value so out-of-order protocol steps fail clearly.
 fn wire_require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
-  match scram {
-    Some(scram) => scram
-    None => fail("missing SCRAM state")
+  if scram is Some(scram) {
+    scram
+  } else {
+    fail("missing SCRAM state")
   }
 }
 
@@ -264,14 +266,14 @@ fn wire_require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
 fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
   let mechanisms = body.mechanisms()
   for mechanism = mechanisms.next() {
-    match mechanism {
-      None => break false
-      Some(mechanism) =>
-        if mechanism == @auth.SCRAM_SHA_256 {
-          break true
-        } else {
-          continue mechanisms.next()
-        }
+    if mechanism is Some(mechanism) {
+      if mechanism == @auth.SCRAM_SHA_256 {
+        break true
+      } else {
+        continue mechanisms.next()
+      }
+    } else {
+      break false
     }
   }
 }
@@ -280,12 +282,11 @@ fn wire_supports_scram(body : @backend.AuthenticationSaslBody) -> Bool raise {
 /// Serialize an optional text parameter in the protocol's length-plus-payload format.
 /// `None` becomes SQL `NULL`, encoded as length `-1`.
 fn wire_serialize_param(param : String?, buf : @buffer.Buffer) -> @proto.IsNull {
-  match param {
-    None => Yes
-    Some(value) => {
-      buf.write_bytes(@proto.utf8_encode(value))
-      No
-    }
+  if param is Some(value) {
+    buf.write_bytes(@proto.utf8_encode(value))
+    No
+  } else {
+    Yes
   }
 }
 
@@ -308,26 +309,24 @@ fn parse_wire_database_error(
   let mut detail = None
   let mut hint = None
   for field = fields.next() {
-    match field {
-      None =>
-        break {
-          severity,
-          code,
-          message: message.unwrap_or("database error"),
-          detail,
-          hint,
-        }
-      Some(field) => {
-        let value = wire_decode_utf8(field.value_bytes())
-        match field.type_ {
-          b'S' | b'V' => severity = Some(value)
-          b'C' => code = Some(value)
-          b'M' => message = Some(value)
-          b'D' => detail = Some(value)
-          b'H' => hint = Some(value)
-          _ => ()
-        }
-        continue fields.next()
+    if field is Some(field) {
+      let value = wire_decode_utf8(field.value_bytes())
+      match field.type_ {
+        b'S' | b'V' => severity = Some(value)
+        b'C' => code = Some(value)
+        b'M' => message = Some(value)
+        b'D' => detail = Some(value)
+        b'H' => hint = Some(value)
+        _ => ()
+      }
+      continue fields.next()
+    } else {
+      break {
+        severity,
+        code,
+        message: message.unwrap_or("database error"),
+        detail,
+        hint,
       }
     }
   }
@@ -462,18 +461,20 @@ async test "integration protocol startup packet header parsing" {
 
   let packet = read_socket_packet(socket)
   assert_true(@backend.Header::parse(packet[:4]) is None)
-  let header = match @backend.Header::parse(packet[:]) {
-    Some(header) => header
-    None => fail("expected startup header")
+  let header = if @backend.Header::parse(packet[:]) is Some(header) {
+    header
+  } else {
+    fail("expected startup header")
   }
   assert_eq(header.tag, @backend.AUTHENTICATION_TAG)
   assert_eq(header.len, packet.length() - 1)
 
   assert_true(@backend.Message::parse(packet[:4]) is None)
   assert_true(@backend.Message::parse(packet[:packet.length() - 1]) is None)
-  let parsed = match @backend.Message::parse(packet[:]) {
-    Some(parsed) => parsed
-    None => fail("expected startup authentication message")
+  let parsed = if @backend.Message::parse(packet[:]) is Some(parsed) {
+    parsed
+  } else {
+    fail("expected startup authentication message")
   }
   assert_eq(parsed.consumed, packet.length())
   match parsed.message {
@@ -765,14 +766,13 @@ async test "integration protocol describe close and parameter description" {
     RowDescription(body) => {
       let fields = body.fields()
       let first_field = try! fields.next()
-      match first_field {
-        Some(field) => {
-          assert_eq(wire_decode_utf8(field.name_bytes()), "value")
-          assert_eq(field.type_oid, 23U)
-          assert_eq(field.type_size, 4)
-          assert_eq(field.format, 0)
-        }
-        None => fail("missing described field")
+      if first_field is Some(field) {
+        assert_eq(wire_decode_utf8(field.name_bytes()), "value")
+        assert_eq(field.type_oid, 23U)
+        assert_eq(field.type_size, 4)
+        assert_eq(field.format, 0)
+      } else {
+        fail("missing described field")
       }
       assert_true((try! fields.next()) is None)
     }
@@ -840,29 +840,27 @@ async test "integration protocol bind text formats and null row ranges" {
       let fields = body.fields()
       let first = try! fields.next()
       let second = try! fields.next()
-      match first {
-        Some(field) => {
-          assert_eq(try! field.name_str(), "id")
-          assert_true(field.table_oid > 0U)
-          assert_eq(field.column_id, 1)
-          assert_eq(field.type_oid, 23U)
-          assert_eq(field.type_size, 4)
-          assert_eq(field.type_modifier, -1)
-          assert_eq(field.format, 0)
-        }
-        None => fail("missing first described field")
+      if first is Some(field) {
+        assert_eq(try! field.name_str(), "id")
+        assert_true(field.table_oid > 0U)
+        assert_eq(field.column_id, 1)
+        assert_eq(field.type_oid, 23U)
+        assert_eq(field.type_size, 4)
+        assert_eq(field.type_modifier, -1)
+        assert_eq(field.format, 0)
+      } else {
+        fail("missing first described field")
       }
-      match second {
-        Some(field) => {
-          assert_eq(try! field.name_str(), "note")
-          assert_true(field.table_oid > 0U)
-          assert_eq(field.column_id, 2)
-          assert_eq(field.type_oid, 25U)
-          assert_eq(field.type_size, -1)
-          assert_eq(field.type_modifier, -1)
-          assert_eq(field.format, 0)
-        }
-        None => fail("missing second described field")
+      if second is Some(field) {
+        assert_eq(try! field.name_str(), "note")
+        assert_true(field.table_oid > 0U)
+        assert_eq(field.column_id, 2)
+        assert_eq(field.type_oid, 25U)
+        assert_eq(field.type_size, -1)
+        assert_eq(field.type_modifier, -1)
+        assert_eq(field.format, 0)
+      } else {
+        fail("missing second described field")
       }
       assert_true((try! fields.next()) is None)
       assert_true((try! fields.next()) is None)
@@ -951,16 +949,16 @@ async test "integration protocol notice and notification getters" {
   let notice_fields = notice.fields()
   let mut saw_message = false
   for field = notice_fields.next() {
-    match field {
-      None => break ()
-      Some(field) =>
-        if field.type_ == b'M' {
-          saw_message = true
-          assert_eq(wire_decode_utf8(field.value_bytes()), "wire notice")
-          break ()
-        } else {
-          continue notice_fields.next()
-        }
+    if field is Some(field) {
+      if field.type_ == b'M' {
+        saw_message = true
+        assert_eq(wire_decode_utf8(field.value_bytes()), "wire notice")
+        break ()
+      } else {
+        continue notice_fields.next()
+      }
+    } else {
+      break ()
     }
   }
   assert_true(saw_message)

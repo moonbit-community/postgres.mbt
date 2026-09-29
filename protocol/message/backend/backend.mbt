@@ -383,9 +383,10 @@ pub fn SaslMechanisms::next(
 pub fn SaslMechanisms::next_str(
   self : SaslMechanisms,
 ) -> String? raise @proto.ProtocolError {
-  match self.next() {
-    None => None
-    Some(value) => Some(decode_utf8(value[:]))
+  if self.next() is Some(value) {
+    Some(decode_utf8(value[:]))
+  } else {
+    None
   }
 }
 
@@ -540,7 +541,7 @@ pub fn ColumnFormats::next(
     }
     raise InvalidInput("invalid message length: wrong column formats")
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let v = r.read_u16_be().to_int()
   self.buf = self.buf[2:]
@@ -636,7 +637,7 @@ pub fn DataRowRanges::next(
     }
     raise InvalidInput("invalid message length: datarowrange is not empty")
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let len = r.read_i32_be()
   if len < 0 {
@@ -838,7 +839,7 @@ pub fn Parameters::next(
     }
     raise InvalidInput("invalid message length: parameters is not drained")
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let r = @proto.ByteReader::new(self.buf)
   let v = r.read_u32_be()
   self.buf = self.buf[4:]
@@ -962,7 +963,7 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
     }
     raise InvalidInput("invalid message length: field is not drained")
   }
-  self.remaining = self.remaining - 1
+  self.remaining -= 1
   let name_end = find_null(self.buf, 0)
   let name = self.buf[0:name_end]
   self.buf = self.buf[name_end + 1:]
@@ -1024,7 +1025,7 @@ fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
     if buf[i] == 0 {
       return i
     }
-    i = i + 1
+    i += 1
   }
   raise UnexpectedEof("unexpected EOF")
 }
