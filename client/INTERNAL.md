@@ -103,8 +103,10 @@ cancellation is checked before and after the callback and after finalization.
 Output scopes finish their streams; COPY IN aborts unless explicitly finished.
 COPY IN records any abandoned drain's completion so its scope can also wait for
 cleanup triggered by cancellation in `send`, `finish`, or `abort`. Callback
-errors survive cleanup errors. The client Statement scope and transaction Portal
-scope own only execution streams, never the parent handles.
+errors survive cleanup errors. `Client::with_statement_stream` and
+`Transaction::with_statement_stream` own only an execution stream, leaving the
+statement with the caller. `ScopedPortal::with_stream` also finishes only its
+current fetch stream; the enclosing portal scope retains the portal.
 
 Temporary inferred/typed queries install statement cleanup immediately after
 `read_prepare_response` succeeds. Close bytes and execution parameters are built
@@ -152,6 +154,35 @@ cancellation gives them `ClientError::Closed` while preserving the driver's
 cancellation. The driver's exit defer wakes even cancellation-protected consumers. The
 executor then publishes its repeatable completion result after all local tasks
 and transport cleanup finish, without overwriting an earlier failure.
+
+## Scoped Statements And Portals
+
+`Portal` is private runtime state. `Transaction::bind`, `query_portal`,
+`with_portal_stream`, and `close_portal` are package-internal helpers that keep
+the existing protocol and transaction-gate paths. The only public portal handle
+is `ScopedPortal`, created by `Transaction::with_portal` for an ordinary
+Statement or by `ScopedStatement::with_portal` for a transaction-owned scoped
+statement. There is no public manual portal lifecycle or compatibility alias.
+
+Each `ScopedPortal::with_stream` drains one fetch to `ReadyForQuery`, under
+cancellation protection, before returning. The portal can then fetch another
+window; `QuerySummary.suspended` records `PortalSuspended`. `execute` uses the
+same path with an unlimited row count. Portal cleanup closes only the portal,
+so an ordinary Statement remains reusable across scopes and transactions, and
+the pool's prepared-statement cache is unaffected.
+
+On callback exit, the resource scope first rejects new calls, waits for calls
+already started through its handle, then closes its resource. Escaped handles
+report `Closed` for later database operations. Nested scoped resources clean up
+in stream, portal, statement order. Callbacks stay cancellable; finalizers
+run protected and preserve callback errors or cancellation. A portal Close
+failure aborts the connection and invalidates its transaction. Cancellation
+during Bind closes an undelivered portal before releasing the scope.
+
+`scoped_resources` remains registered through acquisition, the callback, and
+finalization. Explicit commit or rollback rejects active resource scopes,
+including those in child transactions. Callback transaction completion waits
+for these scopes before proceeding with its existing stream/child cleanup.
 
 ## Transactions
 

@@ -976,8 +976,8 @@ async test "integration simple query detach swallows trailing database error" {
 }
 
 ///|
-/// This verifies portal-based pagination.
-/// The test binds a portal inside a transaction, fetches three times, and checks that the batches are 2 rows, then 1 row, then empty.
+/// One scoped portal retains its position across fetches of 2, 1, and 0 rows.
+/// Closing the portal leaves the caller's statement reusable across transactions.
 async test "integration portal pagination" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
@@ -992,16 +992,49 @@ async test "integration portal pagination" {
     client.batch_execute(
       "insert into moon_driver_portal (name) values ('alice'), ('bob'), ('charlie')",
     )
-    // A portal has a stable lifetime only inside a transaction, so the test starts one explicitly.
     let statement = client.prepare(
-      "select id, name from moon_driver_portal order by id",
+      "select id, name from moon_driver_portal where id >= $1::int4 order by id",
     )
     let tx = client.transaction()
-    let portal = tx.bind(statement)
-    let first = tx.query_portal(portal, 2).collect()
-    let second = tx.query_portal(portal, 2).collect()
-    let third = tx.query_portal(portal, 2).collect()
-    tx.close_portal(portal)
+    let (first, second, third) = tx.with_portal(
+      statement,
+      params=[1 as &@client.ToSql],
+      portal => {
+        assert_eq(portal.columns().length(), 2)
+        assert_eq(portal.columns()[0].name, "id")
+        assert_eq(portal.columns()[0].type_, @client.Type::int4())
+        assert_eq(portal.columns()[1].name, "name")
+        assert_eq(portal.columns()[1].type_, @client.Type::text())
+        let first = portal.with_stream(2, stream => {
+          let rows = stream.collect()
+          let summary = stream.finish()
+          assert_eq(summary.row_count, 2)
+          assert_true(summary.suspended)
+          rows
+        })
+        let second = portal.with_stream(2, stream => {
+          let rows = stream.collect()
+          let summary = stream.finish()
+          assert_eq(summary.row_count, 1)
+          assert_false(summary.suspended)
+          rows
+        })
+        let third = portal.with_stream(2, stream => {
+          let rows = stream.collect()
+          let summary = stream.finish()
+          assert_eq(summary.row_count, 0)
+          assert_false(summary.suspended)
+          rows
+        })
+        (first, second, third)
+      },
+    )
+    assert_eq(
+      tx.with_statement_stream(statement, params=[2 as &@client.ToSql], stream => {
+        stream.collect().length()
+      }),
+      2,
+    )
     tx.commit()
 
     assert_eq(first.length(), 2)
@@ -1021,6 +1054,15 @@ async test "integration portal pagination" {
     assert_eq(third_name, "charlie")
     assert_eq(third.length(), 0)
 
+    assert_eq(
+      client.with_transaction(next_tx => {
+        next_tx.with_portal(statement, params=[1 as &@client.ToSql], portal => {
+          portal.execute()
+        })
+      }),
+      3,
+    )
+    statement.close()
     client.close()
   })
 }

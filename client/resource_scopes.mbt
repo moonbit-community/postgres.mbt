@@ -36,6 +36,10 @@ priv struct ScopedPortalState {
 
 ///|
 /// A bound portal usable only during its `with_portal` callback.
+/// Fetch multiple windows with `with_stream` or execute to completion with
+/// `execute`. The scope waits for started calls before closing the portal.
+/// Database operations through a saved handle report `Closed` after its
+/// callback ends.
 struct ScopedPortal {
   /// Result columns associated with the portal.
   columns : Array[Column]
@@ -264,7 +268,8 @@ pub async fn ScopedStatement::execute(
 }
 
 ///|
-/// Bind a portal from a transaction-owned scoped statement.
+/// Bind a portal from a transaction-owned scoped statement and close it on
+/// every callback exit. The statement remains usable within its own scope.
 pub async fn[T] ScopedStatement::with_portal(
   self : ScopedStatement,
   params? : Array[&ToSql] = [],
@@ -284,6 +289,8 @@ pub async fn[T] ScopedStatement::with_portal(
 
 ///|
 /// Bind a portal, run one callback, and close the portal on every exit.
+/// The caller retains the statement and may reuse it after this scope ends.
+/// Explicit commit or rollback reports an error until this scope has finished.
 pub async fn[T] Transaction::with_portal(
   self : Transaction,
   statement : Statement,
@@ -315,6 +322,9 @@ pub async fn[T] Transaction::with_portal(
 
 ///|
 /// Fetch rows from this portal, finishing the stream on every exit.
+/// The portal remains available for later fetches within its callback. A zero
+/// row limit fetches all remaining rows; `QuerySummary.suspended` reports when
+/// PostgreSQL stops at a row limit.
 pub async fn[T] ScopedPortal::with_stream(
   self : ScopedPortal,
   max_rows : Int,
