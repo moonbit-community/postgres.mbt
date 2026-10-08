@@ -447,7 +447,7 @@ pub async fn Transaction::execute_raw(
 }
 
 ///|
-/// Bind private portal state for a resource scope while the transaction is open.
+/// Bind a portal for a resource scope while the transaction is open.
 /// Close an undelivered portal before propagating cancellation.
 async fn Transaction::bind(
   self : Transaction,
@@ -459,9 +459,10 @@ async fn Transaction::bind(
   self.assert_open()
   errdefer self.invalidate_if_connection_closed()
   check_pending_cancellation()
-  let portal = @async.protect_from_cancel(() => {
+  let (name, columns) = @async.protect_from_cancel(() => {
     self.context.bind(statement, params)
   })
+  let portal = Portal::new(self, name, columns)
   errdefer @async.protect_from_cancel(() => {
     self.context.close_portal(portal) catch {
       ClientError::Database(_) => ()
@@ -476,7 +477,7 @@ async fn Transaction::bind(
 /// Fetch up to `max_rows` from a portal while the transaction is open.
 /// `QuerySummary.suspended` reports when PostgreSQL has more rows. An
 /// unfinished result is drained at transaction end; the enclosing resource
-/// scope retains the private portal state.
+/// scope retains the portal.
 async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,

@@ -24,13 +24,13 @@ For client streams and COPY, prefer `Client::with_stream`,
 `with_typed_stream`, `with_statement_stream`, `with_simple_query`,
 `with_copy_in`, and `with_copy_out`. Create portals with
 `Transaction::with_portal` or a transaction-owned `ScopedStatement::with_portal`,
-then fetch successive windows through `ScopedPortal::with_stream`.
+then fetch successive windows through `Portal::with_stream`.
 These scopes keep the callback cancellable
 and wait for cleanup on every exit. COPY IN commits only when the callback
 explicitly calls `finish()`; otherwise it is aborted.
 For named statements, `Client::with_prepared` and
 `Transaction::with_prepared` close the Statement after the callback.
-`ScopedPortal` is the only public portal handle: each fetch finishes its stream,
+`Portal` is the only public portal handle: each fetch finishes its stream,
 and the portal closes when its callback ends. A caller-owned `Statement` remains
 open for reuse, including across transactions. The former manual portal
 bind/query/close API has been removed; see the

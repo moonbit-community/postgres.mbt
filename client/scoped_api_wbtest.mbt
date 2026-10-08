@@ -210,11 +210,6 @@ async test "scoped statement and portal streams leave caller resources open and 
         columns: [],
         closed: @ref.new(false),
       }
-      let portal : Portal = {
-        name: b"owned_portal",
-        columns: [],
-        closed: @ref.new(false),
-      }
       let transaction = if use_portal {
         let begin = group.spawn(() => client.transaction())
         next_request().responses.put(
@@ -224,10 +219,11 @@ async test "scoped statement and portal streams leave caller resources open and 
       } else {
         None
       }
+      let portal = transaction.map(tx => Portal::new(tx, b"owned_portal", []))
       for _ in 0..<2 {
         let task = group.spawn(() => {
           if transaction is Some(tx) {
-            tx.with_portal_stream(portal, 1, _ => 42)
+            tx.with_portal_stream(portal.unwrap(), 1, _ => 42)
           } else {
             client.with_statement_stream(statement, _ => 42)
           }
@@ -252,7 +248,9 @@ async test "scoped statement and portal streams leave caller resources open and 
         )
         assert_eq(task.wait(), 42)
         assert_false(statement.closed.val)
-        assert_false(portal.closed.val)
+        if portal is Some(portal) {
+          assert_false(portal.closed.val)
+        }
         assert_true(client.shared.requests.try_get() is None)
       }
       if transaction is Some(tx) {
