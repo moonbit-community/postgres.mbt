@@ -103,7 +103,7 @@ Choose the smallest result shape that matches the query:
 | Incremental rows | `Client::with_stream` |
 | Explicit parameter types | `Client::with_typed_stream` |
 | Execute a prepared statement | `Client::with_statement_stream` |
-| Fetch a portal window | `ScopedPortal::with_stream` |
+| Fetch a portal window | `Portal::with_stream` |
 | Affected row count | `Client::execute` |
 | SQL batch without parameters | `Client::batch_execute` |
 | Text/simple protocol frames | `Client::with_simple_query` |
@@ -139,7 +139,7 @@ column-label view. `CopyOutStream::formats()` exposes the COPY wire formats in
 the same way.
 
 `Statement` and `ScopedStatement` expose `params()` and `columns()` metadata
-views; `ScopedPortal` exposes `columns()`. Type descriptors expose their
+views; `Portal` exposes `columns()`. Type descriptors expose their
 `Kind` through `Type::kind()`; enum labels and composite fields are read-only
 views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
 
@@ -197,7 +197,7 @@ use `Transaction::close_statement`: direct `Statement::close` immediately raises
 permit. A named Statement may outlive the transaction, so rollback does not
 close it.
 
-`ScopedPortal` is the only public portal handle. Create one inside a transaction
+`Portal` is the only public portal handle. Create one inside a transaction
 with `Transaction::with_portal(statement, params?, callback)` or a
 transaction-owned `ScopedStatement::with_portal(params?, callback)`. Both entry
 points close the portal on return, error, or cancellation. A client-owned
@@ -211,7 +211,7 @@ order:
 async fn _portal_example(client : @client.Client) -> Int {
   client.with_transaction(tx => {
     tx.with_prepared("select 7::int4 as value", statement => {
-      statement.with_portal(portal => {
+      statement.with_portal((portal : @client.Portal) => {
         portal.with_stream(1, stream => {
           let result : Int = stream.next().unwrap().get_name("value")
           result
@@ -222,9 +222,11 @@ async fn _portal_example(client : @client.Client) -> Int {
 }
 ```
 
-The manual `Portal` API and public `Transaction::bind`, `query_portal`,
-`with_portal_stream`, and `close_portal` methods have been removed without
-deprecated aliases. Replace the bind/query/close sequence with one `with_portal`
+`Portal` owns both its server resource and callback scope. The former scoped
+handle has been renamed to `Portal` without a compatibility alias. Portal
+creation and cleanup use `with_portal`; `Transaction::bind`, `query_portal`,
+`with_portal_stream`, and `close_portal` remain package-internal helpers.
+Replace a manual bind/query/close sequence with one `with_portal`
 callback and successive `portal.with_stream` calls. Each fetch finishes only
 its current stream, so the same portal can resume at the next window. Unread
 rows in that window are discarded before the next call. Use `max_rows=0` to
@@ -255,7 +257,7 @@ async fn _portal_pagination(client : @client.Client) -> Array[Int] {
 }
 ```
 
-`ScopedPortal::execute()` consumes the portal to completion and returns the
+`Portal::execute()` consumes the portal to completion and returns the
 affected row count. `Transaction::with_portal` leaves its ordinary `Statement`
 open; the caller can reuse it after the portal scope or transaction ends and
 closes it separately. The pool's prepared-statement cache is unchanged.
@@ -319,7 +321,7 @@ nested transaction instead rolls it back and raises
 Inside a transaction, `with_stream` and `with_statement_stream` scope one
 execution stream. They discard unread rows and wait for cleanup when the
 callback returns, raises, or is cancelled. `with_statement_stream` leaves the
-Statement open. `ScopedPortal::with_stream` likewise finishes one fetch, with
+Statement open. `Portal::with_stream` likewise finishes one fetch, with
 the portal retained until its enclosing `with_portal` callback ends. Use
 `with_transaction` or `with_savepoint` on a transaction to scope nested work:
 
@@ -363,7 +365,7 @@ async fn _copy_rows(client : @client.Client) -> Int {
 The raw client APIs (`query`, `query_typed`, `query_statement`, `simple_query`,
 `copy_in`, and `copy_out`) remain available when the caller needs to transfer
 ownership or control draining explicitly. Portal streams are available only
-inside `ScopedPortal::with_stream`:
+inside `Portal::with_stream`:
 
 - `RowStream`, `SimpleQueryStream`, and `CopyOutStream` expose `next`,
   `collect`, `finish`, and `detach` as appropriate.

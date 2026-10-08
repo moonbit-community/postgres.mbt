@@ -11,7 +11,7 @@ async test "portal scope waits for started calls and rejects expired operations"
       columns: [],
       closed: @ref.new(false),
     }
-    let delivered : @async.Queue[ScopedPortal] = Queue(kind=Unbounded)
+    let delivered : @async.Queue[Portal] = Queue(kind=Unbounded)
     let leave_scope : @async.Queue[Unit] = Queue(kind=Unbounded)
     defer leave_scope.close()
     let task = group.spawn(() => {
@@ -34,9 +34,10 @@ async test "portal scope waits for started calls and rejects expired operations"
     leave_scope.put(())
     // Wait until the callback has returned and its finalizer is waiting for
     // the already started fetch. New operations must fail during this wait.
-    while portal.state.active.val {
+    while portal.active.val {
       @async.pause()
     }
+    assert_false(portal.closed.val)
     assert_true(task.try_wait() is None)
     assert_true(client.shared.requests.try_get() is None)
     assert_true(
@@ -67,7 +68,7 @@ async test "portal scope waits for started calls and rejects expired operations"
     close.responses.put(copy_test_close_complete_message())
     close.responses.put(copy_test_ready_for_query_message(status=b'T'))
     assert_eq(task.wait(), 42)
-    assert_true(portal.state.portal.closed.val)
+    assert_true(portal.closed.val)
     assert_false(statement.closed.val)
     assert_eq(transaction.scoped_resources.val, 0)
     let rollback = group.spawn(() => transaction.rollback())
@@ -157,6 +158,83 @@ async test "portal scope preserves cancellation during bind fetch callback and C
       let request = next_request()
       assert_eq(request.bytes, simple_query_bytes("ROLLBACK"))
       request.responses.put(copy_test_ready_for_query_message())
+      rollback.wait()
+    })
+  }
+}
+
+///|
+async test "portal bind closes its server resource when column type resolution fails" {
+  for close_fails in [false, true] {
+    with_cancellation_test_client((group, client, next_request) => {
+      let begin = group.spawn(() => client.transaction())
+      next_request().responses.put(
+        copy_test_ready_for_query_message(status=b'T'),
+      )
+      let transaction = begin.wait()
+      let statement : Statement = {
+        client,
+        name: b"existing",
+        params: [],
+        columns: [
+          {
+            name: "value",
+            table_oid: 0U,
+            column_id: 0,
+            type_: Type::unknown(99999U, name="custom_type"),
+            type_size: -1,
+            type_modifier: -1,
+            format: Binary,
+          },
+        ],
+        closed: @ref.new(false),
+      }
+      let delivered = @ref.new(false)
+      let task = group.spawn(allow_failure=true, () => {
+        transaction.with_portal(statement, _ => delivered.val = true)
+      })
+      let bind = next_request()
+      assert_eq(bind.bytes, bind_portal_bytes(b"p1", b"existing", [], []))
+      bind.responses.put(parse_backend_message(b"2\x00\x00\x00\x04"))
+      bind.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let prepare = next_request()
+      assert_eq(
+        prepare.bytes,
+        prepare_bytes(b"q2", typeinfo_query, [Type::oid_type()]),
+      )
+      scoped_test_prepare(prepare, param_types=[Type::oid_type()])
+      let catalog = next_request()
+      // A NULL type name fails decoding after the catalog stream is drained.
+      catalog.responses.put(copy_test_data_row_message(None))
+      catalog.responses.put(copy_test_command_complete_message("SELECT 1"))
+      catalog.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let close_statement = next_request()
+      assert_eq(close_statement.bytes, close_bytes(b'S', b"q2"))
+      close_statement.responses.put(copy_test_close_complete_message())
+      close_statement.responses.put(
+        copy_test_ready_for_query_message(status=b'T'),
+      )
+      let close = next_request()
+      assert_eq(close.bytes, close_bytes(b'P', b"p1"))
+      assert_false(delivered.val)
+      assert_true(task.try_wait() is None)
+      assert_eq(transaction.scoped_resources.val, 1)
+      assert_false(transaction.scope_gate.mutex.try_acquire())
+      if close_fails {
+        close.responses.put(copy_test_error_response_message("close failed"))
+      } else {
+        close.responses.put(copy_test_close_complete_message())
+      }
+      close.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      assert_true(
+        expect_error_async(() => task.wait()) is ClientError::Decode(_),
+      )
+      assert_false(delivered.val)
+      assert_false(statement.closed.val)
+      assert_eq(transaction.scoped_resources.val, 0)
+      assert_true(client.shared.requests.try_get() is None)
+      let rollback = group.spawn(() => transaction.rollback())
+      next_request().responses.put(copy_test_ready_for_query_message())
       rollback.wait()
     })
   }

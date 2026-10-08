@@ -143,7 +143,7 @@ async test "transaction scopes drain stream before closing portal and statement"
         copy_test_ready_for_query_message(status=b'T'),
       )
       let transaction = begin.wait()
-      let saved : @ref.Ref[ScopedPortal?] = @ref.new(None)
+      let saved : @ref.Ref[Portal?] = @ref.new(None)
       let stream_exited : @async.Queue[Unit] = Queue(kind=Unbounded)
       let task = group.spawn(allow_failure=true, () => {
         transaction.with_prepared("select value", statement => {

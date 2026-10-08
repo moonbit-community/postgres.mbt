@@ -412,7 +412,7 @@ async fn OpContext::bind(
   self : OpContext,
   statement : Statement,
   params : Array[&ToSql],
-) -> Portal {
+) -> (Bytes, Array[Column]) {
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -446,21 +446,15 @@ async fn OpContext::bind(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
           errdefer @async.protect_from_cancel(() => {
-            self.close_portal(raw_portal) catch {
+            self.close_portal_by_name(name) catch {
               ClientError::Database(_) => ()
               _ => self.client.abort()
             }
           })
-          let portal = Portal::{
-            name,
-            // Resolve column OIDs lazily here so callers still get enriched
-            // type descriptors even when portals are bound later.
-            columns: resolve_columns(self, columns),
-            closed: @ref.new(false),
-          }
-          break portal
+          // Resolve column OIDs lazily here so callers still get enriched
+          // type descriptors even when portals are bound later.
+          break (name, resolve_columns(self, columns))
         }
       _ =>
         fail_response_stream(
@@ -472,15 +466,20 @@ async fn OpContext::bind(
 }
 
 ///|
+async fn OpContext::close_portal_by_name(
+  self : OpContext,
+  name : Bytes,
+) -> Unit {
+  let responses = self.client.send_request(Messages, close_bytes(b'P', name[:]))
+  drain_close_response(responses)
+}
+
+///|
 async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
   if portal.closed.val {
     return
   }
-  let responses = self.client.send_request(
-    Messages,
-    close_bytes(b'P', portal.name[:]),
-  )
-  drain_close_response(responses)
+  self.close_portal_by_name(portal.name)
   portal.closed.val = true
 }
 

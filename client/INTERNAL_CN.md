@@ -85,7 +85,7 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 若未显式完成则调用 `abort()`。COPY IN 记录遗弃排空的完成信号，作用域因此也能等待
 `send`、`finish` 或 `abort` 被取消时启动的后台清理。清理错误不覆盖回调原错误。
 `Client::with_statement_stream` 和 `Transaction::with_statement_stream` 仅拥有
-本次执行流，Statement 仍由调用方持有。`ScopedPortal::with_stream` 也只结束当前
+本次执行流，Statement 仍由调用方持有。`Portal::with_stream` 也只结束当前
 分页流，portal 仍由外层 portal 作用域持有。
 
 inferred/typed 临时查询在 `read_prepare_response` 成功后立即安装语句清理。Close 字节和
@@ -122,13 +122,19 @@ MoonBit 任务取消有独立的生命周期规则。一旦 `execute_raw` 持有
 
 ## Statement 与 Portal 资源作用域
 
-`Portal` 是私有运行时状态。`Transaction::bind`、`query_portal`、
-`with_portal_stream` 和 `close_portal` 是包内助手，沿用现有协议和事务门控调用链。
-唯一公开的 portal 句柄是 `ScopedPortal`：通过 `Transaction::with_portal` 绑定普通
-Statement，或通过事务内的 `ScopedStatement::with_portal` 创建。不存在公开的手动
-portal 生命周期 API，也不提供兼容别名。
+`Portal` 是唯一公开的 portal 句柄，直接持有事务、服务器名称、结果列、关闭标记、
+作用域活动标记和活动调用计数。可变标记与计数仍使用共享引用，确保句柄副本观察到
+相同的生命周期。作用域活动标记先拒绝新调用，已经开始的调用完成后才关闭服务器资源。
+`Transaction::bind`、`query_portal`、`with_portal_stream` 和 `close_portal` 仍是包内
+助手，沿用现有协议和事务门控调用链。`OpContext::bind` 返回名称和解析后的结果列，
+由 `Transaction::bind` 构造句柄；列类型解析失败时，先按名称关闭已绑定的 portal，
+再传播错误。
 
-每次 `ScopedPortal::with_stream` 返回前，都会在取消保护下将当前分页流排空至
+通过 `Transaction::with_portal` 绑定普通 Statement，或通过事务内的
+`ScopedStatement::with_portal` 创建 `Portal`。不存在公开的手动 portal 生命周期 API，
+也不提供兼容别名。
+
+每次 `Portal::with_stream` 返回前，都会在取消保护下将当前分页流排空至
 `ReadyForQuery`。随后可通过同一 portal 继续获取下一页；`QuerySummary.suspended`
 记录服务器的 `PortalSuspended`。`execute` 沿用此路径，并设置不限行数。
 portal 清理仅关闭 portal，普通 Statement 仍可跨作用域、跨事务复用，连接池的

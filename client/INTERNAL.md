@@ -105,7 +105,7 @@ COPY IN records any abandoned drain's completion so its scope can also wait for
 cleanup triggered by cancellation in `send`, `finish`, or `abort`. Callback
 errors survive cleanup errors. `Client::with_statement_stream` and
 `Transaction::with_statement_stream` own only an execution stream, leaving the
-statement with the caller. `ScopedPortal::with_stream` also finishes only its
+statement with the caller. `Portal::with_stream` also finishes only its
 current fetch stream; the enclosing portal scope retains the portal.
 
 Temporary inferred/typed queries install statement cleanup immediately after
@@ -157,14 +157,22 @@ and transport cleanup finish, without overwriting an earlier failure.
 
 ## Scoped Statements And Portals
 
-`Portal` is private runtime state. `Transaction::bind`, `query_portal`,
-`with_portal_stream`, and `close_portal` are package-internal helpers that keep
-the existing protocol and transaction-gate paths. The only public portal handle
-is `ScopedPortal`, created by `Transaction::with_portal` for an ordinary
-Statement or by `ScopedStatement::with_portal` for a transaction-owned scoped
-statement. There is no public manual portal lifecycle or compatibility alias.
+`Portal` is the only public portal handle. It directly owns the transaction,
+server name, result columns, closed flag, scope activity flag, and active-call
+count. The mutable flags and counter remain shared references so copies of the
+handle observe the same lifecycle. The activity flag rejects new calls before
+the server resource is closed, while calls already started can finish.
+`Transaction::bind`, `query_portal`, `with_portal_stream`, and `close_portal`
+remain package-internal helpers using the existing protocol and transaction
+gates. `Transaction::bind` builds the handle from the name and resolved columns
+returned by `OpContext::bind`; a type-resolution failure closes the bound name
+before propagating the error.
 
-Each `ScopedPortal::with_stream` drains one fetch to `ReadyForQuery`, under
+Create a `Portal` through `Transaction::with_portal` for an ordinary Statement
+or `ScopedStatement::with_portal` for a transaction-owned scoped statement.
+There is no public manual portal lifecycle or compatibility alias.
+
+Each `Portal::with_stream` drains one fetch to `ReadyForQuery`, under
 cancellation protection, before returning. The portal can then fetch another
 window; `QuerySummary.suspended` records `PortalSuspended`. `execute` uses the
 same path with an unlimited row count. Portal cleanup closes only the portal,

@@ -170,6 +170,11 @@ pub struct Notification {
   payload : String
 } derive(Eq, @debug.Debug)
 
+type Portal
+pub fn Portal::columns(Self) -> ArrayView[Column]
+pub async fn Portal::execute(Self) -> Int
+pub async fn[T] Portal::with_stream(Self, Int, async (RowStream) -> T) -> T
+
 pub struct QuerySummary {
   command_tag : String
   row_count : Int
@@ -199,16 +204,11 @@ pub async fn RowStream::next(Self) -> Row?
 pub async fn RowStream::one(Self) -> Row
 pub async fn RowStream::opt(Self) -> Row?
 
-type ScopedPortal
-pub fn ScopedPortal::columns(Self) -> ArrayView[Column]
-pub async fn ScopedPortal::execute(Self) -> Int
-pub async fn[T] ScopedPortal::with_stream(Self, Int, async (RowStream) -> T) -> T
-
 type ScopedStatement
 pub fn ScopedStatement::columns(Self) -> ArrayView[Column]
 pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> Int
 pub fn ScopedStatement::params(Self) -> ArrayView[Type]
-pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
+pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
 
 pub enum SimpleQueryMessage {
@@ -255,7 +255,7 @@ pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSq
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
-pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
+pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] Transaction::with_prepared(Self, String, async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[Type], async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T

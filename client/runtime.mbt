@@ -220,17 +220,6 @@ pub fn Statement::columns(self : Statement) -> ArrayView[Column] {
 }
 
 ///|
-/// Private bound-portal state owned by a `ScopedPortal` callback.
-/// The transaction helpers reuse this state across fetch windows and close it
-/// after the callback and any operations already started through its handle.
-priv struct Portal {
-  name : Bytes
-  /// Result columns currently associated with the portal.
-  columns : Array[Column]
-  closed : @ref.Ref[Bool]
-}
-
-///|
 /// Capability object used to send a PostgreSQL cancel request.
 ///
 /// PostgreSQL cancellation happens over a separate short-lived TCP connection,
