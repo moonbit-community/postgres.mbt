@@ -12,6 +12,68 @@ async fn scoped_prepared_count(client : @client.Client) -> Int {
 }
 
 ///|
+async test "integration scoped statement portals bind parameters and drain each window" {
+  guard integration_config() is Some(config) else { return }
+  @async.with_task_group(group => {
+    let client = start_client(
+      as_client_config(
+        config,
+        application_name="moonbit-postgres-scoped-portals",
+      ),
+      group,
+    )
+    defer client.abort()
+    @async.with_timeout(5000, () => {
+      let prepared_before = scoped_prepared_count(client)
+      client.with_transaction(tx => {
+        tx.with_prepared("select generate_series(1, $1::int4) as value", statement => {
+          statement.with_portal(params=[5 as &@client.ToSql], portal => {
+            assert_eq(portal.columns().length(), 1)
+            assert_eq(portal.columns()[0].name, "value")
+            assert_eq(portal.columns()[0].type_, @client.Type::int4())
+            let first : Int = portal.with_stream(2, stream => {
+              stream.next().unwrap().get_name("value")
+            })
+            assert_eq(first, 1)
+            // The first window's unread second row was drained. The same
+            // portal resumes at the third row, rather than being closed.
+            @debug.assert_eq(
+              portal.with_stream(0, stream => {
+                let rows = stream.collect()
+                assert_false(stream.finish().suspended)
+                transaction_row_values(rows)
+              }),
+              [3, 4, 5],
+            )
+          })
+        })
+        tx.batch_execute("create temp table scoped_portal_values(value int4)")
+        tx.with_prepared(
+          "insert into scoped_portal_values select generate_series(1, $1::int4)",
+          statement => {
+            assert_eq(
+              statement.with_portal(params=[3 as &@client.ToSql], portal => {
+                assert_eq(portal.columns().length(), 0)
+                portal.execute()
+              }),
+              3,
+            )
+            // Closing a portal leaves its enclosing scoped statement usable.
+            assert_eq(statement.execute(params=[2 as &@client.ToSql]), 2)
+          },
+        )
+      })
+      assert_eq(scoped_prepared_count(client), prepared_before)
+      let count : Int = client
+        .query_one("select count(*)::int4 from scoped_portal_values")
+        .get(0)
+      assert_eq(count, 5)
+    })
+    client.close()
+  })
+}
+
+///|
 async test "integration scoped streams drain early exits and release temporary statements" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {

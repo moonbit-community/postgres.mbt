@@ -103,15 +103,14 @@ Choose the smallest result shape that matches the query:
 | Incremental rows | `Client::with_stream` |
 | Explicit parameter types | `Client::with_typed_stream` |
 | Execute a prepared statement | `Client::with_statement_stream` |
-| Fetch a portal window | `Transaction::with_portal_stream` |
+| Fetch a portal window | `ScopedPortal::with_stream` |
 | Affected row count | `Client::execute` |
 | SQL batch without parameters | `Client::batch_execute` |
 | Text/simple protocol frames | `Client::with_simple_query` |
 | Bulk import/export | `Client::with_copy_in`, `Client::with_copy_out` |
 
-`Client::simple_query`, `Client::query_statement`, and
-`Transaction::query_portal` are asynchronous because they must wait for an
-operation permit before returning a stream.
+`Client::simple_query` and `Client::query_statement` are asynchronous because
+they must wait for an operation permit before returning a stream.
 MoonBit async calls do not use an `await` keyword.
 
 Rows decode by index or PostgreSQL column name:
@@ -139,8 +138,8 @@ the stream. `SimpleQueryMessage::RowDescription` also carries a read-only
 column-label view. `CopyOutStream::formats()` exposes the COPY wire formats in
 the same way.
 
-Prepared statements, portals, and their scoped handles expose `params()` and
-`columns()` metadata views where applicable. Type descriptors expose their
+`Statement` and `ScopedStatement` expose `params()` and `columns()` metadata
+views; `ScopedPortal` exposes `columns()`. Type descriptors expose their
 `Kind` through `Type::kind()`; enum labels and composite fields are read-only
 views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
 
@@ -198,14 +197,14 @@ use `Transaction::close_statement`: direct `Statement::close` immediately raises
 permit. A named Statement may outlive the transaction, so rollback does not
 close it.
 
-Create and use portals inside an explicit transaction. The former
-`Client::bind`, `Client::query_portal`, `Client::with_portal_stream`, and
-`Portal::close` methods have been removed. Replace them with `Transaction::bind`,
-`Transaction::query_portal` or `Transaction::with_portal_stream`, and
-`Transaction::close_portal`. A portal becomes invalid when its enclosing
-PostgreSQL transaction ends.
-`with_prepared` and its transaction-only `with_portal` method close each
-resource in stream, Portal, Statement order:
+`ScopedPortal` is the only public portal handle. Create one inside a transaction
+with `Transaction::with_portal(statement, params?, callback)` or a
+transaction-owned `ScopedStatement::with_portal(params?, callback)`. Both entry
+points close the portal on return, error, or cancellation. A client-owned
+`ScopedStatement` cannot create portals.
+
+With `with_prepared`, nested callbacks clean up in stream, portal, statement
+order:
 
 ```mbt check
 ///|
@@ -223,11 +222,48 @@ async fn _portal_example(client : @client.Client) -> Int {
 }
 ```
 
-`Transaction::with_portal(statement, f)` also scopes a manually prepared
-Statement's Portal. Both scoped handles expire at callback end. Explicit
-`commit()` or `rollback()` raises `ClientError::Closed` while either resource
-scope is active. The lower-level `with_portal_stream` finishes only one fetch
-window, leaving the Portal and Statement with their caller.
+The manual `Portal` API and public `Transaction::bind`, `query_portal`,
+`with_portal_stream`, and `close_portal` methods have been removed without
+deprecated aliases. Replace the bind/query/close sequence with one `with_portal`
+callback and successive `portal.with_stream` calls. Each fetch finishes only
+its current stream, so the same portal can resume at the next window. Unread
+rows in that window are discarded before the next call. Use `max_rows=0` to
+fetch all remaining rows, or inspect `QuerySummary.suspended` to decide whether
+to fetch another window:
+
+```mbt check
+///|
+async fn _portal_pagination(client : @client.Client) -> Array[Int] {
+  let statement = client.prepare("select generate_series(1, $1::int4) as value")
+  defer @async.protect_from_cancel(() => statement.close())
+  client.with_transaction(tx => {
+    tx.with_portal(statement, params=[3 as &ToSql], portal => {
+      let values : Array[Int] = []
+      for ;; {
+        let summary = portal.with_stream(2, stream => {
+          for row in stream.collect() {
+            values.push(row.get_name("value"))
+          }
+          stream.finish()
+        })
+        if !summary.suspended {
+          break values
+        }
+      }
+    })
+  })
+}
+```
+
+`ScopedPortal::execute()` consumes the portal to completion and returns the
+affected row count. `Transaction::with_portal` leaves its ordinary `Statement`
+open; the caller can reuse it after the portal scope or transaction ends and
+closes it separately. The pool's prepared-statement cache is unchanged.
+
+Both scoped handles reject new database operations with `ClientError::Closed`
+after their callback ends, wait for calls already started, then close their resource.
+Explicit `commit()` or `rollback()` raises `ClientError::Closed` while either
+resource scope is active, including while cleanup is waiting for a fetch.
 
 If cancellation arrives while `prepare` is waiting for PostgreSQL, the driver
 closes an already created statement before propagating cancellation. A failed
@@ -280,10 +316,11 @@ recursively rolls back open nested transactions. A manual commit with an open
 nested transaction instead rolls it back and raises
 `UnfinishedChildTransaction` after rolling back the parent.
 
-Inside a transaction, `with_stream`, `with_statement_stream`, and
-`with_portal_stream` scope one execution stream. They discard unread rows and
-wait for cleanup when the callback returns, raises, or is cancelled. The latter
-two leave the Statement and Portal owned by the caller. Use
+Inside a transaction, `with_stream` and `with_statement_stream` scope one
+execution stream. They discard unread rows and wait for cleanup when the
+callback returns, raises, or is cancelled. `with_statement_stream` leaves the
+Statement open. `ScopedPortal::with_stream` likewise finishes one fetch, with
+the portal retained until its enclosing `with_portal` callback ends. Use
 `with_transaction` or `with_savepoint` on a transaction to scope nested work:
 
 ```mbt check
@@ -325,8 +362,8 @@ async fn _copy_rows(client : @client.Client) -> Int {
 
 The raw client APIs (`query`, `query_typed`, `query_statement`, `simple_query`,
 `copy_in`, and `copy_out`) remain available when the caller needs to transfer
-ownership or control draining explicitly. `Transaction::query_portal` provides
-the raw portal stream inside a transaction:
+ownership or control draining explicitly. Portal streams are available only
+inside `ScopedPortal::with_stream`:
 
 - `RowStream`, `SimpleQueryStream`, and `CopyOutStream` expose `next`,
   `collect`, `finish`, and `detach` as appropriate.

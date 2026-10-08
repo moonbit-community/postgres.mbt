@@ -316,10 +316,7 @@ pub async fn Transaction::close_statement(
 
 ///|
 /// Close a portal without leaving this transaction's operation scope.
-pub async fn Transaction::close_portal(
-  self : Transaction,
-  portal : Portal,
-) -> Unit {
+async fn Transaction::close_portal(self : Transaction, portal : Portal) -> Unit {
   self.run_scope_operation(context => context.close_portal(portal))
 }
 
@@ -450,9 +447,9 @@ pub async fn Transaction::execute_raw(
 }
 
 ///|
-/// Bind parameters to a statement while the transaction is open. The portal
-/// remains valid only within its enclosing PostgreSQL transaction.
-pub async fn Transaction::bind(
+/// Bind private portal state for a resource scope while the transaction is open.
+/// Close an undelivered portal before propagating cancellation.
+async fn Transaction::bind(
   self : Transaction,
   statement : Statement,
   params? : Array[&ToSql] = [],
@@ -478,9 +475,9 @@ pub async fn Transaction::bind(
 ///|
 /// Fetch up to `max_rows` from a portal while the transaction is open.
 /// `QuerySummary.suspended` reports when PostgreSQL has more rows. An
-/// unfinished result is drained at transaction end; the portal remains owned
-/// by the caller.
-pub async fn Transaction::query_portal(
+/// unfinished result is drained at transaction end; the enclosing resource
+/// scope retains the private portal state.
+async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,
   max_rows : Int,
@@ -491,9 +488,9 @@ pub async fn Transaction::query_portal(
 }
 
 ///|
-/// Scope one portal fetch stream. The portal and its statement remain owned by
-/// the caller and must be closed separately.
-pub async fn[T] Transaction::with_portal_stream(
+/// Finish one portal fetch stream before returning to its resource scope.
+/// The scope can fetch again and closes the portal when its callback ends.
+async fn[T] Transaction::with_portal_stream(
   self : Transaction,
   portal : Portal,
   max_rows : Int,

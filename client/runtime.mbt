@@ -220,22 +220,14 @@ pub fn Statement::columns(self : Statement) -> ArrayView[Column] {
 }
 
 ///|
-/// Bound portal ready for repeated or chunked execution.
-///
-/// Portals are created and used through an open transaction. Fetch rows
-/// incrementally with
-/// `Transaction::query_portal` or `Transaction::with_portal_stream`.
-struct Portal {
+/// Private bound-portal state owned by a `ScopedPortal` callback.
+/// The transaction helpers reuse this state across fetch windows and close it
+/// after the callback and any operations already started through its handle.
+priv struct Portal {
   name : Bytes
   /// Result columns currently associated with the portal.
   columns : Array[Column]
   closed : @ref.Ref[Bool]
-}
-
-///|
-/// Return a read-only view of the portal's result columns.
-pub fn Portal::columns(self : Portal) -> ArrayView[Column] {
-  self.columns[:]
 }
 
 ///|

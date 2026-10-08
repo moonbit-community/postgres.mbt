@@ -170,9 +170,6 @@ pub struct Notification {
   payload : String
 } derive(Eq, @debug.Debug)
 
-type Portal
-pub fn Portal::columns(Self) -> ArrayView[Column]
-
 pub struct QuerySummary {
   command_tag : String
   row_count : Int
@@ -247,8 +244,6 @@ pub fn Statement::params(Self) -> ArrayView[Type]
 
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
-pub async fn Transaction::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
-pub async fn Transaction::close_portal(Self, Portal) -> Unit
 pub async fn Transaction::close_statement(Self, Statement) -> Unit
 pub async fn Transaction::commit(Self) -> Unit
 pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
@@ -256,13 +251,11 @@ pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) 
 pub async fn Transaction::prepare(Self, String) -> Statement
 pub async fn Transaction::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
-pub async fn Transaction::query_portal(Self, Portal, Int) -> RowStream
 pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
 pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
-pub async fn[T] Transaction::with_portal_stream(Self, Portal, Int, async (RowStream) -> T) -> T
 pub async fn[T] Transaction::with_prepared(Self, String, async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[Type], async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T

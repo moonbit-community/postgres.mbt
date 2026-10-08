@@ -135,55 +135,86 @@ async test "prepared scopes preserve cancellation and close before releasing own
 }
 
 ///|
-async test "transaction scopes close portal before statement and reject early commit" {
-  with_cancellation_test_client((group, client, next_request) => {
-    let begin = group.spawn(() => client.transaction())
-    next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
-    let transaction = begin.wait()
-    let saved : @ref.Ref[ScopedPortal?] = @ref.new(None)
-    let task = group.spawn(() => {
-      transaction.with_prepared("select value", statement => {
-        assert_true(
-          expect_error_async(() => transaction.commit())
-          is ClientError::Closed("transaction has active resource scope"),
-        )
-        statement.with_portal(portal => {
-          saved.val = Some(portal)
-          portal.with_stream(1, _ => 7)
+async test "transaction scopes drain stream before closing portal and statement" {
+  for callback_error in [false, true] {
+    with_cancellation_test_client((group, client, next_request) => {
+      let begin = group.spawn(() => client.transaction())
+      next_request().responses.put(
+        copy_test_ready_for_query_message(status=b'T'),
+      )
+      let transaction = begin.wait()
+      let saved : @ref.Ref[ScopedPortal?] = @ref.new(None)
+      let stream_exited : @async.Queue[Unit] = Queue(kind=Unbounded)
+      let task = group.spawn(allow_failure=true, () => {
+        transaction.with_prepared("select value", statement => {
+          assert_true(
+            expect_error_async(() => transaction.commit())
+            is ClientError::Closed("transaction has active resource scope"),
+          )
+          statement.with_portal(portal => {
+            saved.val = Some(portal)
+            portal.with_stream(1, _ => {
+              stream_exited.put(())
+              if callback_error {
+                raise ClientError::Encode("callback failed")
+              }
+              7
+            })
+          })
         })
       })
+      let prepare = next_request()
+      assert_eq(prepare.bytes, prepare_bytes(b"s1", "select value", []))
+      scoped_test_prepare(prepare)
+      let bind = next_request()
+      assert_eq(bind.bytes[0], b'B')
+      bind.responses.put(parse_backend_message(b"2\x00\x00\x00\x04"))
+      bind.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let execute = next_request()
+      assert_eq(execute.bytes, execute_portal_bytes(b"p2", 1))
+      stream_exited.get()
+      execute.responses.put(copy_test_data_row_message(Some(b"value")))
+      execute.responses.put(parse_backend_message(b"s\x00\x00\x00\x04"))
+      @async.pause()
+      assert_true(task.try_wait() is None)
+      assert_true(client.shared.requests.try_get() is None)
+      execute.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let close_portal = next_request()
+      assert_eq(close_portal.bytes, close_bytes(b'P', b"p2"))
+      assert_true(execute.responses.try_get() is None)
+      assert_true(task.try_wait() is None)
+      assert_true(client.shared.requests.try_get() is None)
+      close_portal.responses.put(copy_test_close_complete_message())
+      close_portal.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let close_statement = next_request()
+      assert_eq(close_statement.bytes, close_bytes(b'S', b"s1"))
+      assert_true(close_portal.responses.try_get() is None)
+      assert_true(task.try_wait() is None)
+      close_statement.responses.put(copy_test_close_complete_message())
+      close_statement.responses.put(
+        copy_test_ready_for_query_message(status=b'T'),
+      )
+      if callback_error {
+        assert_true(
+          expect_error_async(() => task.wait())
+          is ClientError::Encode("callback failed"),
+        )
+      } else {
+        assert_eq(task.wait(), 7)
+      }
+      assert_true(
+        expect_error_async(() => saved.val.unwrap().execute())
+        is ClientError::Closed("portal scope expired"),
+      )
+      assert_true(
+        expect_error_async(() => saved.val.unwrap().with_stream(1, _ => ()))
+        is ClientError::Closed("portal scope expired"),
+      )
+      let rollback = group.spawn(() => transaction.rollback())
+      next_request().responses.put(copy_test_ready_for_query_message())
+      rollback.wait()
     })
-    let prepare = next_request()
-    assert_eq(prepare.bytes, prepare_bytes(b"s1", "select value", []))
-    scoped_test_prepare(prepare)
-    let bind = next_request()
-    assert_eq(bind.bytes[0], b'B')
-    bind.responses.put(parse_backend_message(b"2\x00\x00\x00\x04"))
-    bind.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    let execute = next_request()
-    assert_eq(execute.bytes, execute_portal_bytes(b"p2", 1))
-    execute.responses.put(copy_test_data_row_message(Some(b"value")))
-    execute.responses.put(parse_backend_message(b"s\x00\x00\x00\x04"))
-    execute.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    let close_portal = next_request()
-    assert_eq(close_portal.bytes, close_bytes(b'P', b"p2"))
-    close_portal.responses.put(copy_test_close_complete_message())
-    close_portal.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    let close_statement = next_request()
-    assert_eq(close_statement.bytes, close_bytes(b'S', b"s1"))
-    close_statement.responses.put(copy_test_close_complete_message())
-    close_statement.responses.put(
-      copy_test_ready_for_query_message(status=b'T'),
-    )
-    assert_eq(task.wait(), 7)
-    assert_true(
-      expect_error_async(() => saved.val.unwrap().execute())
-      is ClientError::Closed("portal scope expired"),
-    )
-    let rollback = group.spawn(() => transaction.rollback())
-    next_request().responses.put(copy_test_ready_for_query_message())
-    rollback.wait()
-  })
+  }
 }
 
 ///|
@@ -292,39 +323,51 @@ async test "portal scope preserves cancellation and closes before transaction ro
 }
 
 ///|
-async test "portal Close failure aborts transaction connection" {
-  @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
-    let client : Client = { shared, }
-    let begin = group.spawn(() => client.transaction())
-    shared.requests.get().responses.put(
-      copy_test_ready_for_query_message(status=b'T'),
-    )
-    let transaction = begin.wait()
-    let statement : Statement = {
-      client,
-      name: b"existing",
-      params: [],
-      columns: [],
-      closed: @ref.new(false),
-    }
-    let task = group.spawn(allow_failure=true, () => {
-      transaction.with_portal(statement, _ => 42)
+async test "portal Close failure aborts connection and preserves callback errors" {
+  for callback_error in [false, true] {
+    @async.with_task_group(group => {
+      let shared = copy_test_shared(@ref.new(Some(group)))
+      let client : Client = { shared, }
+      let begin = group.spawn(() => client.transaction())
+      shared.requests.get().responses.put(
+        copy_test_ready_for_query_message(status=b'T'),
+      )
+      let transaction = begin.wait()
+      let statement : Statement = {
+        client,
+        name: b"existing",
+        params: [],
+        columns: [],
+        closed: @ref.new(false),
+      }
+      let task = group.spawn(allow_failure=true, () => {
+        transaction.with_portal(statement, _ => {
+          if callback_error {
+            raise ClientError::Encode("callback failed")
+          }
+          42
+        })
+      })
+      let bind = shared.requests.get()
+      bind.responses.put(parse_backend_message(b"2\x00\x00\x00\x04"))
+      bind.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let close = shared.requests.get()
+      assert_eq(close.bytes, close_bytes(b'P', b"p1"))
+      close.responses.put(copy_test_error_response_message("close failed"))
+      close.responses.put(copy_test_ready_for_query_message(status=b'T'))
+      let error = expect_error_async(() => task.wait())
+      if callback_error {
+        assert_true(error is ClientError::Encode("callback failed"))
+      } else {
+        assert_true(
+          error is ClientError::Database({ message: "close failed", .. }),
+        )
+      }
+      assert_true(client.is_closed())
+      assert_true(transaction.finished.val)
+      assert_eq(shared.root_transaction_occupancy.val, 0)
     })
-    let bind = shared.requests.get()
-    bind.responses.put(parse_backend_message(b"2\x00\x00\x00\x04"))
-    bind.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    let close = shared.requests.get()
-    assert_eq(close.bytes, close_bytes(b'P', b"p1"))
-    close.responses.put(copy_test_error_response_message("close failed"))
-    close.responses.put(copy_test_ready_for_query_message(status=b'T'))
-    assert_true(
-      expect_error_async(() => task.wait()) is ClientError::Database(_),
-    )
-    assert_true(client.is_closed())
-    assert_true(transaction.finished.val)
-    assert_eq(shared.root_transaction_occupancy.val, 0)
-  })
+  }
 }
 
 ///|
