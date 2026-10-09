@@ -508,3 +508,44 @@ A fatal driver error becomes the terminal result for the active request and
 requests already accepted by the submission queue. Calls still waiting at the
 operation gate have not submitted a request; after the driver stops, they
 observe `ClientError::Closed` instead.
+
+`ClientError::Database(err)` and `AsyncMessage::Notice(err)` expose the same
+`DatabaseError` fields. All fields except `message` are independently optional;
+absent values are `None`, and an absent message defaults to `"database error"`.
+Object fields need not appear together or refer to objects that currently exist.
+
+| Fields | Meaning |
+| --- | --- |
+| `severity`, `severity_nonlocalized` | Localizable severity from `S`, nonlocalized severity from `V` |
+| `code`, `message`, `detail`, `hint` | SQLSTATE, primary message, extra detail, suggested action |
+| `schema`, `table`, `column`, `datatype`, `constraint` | Associated object names; `constraint` can also name an index |
+| `position`, `internal_position` | One-based character indices into the submitted query and `internal_query` |
+| `internal_query`, `where_` | Internally generated SQL and error context (possibly multiline) |
+| `file`, `line`, `routine` | Server source location |
+
+`position` and `internal_position` are positive `UInt` values, preserved as
+supplied by the server. They count characters, including in Unicode queries;
+they are not byte offsets or MoonBit UTF-16 indices. `line` is an optional
+`UInt`. Malformed decimal values, overflow, zero positions, and invalid UTF-8
+raise `ProtocolError::InvalidInput` in the shared parser.
+
+Previously `severity` could be overwritten by `V` depending on field order.
+It now preserves only `S`; use `severity_nonlocalized` for stable severity
+matching. `Debug` and `Eq` include every field. Query, transaction, COPY, and
+pool operations preserve the same structured fields.
+
+Branch on SQLSTATE and constraint name instead of parsing the message:
+
+```mbt check
+///|
+fn _is_email_conflict(error : Error) -> Bool {
+  match error {
+    @client.ClientError::Database(err) =>
+      err.code == Some("23505") && err.constraint == Some("accounts_email_key")
+    _ => false
+  }
+}
+```
+
+The field meanings follow the
+[PostgreSQL error and notice protocol](https://www.postgresql.org/docs/current/protocol-error-fields.html).

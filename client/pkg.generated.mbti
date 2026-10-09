@@ -132,10 +132,23 @@ pub async fn CopyOutStream::next(Self) -> Bytes?
 
 pub struct DatabaseError {
   severity : String?
+  severity_nonlocalized : String?
   code : String?
   message : String
   detail : String?
   hint : String?
+  schema : String?
+  table : String?
+  column : String?
+  datatype : String?
+  constraint : String?
+  position : UInt?
+  internal_position : UInt?
+  internal_query : String?
+  where_ : String?
+  file : String?
+  line : UInt?
+  routine : String?
 } derive(Eq, @debug.Debug)
 
 pub struct Field {

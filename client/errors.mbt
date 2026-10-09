@@ -1,23 +1,48 @@
 // Error values surfaced by the client package.
 
 ///|
-/// Structured subset of PostgreSQL `ErrorResponse` and `NoticeResponse` fields.
+/// PostgreSQL `ErrorResponse` and `NoticeResponse` fields.
 ///
-/// PostgreSQL emits many optional fields in protocol-level errors. The client
-/// currently preserves the most actionable ones so callers can branch on SQL
-/// state code, log a human-readable message, and surface hints or details to
-/// operators.
+/// Optional fields are independent: one object name does not imply another.
+/// Positions preserve PostgreSQL's one-based character indices, not byte or
+/// UTF-16 offsets. Unknown protocol tags are ignored.
 pub struct DatabaseError {
-  /// Human-readable severity, for example `"ERROR"` or `"NOTICE"`.
+  /// Localizable human-readable severity from `S`, for example `"ERROR"`.
   severity : String?
+  /// Nonlocalized severity from `V`, independent of `severity`.
+  severity_nonlocalized : String?
   /// Five-character SQLSTATE code when the server provided one.
   code : String?
-  /// Primary error message. This field is always populated.
+  /// Primary error message, defaulting to `"database error"` when absent.
   message : String
   /// Optional extra detail from PostgreSQL.
   detail : String?
   /// Optional hint from PostgreSQL describing a likely fix.
   hint : String?
+  /// Schema name associated with the error, if supplied.
+  schema : String?
+  /// Table name associated with the error, if supplied.
+  table : String?
+  /// Column name associated with the error, if supplied.
+  column : String?
+  /// Data type name associated with the error, if supplied.
+  datatype : String?
+  /// Constraint (or index) name associated with the error, if supplied.
+  constraint : String?
+  /// One-based character index into the query submitted by the client.
+  position : UInt?
+  /// One-based character index into `internal_query`.
+  internal_position : UInt?
+  /// Failed internally generated command, for example from PL/pgSQL.
+  internal_query : String?
+  /// Error context, including procedural call stacks, possibly multiline.
+  where_ : String?
+  /// PostgreSQL source file reporting the error.
+  file : String?
+  /// Line number in the PostgreSQL source file reporting the error.
+  line : UInt?
+  /// PostgreSQL source routine reporting the error.
+  routine : String?
 } derive(Debug, Eq)
 
 ///|

@@ -296,3 +296,221 @@ async test "backend parsing fail_response_stream closes queue with error" {
   }
   @debug.assert_eq(message, "boom")
 }
+
+///|
+fn all_database_error_fields() -> Array[(Byte, Bytes)] {
+  [
+    (b'S', @proto.utf8_encode("错误")),
+    (b'V', @proto.utf8_encode("ERROR")),
+    (b'C', @proto.utf8_encode("23505")),
+    (b'M', @proto.utf8_encode("重复 🔑")),
+    (b'D', @proto.utf8_encode("第一行\n第二行")),
+    (b'H', @proto.utf8_encode("提示\n重试")),
+    (b's', @proto.utf8_encode("模式")),
+    (b't', @proto.utf8_encode("表😀")),
+    (b'c', @proto.utf8_encode("列")),
+    (b'd', @proto.utf8_encode("类型")),
+    (b'n', @proto.utf8_encode("唯一约束")),
+    (b'P', @proto.utf8_encode("19")),
+    (b'p', @proto.utf8_encode("7")),
+    (b'q', @proto.utf8_encode("select '😀';\nselect missing")),
+    (b'W', @proto.utf8_encode("函数一\n函数二")),
+    (b'F', @proto.utf8_encode("source.c")),
+    (b'L', @proto.utf8_encode("123")),
+    (b'R', @proto.utf8_encode("routine_name")),
+  ]
+}
+
+///|
+test "database error preserves every official field and Unicode text" {
+  let err = parse_database_error(make_error_fields(all_database_error_fields()))
+  @debug.assert_eq(err.severity, Some("错误"))
+  @debug.assert_eq(err.severity_nonlocalized, Some("ERROR"))
+  @debug.assert_eq(err.code, Some("23505"))
+  @debug.assert_eq(err.message, "重复 🔑")
+  @debug.assert_eq(err.detail, Some("第一行\n第二行"))
+  @debug.assert_eq(err.hint, Some("提示\n重试"))
+  @debug.assert_eq(err.schema, Some("模式"))
+  @debug.assert_eq(err.table, Some("表😀"))
+  @debug.assert_eq(err.column, Some("列"))
+  @debug.assert_eq(err.datatype, Some("类型"))
+  @debug.assert_eq(err.constraint, Some("唯一约束"))
+  @debug.assert_eq(err.position, Some(19U))
+  @debug.assert_eq(err.internal_position, Some(7U))
+  @debug.assert_eq(err.internal_query, Some("select '😀';\nselect missing"))
+  @debug.assert_eq(err.where_, Some("函数一\n函数二"))
+  @debug.assert_eq(err.file, Some("source.c"))
+  @debug.assert_eq(err.line, Some(123U))
+  @debug.assert_eq(err.routine, Some("routine_name"))
+}
+
+///|
+test "database error fields are independently optional" {
+  let fields = all_database_error_fields()
+  let full = parse_database_error(make_error_fields(fields))
+  let empty = parse_database_error(make_error_fields([]))
+  @debug.assert_eq(empty.message, "database error")
+  @debug.assert_eq(empty.severity, None)
+  @debug.assert_eq(empty.severity_nonlocalized, None)
+  @debug.assert_eq(empty.code, None)
+  @debug.assert_eq(empty.detail, None)
+  @debug.assert_eq(empty.hint, None)
+  @debug.assert_eq(empty.schema, None)
+  @debug.assert_eq(empty.table, None)
+  @debug.assert_eq(empty.column, None)
+  @debug.assert_eq(empty.datatype, None)
+  @debug.assert_eq(empty.constraint, None)
+  @debug.assert_eq(empty.position, None)
+  @debug.assert_eq(empty.internal_position, None)
+  @debug.assert_eq(empty.internal_query, None)
+  @debug.assert_eq(empty.where_, None)
+  @debug.assert_eq(empty.file, None)
+  @debug.assert_eq(empty.line, None)
+  @debug.assert_eq(empty.routine, None)
+  for field in fields {
+    let (tag, value) = field
+    let without = parse_database_error(
+      make_error_fields(fields.filter(field => field.0 != tag)),
+    )
+    let alone = parse_database_error(make_error_fields([(tag, value)]))
+    let expected_without = match tag {
+      b'S' => { ..full, severity: None, }
+      b'V' => { ..full, severity_nonlocalized: None, }
+      b'C' => { ..full, code: None, }
+      b'M' => { ..full, message: "database error", }
+      b'D' => { ..full, detail: None, }
+      b'H' => { ..full, hint: None, }
+      b's' => { ..full, schema: None, }
+      b't' => { ..full, table: None, }
+      b'c' => { ..full, column: None, }
+      b'd' => { ..full, datatype: None, }
+      b'n' => { ..full, constraint: None, }
+      b'P' => { ..full, position: None, }
+      b'p' => { ..full, internal_position: None, }
+      b'q' => { ..full, internal_query: None, }
+      b'W' => { ..full, where_: None, }
+      b'F' => { ..full, file: None, }
+      b'L' => { ..full, line: None, }
+      b'R' => { ..full, routine: None, }
+      _ => fail("unexpected fixture tag")
+    }
+    let expected_alone = match tag {
+      b'S' => { ..empty, severity: full.severity, }
+      b'V' => { ..empty, severity_nonlocalized: full.severity_nonlocalized, }
+      b'C' => { ..empty, code: full.code, }
+      b'M' => { ..empty, message: full.message, }
+      b'D' => { ..empty, detail: full.detail, }
+      b'H' => { ..empty, hint: full.hint, }
+      b's' => { ..empty, schema: full.schema, }
+      b't' => { ..empty, table: full.table, }
+      b'c' => { ..empty, column: full.column, }
+      b'd' => { ..empty, datatype: full.datatype, }
+      b'n' => { ..empty, constraint: full.constraint, }
+      b'P' => { ..empty, position: full.position, }
+      b'p' => { ..empty, internal_position: full.internal_position, }
+      b'q' => { ..empty, internal_query: full.internal_query, }
+      b'W' => { ..empty, where_: full.where_, }
+      b'F' => { ..empty, file: full.file, }
+      b'L' => { ..empty, line: full.line, }
+      b'R' => { ..empty, routine: full.routine, }
+      _ => fail("unexpected fixture tag")
+    }
+    @debug.assert_eq(without, expected_without)
+    @debug.assert_eq(alone, expected_alone)
+    assert_true(without != full)
+  }
+}
+
+///|
+test "database error severity is independent of S and V order" {
+  let sv = parse_database_error(
+    make_error_fields([(b'S', @proto.utf8_encode("错误")), (b'V', b"ERROR")]),
+  )
+  let vs = parse_database_error(
+    make_error_fields([(b'V', b"ERROR"), (b'S', @proto.utf8_encode("错误"))]),
+  )
+  @debug.assert_eq(sv, vs)
+  @debug.assert_eq(sv.severity, Some("错误"))
+  @debug.assert_eq(sv.severity_nonlocalized, Some("ERROR"))
+}
+
+///|
+test "database error equality includes constraint and object fields" {
+  let base = [(b'C', b"23505"), (b'M', b"duplicate key")]
+  let first = parse_database_error(
+    make_error_fields(
+      base + [(b's', b"public"), (b't', b"accounts"), (b'n', b"email_unique")],
+    ),
+  )
+  let second = parse_database_error(
+    make_error_fields(
+      base + [(b's', b"public"), (b't', b"accounts"), (b'n', b"name_unique")],
+    ),
+  )
+  let stripped = parse_database_error(make_error_fields(base))
+  @debug.assert_eq(first.code, second.code)
+  assert_true(first != second)
+  assert_true(first != stripped)
+}
+
+///|
+test "database error validates UTF8 for all fields including unknown tags" {
+  for
+    tag in [
+      b'S', b'V', b'C', b'M', b'D', b'H', b's', b't', b'c', b'd', b'n', b'P', b'p',
+      b'q', b'W', b'F', b'L', b'R', b'X',
+    ] {
+    let err = @test.expect_error(() => {
+      parse_database_error(make_error_fields([(tag, bytes_of([0xC2]))]))
+    })
+    assert_true(err is @proto.ProtocolError::InvalidInput("invalid UTF-8"))
+  }
+}
+
+///|
+test "database error numeric fields reject malformed and overflowing values" {
+  for tag in [b'P', b'p', b'L'] {
+    for
+      value in [
+        "", "+1", "-1", " 1", "1 ", "1\n", "1.0", "0x10", "1_0", "one", "１", "١",
+        "4294967296", "18446744073709551616",
+      ] {
+      let err = @test.expect_error(() => {
+        parse_database_error(
+          make_error_fields([(tag, @proto.utf8_encode(value))]),
+        )
+      })
+      assert_true(err is @proto.ProtocolError::InvalidInput(_))
+    }
+    for
+      case in [
+        ("1", 1U),
+        ("0001", 1U),
+        ("2147483648", 2147483648U),
+        ("4294967295", 4294967295U),
+      ] {
+      let (value, expected) = case
+      let err = parse_database_error(
+        make_error_fields([(tag, @proto.utf8_encode(value))]),
+      )
+      let actual = match tag {
+        b'P' => err.position
+        b'p' => err.internal_position
+        _ => err.line
+      }
+      @debug.assert_eq(actual, Some(expected))
+    }
+  }
+  for tag in [b'P', b'p'] {
+    for value in [b"0", b"000"] {
+      let err = @test.expect_error(() => {
+        parse_database_error(make_error_fields([(tag, value)]))
+      })
+      assert_true(err is @proto.ProtocolError::InvalidInput(_))
+    }
+  }
+  @debug.assert_eq(
+    parse_database_error(make_error_fields([(b'L', b"0")])).line,
+    Some(0U),
+  )
+}

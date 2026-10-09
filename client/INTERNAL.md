@@ -82,6 +82,35 @@ and the writer stops after its current complete frame. The driver joins that
 writer before forwarding the final `ReadyForQuery` or starting another request.
 It is still one logical operation.
 
+## Error And Notice Fields
+
+`parse_database_error` is shared by startup, query/response collectors, streams,
+transactions, COPY, and async Notice delivery. Pool wrappers propagate the same
+`ClientError::Database` value without reconstructing it. The parser retains all
+currently documented PostgreSQL ErrorResponse/NoticeResponse fields:
+`S/V/C/M/D/H/s/t/c/d/n/P/p/q/W/F/L/R`. Unknown tags are ignored after UTF-8
+validation, preserving the previous behavior.
+
+`severity` stores only `S`; `severity_nonlocalized` stores only `V`, so wire order
+cannot overwrite either. Previously both tags wrote `severity`. All optional
+fields initialize independently to `None`; missing `M` retains the
+`"database error"` fallback. Object fields (`schema`, `table`, `column`,
+`datatype`, `constraint`) do not imply one another. `Debug` and `Eq` cover all
+fields, including object names, context, and source location.
+
+`P/p/L` are parsed as `UInt` using ASCII digits and base 10. Empty input, signs,
+separators, non-digits, overflow, and zero `P/p` raise
+`ProtocolError::InvalidInput`; `L` may be zero. Positions remain one-based
+PostgreSQL character indices into the submitted query (`position`) or `q`
+(`internal_position` into `internal_query`), with no byte or UTF-16 conversion.
+`W` is retained verbatim as `where_`, including multiline context. Text decode
+failures also raise `InvalidInput`.
+
+Business errors still drain to `ReadyForQuery` before normal connection reuse;
+no lifecycle or error-routing behavior changes. See the public README for
+SQLSTATE/constraint matching and the
+[protocol field definitions](https://www.postgresql.org/docs/current/protocol-error-fields.html).
+
 ## Streams And Detach
 
 Row, simple-query, and COPY OUT streams own the operation permit.
