@@ -294,8 +294,11 @@ async fn _transaction_example(client : @client.Client) -> Unit {
 }
 ```
 
-Set an isolation level with `@client.IsolationLevel`; `TransactionOptions`
-accepts an enum value instead of an SQL string:
+Set an isolation level directly with `@client.IsolationLevel::ReadUncommitted`,
+`ReadCommitted`, `RepeatableRead`, or `Serializable`. `TransactionOptions`
+accepts an enum value instead of an SQL string. The former `read_uncommitted()`,
+`read_committed()`, `repeatable_read()`, and `serializable()` factory methods have
+been removed; use the corresponding enum constructors:
 
 ```mbt check
 ///|
@@ -303,7 +306,7 @@ async fn _serializable_transaction(client : @client.Client) -> Unit {
   client.with_transaction(
     _tx => (),
     options=@client.TransactionOptions(
-      isolation_level=@client.IsolationLevel::serializable(),
+      isolation_level=@client.IsolationLevel::Serializable,
     ),
   )
 }

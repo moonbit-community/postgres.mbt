@@ -95,8 +95,9 @@ async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
 ```
 
 Pool transaction options use the `client` isolation enum re-exported as
-`@pgpool.IsolationLevel`; existing enum constructor calls remain valid. The
-isolation level is selected from four fixed SQL spellings:
+`@pgpool.IsolationLevel`. Use its `ReadUncommitted`, `ReadCommitted`,
+`RepeatableRead`, or `Serializable` constructors directly, selecting from four
+fixed SQL spellings:
 
 ```mbt check
 ///|
@@ -104,7 +105,7 @@ async fn _pool_serializable_transaction(pool : @pgpool.Pool) -> Unit {
   pool.with_transaction(
     _tx => (),
     options=@pgpool.TransactionOptions(
-      isolation_level=@pgpool.IsolationLevel::serializable(),
+      isolation_level=@pgpool.IsolationLevel::Serializable,
     ),
   )
 }

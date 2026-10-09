@@ -57,9 +57,6 @@ test "pool config constructors and targets" {
   guard @pgpool.QueueMode::lifo() is Lifo else {
     fail("expected lifo queue mode")
   }
-  guard @pgpool.IsolationLevel::serializable() is Serializable else {
-    fail("expected serializable isolation")
-  }
   guard @pgpool.RecyclingMethod::verified() is Verified else {
     fail("expected verified recycling")
   }
@@ -101,6 +98,35 @@ test "pool config constructors and targets" {
   assert_eq(targets[1].port, 2222)
   assert_true(targets[0].ssl_mode == VerifyCa)
   assert_eq(config.get_pool_config().statement_cache_capacity, 7)
+}
+
+///|
+/// All isolation constructors are usable through both public package paths.
+test "public isolation constructors configure client and pool transactions" {
+  let levels = [
+    (
+      @client.IsolationLevel::ReadUncommitted,
+      @pgpool.IsolationLevel::ReadUncommitted,
+    ),
+    (
+      @client.IsolationLevel::ReadCommitted,
+      @pgpool.IsolationLevel::ReadCommitted,
+    ),
+    (
+      @client.IsolationLevel::RepeatableRead,
+      @pgpool.IsolationLevel::RepeatableRead,
+    ),
+    (@client.IsolationLevel::Serializable, @pgpool.IsolationLevel::Serializable),
+  ]
+  for level in levels {
+    let (client_level, pool_level) = level
+    let client_options = @client.TransactionOptions(
+      isolation_level=client_level,
+    )
+    let pool_options = @pgpool.TransactionOptions(isolation_level=pool_level)
+    assert_eq(client_options.isolation_level, Some(pool_level))
+    assert_eq(pool_options.isolation_level, Some(client_level))
+  }
 }
 
 ///|

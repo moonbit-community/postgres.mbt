@@ -142,16 +142,12 @@ pub struct Field {
   type_oid : UInt
 } derive(Eq, @debug.Debug)
 
-pub enum IsolationLevel {
+pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
 } derive(Eq, @debug.Debug)
-pub fn IsolationLevel::read_committed() -> Self
-pub fn IsolationLevel::read_uncommitted() -> Self
-pub fn IsolationLevel::repeatable_read() -> Self
-pub fn IsolationLevel::serializable() -> Self
 
 pub enum Kind {
   Simple
