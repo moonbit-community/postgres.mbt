@@ -122,6 +122,14 @@ MoonBit 任务取消有独立的生命周期规则。一旦 `execute_raw` 持有
 
 ## Statement 与 Portal 资源作用域
 
+`Shared.connection_id` 由模块级同步 `UInt64` 计数器分配，与协议资源命名计数器独立；
+耗尽时终止分配，禁止回绕。Client 副本、Statement 和同连接事务共享此身份。
+接收 Statement 的公开入口在等待就绪、许可或注册资源前校验归属，`OpContext` 在执行、
+绑定和关闭请求提交前复核。即使外部连接的 Statement 已关闭，仍返回
+`StatementConnectionMismatch`，不提交请求、不改资源、不终止正常连接。
+该错误属于事务本地错误，不触发协议失步处理。手动 Statement 仍可在同连接上跨事务
+复用；`ScopedStatement` 保留原有回调作用域接口和生命周期。
+
 `Portal` 是唯一公开的 portal 句柄，直接持有事务、服务器名称、结果列、关闭标记、
 作用域活动标记和活动调用计数。可变标记与计数仍使用共享引用，确保句柄副本观察到
 相同的生命周期。作用域活动标记先拒绝新调用，已经开始的调用完成后才关闭服务器资源。

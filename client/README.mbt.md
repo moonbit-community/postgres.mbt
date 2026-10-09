@@ -197,6 +197,12 @@ use `Transaction::close_statement`: direct `Statement::close` immediately raises
 permit. A named Statement may outlive the transaction, so rollback does not
 close it.
 
+Every Statement belongs to its creating connection. Passing it to another
+Client or Transaction raises `ClientError::StatementConnectionMismatch` before
+waiting or submitting requests, even if the Statement is already closed.
+Client copies share this identity; Statements remain reusable across
+transactions on that same connection.
+
 `Portal` is the only public portal handle. Create one inside a transaction
 with `Transaction::with_portal(statement, params?, callback)` or a
 transaction-owned `ScopedStatement::with_portal(params?, callback)`. Both entry

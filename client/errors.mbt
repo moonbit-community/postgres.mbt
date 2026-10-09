@@ -52,6 +52,8 @@ pub suberror ClientError {
   ExecutorAlreadyStarted
   /// The client, statement, portal, or transaction is closed or its scope expired.
   Closed(String)
+  /// The statement belongs to another connection. No request was submitted.
+  StatementConnectionMismatch
   /// A server reply violated driver expectations.
   Protocol(String)
   /// A client creation option is invalid.

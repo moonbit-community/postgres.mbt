@@ -157,6 +157,17 @@ and transport cleanup finish, without overwriting an earlier failure.
 
 ## Scoped Statements And Portals
 
+`Shared.connection_id` is allocated by a module-level synchronous `UInt64`
+counter, independent of wire resource naming; exhaustion aborts allocation
+before wraparound. Client copies, statements and transactions on a connection
+share that identity. Public Statement receivers check it before readiness/gate
+waits or resource registration, and `OpContext` rechecks before execution,
+binding or closing. Foreign handles, including closed ones, raise
+`StatementConnectionMismatch` without requests, resource changes or connection
+abort. Transaction child-error classification treats this as a local error.
+Manual Statements remain reusable across transactions on the same connection;
+`ScopedStatement` retains its existing callback-owned API and lifecycle.
+
 `Portal` is the only public portal handle. It directly owns the transaction,
 server name, result columns, closed flag, scope activity flag, and active-call
 count. The mutable flags and counter remain shared references so copies of the

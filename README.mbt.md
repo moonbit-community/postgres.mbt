@@ -30,6 +30,8 @@ and wait for cleanup on every exit. COPY IN commits only when the callback
 explicitly calls `finish()`; otherwise it is aborted.
 For named statements, `Client::with_prepared` and
 `Transaction::with_prepared` close the Statement after the callback.
+Statements belong to their creating connection; passing one to another Client
+or Transaction raises `ClientError::StatementConnectionMismatch` locally.
 `Portal` is the only public portal handle: each fetch finishes its stream,
 and the portal closes when its callback ends. A caller-owned `Statement` remains
 open for reuse, including across transactions. The former manual portal

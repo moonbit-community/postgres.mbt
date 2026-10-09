@@ -34,6 +34,7 @@ fn Client::create_with_capacity_unchecked(
     async_messages: Queue(kind=Blocking(capacity)),
     dropped_async_messages: @ref.new(0L),
     async_message_handler: @ref.new(None),
+    connection_id: connection_ids.allocate(),
     root_transaction_occupancy: @ref.new(0),
     control: DrainControl::new(),
     ready: Completion::new(),
