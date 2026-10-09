@@ -67,6 +67,29 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 停止。驱动器会等待该写入任务结束，然后才转发最终的 `ReadyForQuery` 或开始另一个请求。
 整个过程仍然属于同一个逻辑操作。
 
+## 错误与 Notice 字段
+
+启动、查询响应收集器、流、事务、COPY 以及异步 Notice 共用
+`parse_database_error`。连接池直接透传同一 `ClientError::Database`，不重建错误对象。
+解析器保留 PostgreSQL 当前定义的全部错误与 Notice 标签：
+`S/V/C/M/D/H/s/t/c/d/n/P/p/q/W/F/L/R`。未知标签仍在 UTF-8 校验后忽略。
+
+`severity` 仅保存 `S`，`severity_nonlocalized` 仅保存 `V`，不会因字段顺序互相覆盖；
+此前两个标签都会写入 `severity`。所有可选字段独立初始化为 `None`；缺失 `M` 时
+仍使用 `"database error"` 默认消息。`schema`、`table`、`column`、`datatype` 和
+`constraint` 的存在互不蕴含。`Debug` 和 `Eq` 包含所有字段，包括对象名、上下文和
+源代码位置。
+
+`P/p/L` 只接受 ASCII 十进制数字并解析为 `UInt`；空串、符号、分隔符、非数字、
+溢出和为零的 `P/p` 统一抛出 `ProtocolError::InvalidInput`，`L` 可以为零。
+`position` 是原查询中的一基字符索引；`internal_position` 是 `internal_query`
+（`q`）中的一基字符索引。解析器不转换为字节偏移或 UTF-16 索引。
+`where_`（`W`）原样保存上下文及其中的换行。无效 UTF-8 也抛出 `InvalidInput`。
+
+业务错误仍按原路径排空至 `ReadyForQuery` 后恢复连接复用，不改变生命周期或路由。
+按 SQLSTATE 和约束名处理错误的示例见客户端 README；字段语义见
+[PostgreSQL 错误与 Notice 协议](https://www.postgresql.org/docs/current/protocol-error-fields.html)。
+
 ## 流与分离
 
 行流、简单查询流和 COPY OUT 流持有操作许可。
