@@ -1286,7 +1286,7 @@ async test "integration transaction options" {
     )
     let tx = client.transaction(
       options=TransactionOptions(
-        isolation_level=@client.IsolationLevel::serializable(),
+        isolation_level=@client.IsolationLevel::Serializable,
         read_only=true,
         deferrable=true,
       ),

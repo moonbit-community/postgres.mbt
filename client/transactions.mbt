@@ -2,36 +2,12 @@
 
 ///|
 /// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
-pub enum IsolationLevel {
+pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
 } derive(Eq, Debug)
-
-///|
-/// Construct `READ UNCOMMITTED`.
-pub fn IsolationLevel::read_uncommitted() -> IsolationLevel {
-  ReadUncommitted
-}
-
-///|
-/// Construct `READ COMMITTED`.
-pub fn IsolationLevel::read_committed() -> IsolationLevel {
-  ReadCommitted
-}
-
-///|
-/// Construct `REPEATABLE READ`.
-pub fn IsolationLevel::repeatable_read() -> IsolationLevel {
-  RepeatableRead
-}
-
-///|
-/// Construct `SERIALIZABLE`.
-pub fn IsolationLevel::serializable() -> IsolationLevel {
-  Serializable
-}
 
 ///|
 /// Return one fixed SQL spelling for a transaction isolation level.

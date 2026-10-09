@@ -3,10 +3,10 @@
 async test "transaction isolation levels use fixed BEGIN SQL" {
   with_cancellation_test_client((group, client, next_request) => {
     let cases : Array[(IsolationLevel, String)] = [
-      (IsolationLevel::read_uncommitted(), "READ UNCOMMITTED"),
-      (IsolationLevel::read_committed(), "READ COMMITTED"),
-      (IsolationLevel::repeatable_read(), "REPEATABLE READ"),
-      (IsolationLevel::serializable(), "SERIALIZABLE"),
+      (IsolationLevel::ReadUncommitted, "READ UNCOMMITTED"),
+      (IsolationLevel::ReadCommitted, "READ COMMITTED"),
+      (IsolationLevel::RepeatableRead, "REPEATABLE READ"),
+      (IsolationLevel::Serializable, "SERIALIZABLE"),
     ]
     for case in cases {
       let (level, sql) = case
