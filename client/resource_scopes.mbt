@@ -293,6 +293,7 @@ pub async fn[T] Transaction::with_portal(
   params? : Array[&ToSql] = [],
   f : async (Portal) -> T,
 ) -> T {
+  self.client.assert_statement_connection(statement)
   self.assert_open()
   self.scoped_resources.val += 1
   defer {

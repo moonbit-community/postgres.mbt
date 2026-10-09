@@ -16,6 +16,7 @@ pub suberror ClientError {
   NotReady
   ExecutorAlreadyStarted
   Closed(String)
+  StatementConnectionMismatch
   Protocol(String)
   InvalidConfig(String)
   InvalidSavepointName(String)

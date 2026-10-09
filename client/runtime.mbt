@@ -130,8 +130,10 @@ priv struct OpContext {
 ///
 /// The client, prepared statements, transactions, cancellation tokens, and
 /// private driver task reference this struct to coordinate lifecycle, cache
-/// type metadata, and publish async messages without global state.
+/// type metadata, and publish async messages. Only connection identity allocation
+/// uses a module-level counter.
 priv struct Shared {
+  connection_id : UInt64
   config : Config
   requests : @async.Queue[Request]
   async_messages : @async.Queue[AsyncMessage]
@@ -195,6 +197,8 @@ priv struct Driver {
 ///|
 /// Prepared statement stored on the PostgreSQL server.
 ///
+/// A statement belongs to its creating connection and may be reused across
+/// transactions on that connection.
 /// Read-only metadata views expose the server-inferred parameter and result
 /// types so callers can inspect what PostgreSQL resolved during preparation.
 struct Statement {

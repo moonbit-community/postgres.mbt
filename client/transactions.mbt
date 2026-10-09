@@ -287,6 +287,7 @@ pub async fn Transaction::close_statement(
   self : Transaction,
   statement : Statement,
 ) -> Unit {
+  self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.close_statement(statement))
 }
 
@@ -395,6 +396,7 @@ pub async fn Transaction::query_statement(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> RowStream {
+  self.client.assert_statement_connection(statement)
   self.start_stream(permit => {
     self.context.query_statement(statement, params, permit~)
   })
@@ -409,6 +411,7 @@ pub async fn[T] Transaction::with_statement_stream(
   params? : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
+  self.client.assert_statement_connection(statement)
   with_transaction_stream(() => self.query_statement(statement, params~), f)
 }
 
@@ -419,6 +422,7 @@ pub async fn Transaction::execute_raw(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Int {
+  self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.execute_raw(statement, params))
 }
 
@@ -430,6 +434,7 @@ async fn Transaction::bind(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Portal {
+  self.client.assert_statement_connection(statement)
   let permit = self.scope_gate.acquire()
   defer permit.release()
   self.assert_open()
@@ -635,6 +640,7 @@ async fn Transaction::cleanup_child(self : Transaction) -> Bool {
 
 ///|
 fn local_child_error(error : Error) -> Bool {
+  error is ClientError::StatementConnectionMismatch ||
   error is ClientError::Encode(_) ||
   error is ClientError::Decode(_) ||
   error is ClientError::WrongType(_) ||

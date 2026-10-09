@@ -119,6 +119,7 @@ async fn OpContext::close_statement(
   self : OpContext,
   statement : Statement,
 ) -> Unit {
+  self.client.assert_statement_connection(statement)
   if statement.closed.val {
     return
   }
@@ -298,6 +299,7 @@ pub async fn Client::query_statement(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> RowStream {
+  self.assert_statement_connection(statement)
   let (context, permit) = self.begin_stream_operation()
   errdefer permit.release()
   context.query_statement(statement, params, permit~)
@@ -310,6 +312,7 @@ fn OpContext::query_statement(
   params : Array[&ToSql],
   permit? : OperationPermit,
 ) -> RowStream raise {
+  self.client.assert_statement_connection(statement)
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -378,6 +381,7 @@ pub async fn Client::execute_raw(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Int {
+  self.assert_statement_connection(statement)
   self.run_operation(context => context.execute_raw(statement, params))
 }
 
@@ -413,6 +417,7 @@ async fn OpContext::bind(
   statement : Statement,
   params : Array[&ToSql],
 ) -> (Bytes, Array[Column]) {
+  self.client.assert_statement_connection(statement)
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
