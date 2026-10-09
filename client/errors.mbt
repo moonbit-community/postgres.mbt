@@ -93,6 +93,8 @@ pub suberror ClientError {
   Decode(String)
   /// A `ToSql` or `FromSql` implementation does not accept the PostgreSQL type.
   WrongType(WrongTypeError)
+  /// Type metadata contains a cycle through this OID.
+  UnsupportedRecursiveType(@proto.Oid)
   /// A named column lookup failed.
   ColumnNotFound(String)
   /// A helper such as `query_one` observed an unexpected row count.

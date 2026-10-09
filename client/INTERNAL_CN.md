@@ -42,6 +42,27 @@
 方法并再次获取门控许可。这一点对类型解析发起的系统目录查询，以及临时预处理语句的
 清理尤为重要。
 
+## 递归类型元数据
+
+`Type` 保存目录 schema：内置类型为 `Some("pg_catalog")`，未解析的
+`Type::unknown` 为 `None`，其构造函数签名保持不变。`Kind::Array`、`Domain`、
+`Range` 携带完整子类型，复合字段改为 `Field.type_`。字段和元数据集合保持只读，
+结构化 `Eq` 包括 schema 和完整子类型。旧 OID 载荷改用子描述符的 `.oid`，
+`field.type_oid` 迁移为 `field.type_.oid`。
+
+每次根解析创建独立的活动 OID Map，并传给递归目录解析。再次进入活动 OID 时抛出
+`UnsupportedRecursiveType(oid)`；`defer` 在成功、失败和取消时移除标记。
+只有构造完成的描述符才进入连接缓存，同级重复引用可以复用完整子类型，不会误判为循环。
+`clear_type_cache()` 清除自定义类型元数据。目录查询始终复用父操作的 `OpContext`，
+不重复获取许可。缺失类型和目录数据库错误维持现有回退；传输、协议、解码和循环错误继续
+传播。循环错误归类为事务本地错误。
+
+通用数组从 `Kind::Array(element)` 获取完整子类型，取代固定 OID 列表，元素兼容性
+检查和编解码都使用该描述符。二进制读取校验数组载荷中的元素 OID。
+自定义标量编码器用于数组时必须输出二进制元素载荷，不受其单独使用时的 `format` 偏好
+影响。内置字符串、JSON/JSONB、空数组和 NULL 元素处理保持不变。本次不自动解包域，
+不提供通用复合/range 编解码、公开类型注册表或多维数组支持。
+
 ## 驱动器与队列
 
 驱动器在连接建立后的整个生命周期维持一个套接字读取任务，包括空闲时段。
@@ -117,9 +138,14 @@ COPY IN 完成收集器消费完 `ReadyForQuery` 后返回原始标签；`CopyIn
 本次执行流，Statement 仍由调用方持有。`Portal::with_stream` 也只结束当前
 分页流，portal 仍由外层 portal 作用域持有。
 
-inferred/typed 临时查询在 `read_prepare_response` 成功后立即安装语句清理。Close 字节和
-执行参数均在提交 Execute 前构造；随后由不会抛错的 RowStream 构造器接管清理责任。
-编码或提交失败时，使用已有许可关闭语句，并保留原始错误。
+`read_prepare_response` 仅将参数 OID 和占位列描述读取到成功的 `ReadyForQuery`。
+命名 prepare 和 inferred/typed 临时查询随后进入 `resolve_prepared_metadata`，先注册
+语句清理，再解析参数和列。元数据失败时，在已有许可下关闭未交付的语句，并保留原始
+解析错误；任何 Close 失败都会中止连接。Portal 列解析继续保留现有 portal 清理保护。
+
+元数据解析成功后，临时查询在提交 Execute 前构造 Close 字节和执行参数，随后由不会
+抛错的 RowStream 构造器接管清理责任。编码或提交失败维持原有临时 Close 路径，保留
+原始错误。
 
 命名 `prepare` 使用专门的句柄交付路径：客户端或事务在受保护的准备过程结束后，仍持有
 许可和 `OpContext`，然后检查待处理取消。若已取消，就受保护地发送 Close 并等待

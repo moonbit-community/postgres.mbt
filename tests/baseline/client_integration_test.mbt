@@ -2194,25 +2194,25 @@ async test "integration resolves custom type metadata" {
     @debug.assert_eq(fields.to_owned().map(field => field.name), [
       "left_value", "right_value",
     ])
-    @debug.assert_eq(fields.to_owned().map(field => field.type_oid), [23U, 25U])
+    @debug.assert_eq(fields.to_owned().map(field => field.type_.oid), [23U, 25U])
 
     let domain_type = client
       .prepare("select $1::pg_temp.moon_driver_name as name")
       .params()[0]
     assert_eq(domain_type.name, "moon_driver_name")
-    guard domain_type.kind is Domain(base_oid) else {
+    guard domain_type.kind is Domain(base_type) else {
       fail("expected domain type metadata")
     }
-    assert_eq(base_oid, 25U)
+    assert_eq(base_type, @client.Type::text())
 
     let range_stream = client.query("select int4range(1, 3) as r")
     let range_type = range_stream.columns()[0].type_
     ignore(range_stream.finish())
     assert_eq(range_type.name, "int4range")
-    guard range_type.kind is Range(subtype_oid) else {
+    guard range_type.kind is Range(subtype) else {
       fail("expected range type metadata")
     }
-    assert_eq(subtype_oid, 23U)
+    assert_eq(subtype, @client.Type::int4())
 
     client.close()
   })

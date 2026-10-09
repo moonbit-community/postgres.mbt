@@ -93,7 +93,10 @@ async fn OpContext::prepare_typed(
   let name = next_name(self.client.shared, "s")
   let bytes = prepare_bytes(name[:], sql, types)
   let responses = self.client.send_request(Messages, bytes)
-  let (params, columns) = read_prepare_response(self, responses)
+  let (param_oids, raw_columns) = read_prepare_response(responses)
+  let (params, columns) = resolve_prepared_metadata(
+    self, name, param_oids, raw_columns,
+  )
   { client: self.client, name, params, columns, closed: @ref.new(false), }
 }
 
@@ -179,10 +182,13 @@ async fn OpContext::query(
     Messages,
     prepare_bytes(name[:], sql, []),
   )
-  let (param_types, columns) = read_prepare_response(self, prepare_responses)
+  let (param_oids, raw_columns) = read_prepare_response(prepare_responses)
   // Own the server-side statement immediately after preparation succeeds.
   // All fallible encoding happens before submission; RowStream::new cannot
   // fail, so successful submission transfers cleanup without another gap.
+  let (param_types, columns) = resolve_prepared_metadata(
+    self, name, param_oids, raw_columns,
+  )
   errdefer @async.protect_from_cancel(() => {
     close_temporary_statement_after_error(self, name)
   })
@@ -273,7 +279,8 @@ async fn OpContext::query_typed(
     Messages,
     prepare_bytes(name[:], sql, param_types),
   )
-  let (_, columns) = read_prepare_response(self, prepare_responses)
+  let (_, raw_columns) = read_prepare_response(prepare_responses)
+  let (_, columns) = resolve_prepared_metadata(self, name, [], raw_columns)
   errdefer @async.protect_from_cancel(() => {
     close_temporary_statement_after_error(self, name)
   })

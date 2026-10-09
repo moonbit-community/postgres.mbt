@@ -15,15 +15,28 @@ let typeinfo_composite_query = "select attname::text, atttypid::oid from pg_cata
 ///|
 /// Return a cached `Type`, querying PostgreSQL catalogs only on cache misses.
 async fn cached_type(context : OpContext, oid : @proto.Oid) -> Type {
-  if context.client.shared.types.get(oid) is Some(type_) {
-    type_
-  } else {
-    // Cache misses are resolved once and written back so later row/parameter
-    // decoding for the same OID stays local.
-    let type_ = lookup_type(context, oid)
-    context.client.shared.types[oid] = type_
-    type_
+  cached_type_recursive(context, oid, {})
+}
+
+///|
+/// Only completed descriptors enter the cache. Active OIDs belong to this
+/// resolution path, so repeated sibling references can reuse completed types.
+async fn cached_type_recursive(
+  context : OpContext,
+  oid : @proto.Oid,
+  active : Map[@proto.Oid, Unit],
+) -> Type {
+  if active.contains(oid) {
+    raise ClientError::UnsupportedRecursiveType(oid)
   }
+  if context.client.shared.types.get(oid) is Some(type_) {
+    return type_
+  }
+  active[oid] = ()
+  defer active.remove(oid)
+  let type_ = lookup_type(context, oid, active)
+  context.client.shared.types[oid] = type_
+  type_
 }
 
 ///|
@@ -32,7 +45,11 @@ async fn cached_type(context : OpContext, oid : @proto.Oid) -> Type {
 /// The driver first checks built-ins, then falls back to catalog queries. If
 /// a catalog query returns a PostgreSQL error or no rows, it preserves the OID
 /// inside an `Unknown` descriptor so later error messages remain informative.
-async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
+async fn lookup_type(
+  context : OpContext,
+  oid : @proto.Oid,
+  active : Map[@proto.Oid, Unit],
+) -> Type {
   if builtin_type(oid) is Some(type_) {
     type_
   } else {
@@ -51,6 +68,7 @@ async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
     let elem_oid : @proto.Oid = row.get(2)
     let range_subtype : @proto.Oid? = row.get(3)
     let base_oid : @proto.Oid = row.get(4)
+    let schema : String = row.get(5)
     let relid : @proto.Oid = row.get(6)
     // Match PostgreSQL's richer type families first before falling back to a
     // plain scalar descriptor.
@@ -62,18 +80,18 @@ async fn lookup_type(context : OpContext, oid : @proto.Oid) -> Type {
     } else if typtype == "p" {
       Pseudo
     } else if base_oid != 0U {
-      Domain(base_oid)
+      Domain(cached_type_recursive(context, base_oid, active))
     } else if elem_oid != 0U {
-      Array(elem_oid)
+      Array(cached_type_recursive(context, elem_oid, active))
     } else if relid != 0U {
-      let fields = query_composite_fields(context, relid)
+      let fields = query_composite_fields(context, relid, active)
       Composite(fields[:])
     } else if range_subtype is Some(subtype) {
-      Range(subtype)
+      Range(cached_type_recursive(context, subtype, active))
     } else {
       Simple
     }
-    { oid, name, kind, }
+    { oid, name, schema: Some(schema), kind, }
   }
 }
 
@@ -110,12 +128,19 @@ async fn query_enum_labels(
 async fn query_composite_fields(
   context : OpContext,
   oid : @proto.Oid,
+  active : Map[@proto.Oid, Unit],
 ) -> Array[Field] {
   let rows = query_oid_catalog(context, typeinfo_composite_query, oid) catch {
     ClientError::Database(_) => []
     err => raise err
   }
-  rows.map(row => { name: row.get(0), type_oid: row.get(1), })
+  let fields : Array[Field] = []
+  for row in rows {
+    let name : String = row.get(0)
+    let type_ = cached_type_recursive(context, row.get(1), active)
+    fields.push({ name, type_, })
+  }
+  fields
 }
 
 ///|
