@@ -44,12 +44,13 @@ pub async fn Pool::query_typed_all(
 }
 
 ///|
-/// Execute one command on an automatically managed pooled session.
+/// Execute one command on an automatically managed pooled session and return
+/// its affected row count as `UInt64`.
 pub async fn Pool::execute(
   self : Pool,
   sql : String,
   params? : Array[&@client.ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.with_session(session => session.execute(sql, params~))
 }
 

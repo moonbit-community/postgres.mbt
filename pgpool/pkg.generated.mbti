@@ -66,7 +66,7 @@ pub(all) enum LoadBalanceHosts {
 type Operation
 pub async fn Operation::batch_execute(Self, String) -> Unit
 pub async fn Operation::check_connection(Self) -> Unit
-pub async fn Operation::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+pub async fn Operation::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
 pub async fn Operation::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Operation::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Operation::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
@@ -82,7 +82,7 @@ pub fn Pool::close(Self) -> Unit
 pub fn Pool::config(Self) -> PoolConfig
 pub fn Pool::create(Config, options? : PoolOptions) -> (Self, PoolExecutor) raise
 pub fn Pool::dropped_async_messages(Self) -> Int64
-pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
 pub fn Pool::is_closed(Self) -> Bool
 pub async fn Pool::next_message(Self) -> PoolAsyncMessage?
 pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
@@ -127,7 +127,7 @@ pub fn PoolOptions::PoolOptions(connector? : Connector, post_create? : async (Op
 
 type PreparedStatement
 pub fn PreparedStatement::columns(Self) -> ArrayView[@client.Column]
-pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql]) -> Int
+pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql]) -> UInt64
 pub fn PreparedStatement::params(Self) -> ArrayView[@client.Type]
 pub async fn PreparedStatement::query_all(Self, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql]) -> @client.Row
@@ -155,7 +155,7 @@ pub fn RecyclingMethod::verified() -> Self
 type Session
 pub async fn Session::batch_execute(Self, String) -> Unit
 pub async fn Session::check_connection(Self) -> Unit
-pub async fn Session::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+pub async fn Session::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
 pub async fn Session::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Session::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Session::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
@@ -203,7 +203,7 @@ type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
 pub async fn Transaction::check_connection(Self) -> Unit
 pub async fn Transaction::commit(Self) -> Unit
-pub async fn Transaction::execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+pub async fn Transaction::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
 pub async fn Transaction::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Transaction::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
 pub async fn Transaction::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
@@ -233,7 +233,7 @@ pub(open) trait GenericClient {
   async fn query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
   async fn query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
   async fn query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
   async fn batch_execute(Self, String) -> Unit
   async fn check_connection(Self) -> Unit
 }

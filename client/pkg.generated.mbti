@@ -59,8 +59,8 @@ pub async fn Client::copy_out(Self, String) -> CopyOutStream
 pub fn Client::create(Config) -> (Self, ClientExecutor)
 pub fn Client::create_with_async_message_capacity(Config, Int) -> (Self, ClientExecutor) raise
 pub fn Client::dropped_async_messages(Self) -> Int64
-pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
-pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> UInt64
+pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> UInt64
 pub fn Client::is_closed(Self) -> Bool
 pub fn Client::is_transaction_idle(Self) -> Bool
 pub async fn Client::next_message(Self) -> AsyncMessage?
@@ -120,7 +120,7 @@ pub impl @debug.Debug for Config
 
 type CopyInSink
 pub async fn CopyInSink::abort(Self, message? : String) -> Unit
-pub async fn CopyInSink::finish(Self) -> Int
+pub async fn CopyInSink::finish(Self) -> UInt64
 pub async fn CopyInSink::send(Self, BytesView) -> Unit
 
 type CopyOutStream
@@ -169,12 +169,12 @@ pub struct Notification {
 
 type Portal
 pub fn Portal::columns(Self) -> ArrayView[Column]
-pub async fn Portal::execute(Self) -> Int
+pub async fn Portal::execute(Self) -> UInt64
 pub async fn[T] Portal::with_stream(Self, Int, async (RowStream) -> T) -> T
 
 pub struct QuerySummary {
   command_tag : String
-  row_count : Int
+  row_count : UInt64
   suspended : Bool
 } derive(Eq, @debug.Debug)
 
@@ -203,7 +203,7 @@ pub async fn RowStream::opt(Self) -> Row?
 
 type ScopedStatement
 pub fn ScopedStatement::columns(Self) -> ArrayView[Column]
-pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> Int
+pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> UInt64
 pub fn ScopedStatement::params(Self) -> ArrayView[Type]
 pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
@@ -243,8 +243,8 @@ type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
 pub async fn Transaction::close_statement(Self, Statement) -> Unit
 pub async fn Transaction::commit(Self) -> Unit
-pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
-pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> UInt64
+pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> UInt64
 pub async fn Transaction::prepare(Self, String) -> Statement
 pub async fn Transaction::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream

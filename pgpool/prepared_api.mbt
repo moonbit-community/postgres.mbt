@@ -407,11 +407,11 @@ async fn PreparedStatement::run_query_opt(
 }
 
 ///|
-/// Execute one prepared statement and return its affected row count.
+/// Execute one prepared statement and return its affected row count as `UInt64`.
 async fn PreparedStatement::run_execute(
   self : PreparedStatement,
   params : Array[&@client.ToSql],
-) -> Int {
+) -> UInt64 {
   let statement = self.state.raw_statement()
   self.state.scope.run_request(
     client => client.execute_raw(statement, params~),
@@ -589,11 +589,11 @@ pub async fn PreparedStatement::query_opt(
 }
 
 ///|
-/// Execute this scoped prepared statement and return the affected row count.
+/// Execute this scoped prepared statement and return the affected row count as `UInt64`.
 pub async fn PreparedStatement::execute(
   self : PreparedStatement,
   params? : Array[&@client.ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.state.begin_call()
   defer self.state.finish_call()
   self.run_execute(params) catch {

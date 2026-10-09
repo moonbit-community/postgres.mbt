@@ -337,12 +337,12 @@ pub async fn Transaction::query_typed_all(
 }
 
 ///|
-/// Execute one command inside this transaction and return its affected row count.
+/// Execute one command inside this transaction and return its affected row count as `UInt64`.
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
   params? : Array[&@client.ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.with_prepared(sql, prepared => prepared.execute(params~))
 }
 

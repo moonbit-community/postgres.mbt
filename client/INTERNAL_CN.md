@@ -79,6 +79,12 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 清理是幂等的。消费者取消时，既不能泄漏许可，也不能让下一个操作在 PostgreSQL
 到达安全边界之前开始。
 
+正常读取和分离排空都以 `UInt64` 累加观察到的 DataRow 数量，并通过
+`QuerySummary.row_count` 返回。受影响行数另从带计数的命令标签按十进制解析为
+`UInt64`：无计数命令返回零，非法或超限计数抛出 `ClientError::Protocol`。
+COPY IN 完成收集器消费完 `ReadyForQuery` 后返回原始标签；`CopyInSink::finish`
+先释放操作许可，再解析行数，避免解析失败对已完成的响应队列再次启动遗弃排空。
+
 六个 `Client::with_*` 流/COPY API 共用 `with_scoped_resource`。等待就绪和获取许可仍可
 取消；仅协议启动和 finalizer 受到取消保护，业务回调保持可取消。资源获取后立即安装
 `errdefer`，在回调前、回调后和清理后检查待处理取消。输出流调用 `finish()`；COPY IN

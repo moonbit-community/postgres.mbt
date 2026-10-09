@@ -149,12 +149,12 @@ pub async fn Operation::query_typed_all(
 }
 
 ///|
-/// Execute one command in the cancellable scope and return its affected row count.
+/// Execute one command in the cancellable scope and return its affected row count as `UInt64`.
 pub async fn Operation::execute(
   self : Operation,
   sql : String,
   params? : Array[&@client.ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.run_request(client => client.execute(sql, params~))
 }
 
