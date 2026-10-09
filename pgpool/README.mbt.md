@@ -79,6 +79,12 @@ calls. Transaction, streaming/COPY, and cancellable callbacks keep an exclusive
 session operation until their protocol work finishes, so use the capability
 passed to those callbacks.
 
+`Pool`, `Session`, `Transaction`, `Operation`, `PreparedStatement`, and
+`GenericClient::execute` return affected row counts as `UInt64`. COPY IN
+`finish()` and `QuerySummary.row_count` also use `UInt64`. Commands without a
+count return zero; missing, invalid, or overflowing counted command tags
+propagate `ClientError::Protocol` from the client.
+
 ## Transactions
 
 Pool and session transaction helpers reserve one physical connection for the

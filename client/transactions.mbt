@@ -234,12 +234,12 @@ pub async fn[T] Transaction::with_stream(
 }
 
 ///|
-/// Execute SQL within this transaction and return the affected row count.
+/// Execute SQL within this transaction and return the affected row count as `UInt64`.
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.run_scope_operation(context => context.execute(sql, params))
 }
 
@@ -416,12 +416,12 @@ pub async fn[T] Transaction::with_statement_stream(
 }
 
 ///|
-/// Execute a previously prepared statement and return its affected row count.
+/// Execute a previously prepared statement and return its affected row count as `UInt64`.
 pub async fn Transaction::execute_raw(
   self : Transaction,
   statement : Statement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.execute_raw(statement, params))
 }

@@ -41,6 +41,11 @@ Async backend messages use bounded buffers on both Client and Pool.
 Transaction scopes also drain unfinished query streams before completion and
 roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
 
+Observed row counts (`QuerySummary.row_count`) and affected row counts from
+`execute`, `execute_raw`, and COPY IN `finish` use `UInt64` throughout the client
+and pool. Commands without a row count return zero. Missing, invalid, or
+overflowing counts in counted command tags raise `ClientError::Protocol`.
+
 In `0.1.0`, `Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await
 `client.ready()` to observe connection and authentication errors. `Pool::create`

@@ -171,10 +171,11 @@ async fn read_prepare_response(
 }
 
 ///|
-/// Drain the backend completion sequence for COPY IN and return affected rows.
+/// Drain the backend completion sequence for COPY IN and return its raw tag.
+/// Parse affected rows only after the caller releases the operation permit.
 async fn collect_copy_in_completion(
   responses : @async.Queue[@backend.Message],
-) -> Int {
+) -> String {
   let mut command_tag = ""
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -194,7 +195,7 @@ async fn collect_copy_in_completion(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          break rows_affected(command_tag)
+          break command_tag
         }
       _ =>
         fail_response_stream(
@@ -280,14 +281,56 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 }
 
 ///|
-/// Extract the trailing numeric row count from a PostgreSQL command tag.
-fn rows_affected(command_tag : String) -> Int {
-  if command_tag.split(" ").last() is Some(last) {
-    @string.parse_int(last) catch {
-      _ => 0
+/// Parse the decimal row count of a PostgreSQL command tag.
+/// Commands without a count return zero; malformed counted tags are errors.
+fn rows_affected(command_tag : String) -> UInt64 raise {
+  let fields = command_tag.split(" ").to_array()
+  let count = match fields[:] {
+    ["INSERT", oid, count] => {
+      guard !oid.is_empty() && oid.iter().all(c => c >= '0' && c <= '9') else {
+        raise ClientError::Protocol(
+          "invalid INSERT command tag: \{command_tag}",
+        )
+      }
+      count
     }
-  } else {
-    0
+    [
+      "DELETE"
+      | "UPDATE"
+      | "MERGE"
+      | "SELECT"
+      | "MOVE"
+      | "FETCH"
+      | "COPY",
+      count,
+    ] => count
+    [
+      "INSERT"
+      | "DELETE"
+      | "UPDATE"
+      | "MERGE"
+      | "SELECT"
+      | "MOVE"
+      | "FETCH"
+      | "COPY",
+      ..,
+    ] =>
+      raise ClientError::Protocol(
+        "invalid row count in command tag: \{command_tag}",
+      )
+    _ => return 0
+  }
+  // The core parser also accepts separators, but protocol counts are digits only.
+  guard !count.is_empty() && count.iter().all(c => c >= '0' && c <= '9') else {
+    raise ClientError::Protocol(
+      "invalid row count in command tag: \{command_tag}",
+    )
+  }
+  @string.parse_uint64(count, base=10) catch {
+    _ =>
+      raise ClientError::Protocol(
+        "invalid row count in command tag: \{command_tag}",
+      )
   }
 }
 

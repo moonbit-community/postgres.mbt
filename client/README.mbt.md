@@ -113,6 +113,16 @@ Choose the smallest result shape that matches the query:
 they must wait for an operation permit before returning a stream.
 MoonBit async calls do not use an `await` keyword.
 
+`QuerySummary.row_count` is a `UInt64` count of observed `DataRow` messages,
+including rows discarded during cleanup. All `execute` and `execute_raw`
+methods, including transaction, scoped-statement, and portal methods, return
+the affected row count as `UInt64` from the command tag. Commands without a
+count return zero. Counted tags (`INSERT oid rows` and
+`DELETE/UPDATE/MERGE/SELECT/MOVE/FETCH/COPY rows`) require decimal digits within
+the `UInt64` range; missing, invalid, or overflowing counts raise
+`ClientError::Protocol` after the execution stream has been drained. Portal
+`max_rows` remains an `Int` protocol limit.
+
 Rows decode by index or PostgreSQL column name:
 
 ```mbt check
@@ -360,10 +370,13 @@ Prefer `with_copy_in` and `with_copy_out` for bulk transfer. COPY IN requires an
 explicit `sink.finish()` inside the callback to commit the COPY. Returning
 without finishing, throwing, or being cancelled aborts unfinished COPY input
 and waits for cleanup. A completed COPY is not undone by a later callback error.
+`finish()` returns the affected row count as `UInt64`. If its command tag has an
+invalid or overflowing count, it raises `ClientError::Protocol` after consuming
+`ReadyForQuery` and releasing the operation permit; the connection is reusable.
 
 ```mbt check
 ///|
-async fn _copy_rows(client : @client.Client) -> Int {
+async fn _copy_rows(client : @client.Client) -> UInt64 {
   client.with_copy_in("copy events(value) from stdin", sink => {
     sink.send(b"first\nsecond\n")
     sink.finish()

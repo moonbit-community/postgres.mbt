@@ -334,10 +334,12 @@ fn OpContext::query_statement(
 }
 
 ///|
-/// Execute SQL and return the affected row count.
+/// Execute SQL and return the affected row count as `UInt64`.
 ///
 /// This convenience helper prepares a temporary statement, executes it once,
 /// waits for completion, and then closes the prepared statement.
+/// Missing, invalid, or overflowing counts in counted command tags raise
+/// `ClientError::Protocol` after the execution stream has been drained.
 /// If execution is cancelled, cleanup drains the results before closing the
 /// temporary statement, then propagates cancellation. This can wait for the
 /// current SQL command to finish so the connection remains reusable.
@@ -345,7 +347,7 @@ pub async fn Client::execute(
   self : Client,
   sql : String,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.run_operation(context => context.execute(sql, params))
 }
 
@@ -354,7 +356,7 @@ async fn OpContext::execute(
   self : OpContext,
   sql : String,
   params : Array[&ToSql],
-) -> Int {
+) -> UInt64 {
   let statement = self.prepare_typed(sql, [])
   let rows = {
     errdefer @async.protect_from_cancel(() => {
@@ -370,17 +372,19 @@ async fn OpContext::execute(
 }
 
 ///|
-/// Execute a prepared statement and return the affected row count.
+/// Execute a prepared statement and return the affected row count as `UInt64`.
 ///
 /// The result stream is drained internally so the command tag can be parsed and
 /// converted into a numeric row count. On cancellation, remaining results are
 /// drained before cancellation propagates, which may wait for the SQL command
 /// to finish. The caller retains ownership of the prepared statement.
+/// Missing, invalid, or overflowing counts in counted command tags raise
+/// `ClientError::Protocol` after the execution stream has been drained.
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.assert_statement_connection(statement)
   self.run_operation(context => context.execute_raw(statement, params))
 }
@@ -390,7 +394,7 @@ async fn OpContext::execute_raw(
   self : OpContext,
   statement : Statement,
   params : Array[&ToSql],
-) -> Int {
+) -> UInt64 {
   let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
     // A decoding failure may already have started a detached drain.

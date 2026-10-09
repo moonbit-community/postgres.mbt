@@ -247,11 +247,11 @@ pub async fn[T] ScopedStatement::with_stream(
 }
 
 ///|
-/// Execute this prepared statement and return its affected row count.
+/// Execute this prepared statement and return its affected row count as `UInt64`.
 pub async fn ScopedStatement::execute(
   self : ScopedStatement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.state.begin_call()
   defer {
     self.state.active_calls.val -= 1
@@ -334,8 +334,8 @@ pub async fn[T] Portal::with_stream(
 }
 
 ///|
-/// Execute this portal to completion and return its affected row count.
-pub async fn Portal::execute(self : Portal) -> Int {
+/// Execute this portal to completion and return its affected row count as `UInt64`.
+pub async fn Portal::execute(self : Portal) -> UInt64 {
   self.with_stream(0, stream => {
     let summary = stream.finish()
     rows_affected(summary.command_tag)

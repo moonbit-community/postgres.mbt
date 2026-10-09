@@ -95,6 +95,14 @@ Row, simple-query, and COPY OUT streams own the operation permit.
 Cleanup is idempotent. A consumer cancellation must not leak the permit or
 allow the next operation to start before PostgreSQL reaches a safe boundary.
 
+Both normal reads and detached drains accumulate observed `DataRow` counts as
+`UInt64` and expose them through `QuerySummary.row_count`. Affected row counts
+are parsed separately from counted command tags using decimal `UInt64` parsing;
+invalid or overflowing counts raise `ClientError::Protocol`, while commands
+without a count return zero. COPY IN completion collection returns the raw tag
+after `ReadyForQuery`; `CopyInSink::finish` releases its permit before parsing,
+so a parse error cannot start a second abandoned drain over a completed queue.
+
 The six `Client::with_*` stream/COPY APIs use `with_scoped_resource`. Readiness
 and permit acquisition remain cancellable. Only protocol startup and finalizers
 are protected; the business callback runs outside cancellation protection.
