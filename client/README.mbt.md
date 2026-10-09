@@ -150,8 +150,8 @@ the same way.
 
 `Statement` and `ScopedStatement` expose `params()` and `columns()` metadata
 views; `Portal` exposes `columns()`. Type descriptors expose their
-`Kind` through `Type::kind()`; enum labels and composite fields are read-only
-views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
+classification through `type_.kind`; enum labels and composite fields are
+read-only views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
 
 `query_typed` supplies PostgreSQL parameter types explicitly. The former
 `query_typed_raw` compatibility alias has been removed.
@@ -178,6 +178,52 @@ temporary statement before the scope returns. If parameter count, type, or
 encoding validation fails after preparation, the temporary statement is closed
 under the same operation permit before the original error is returned; no
 Execute request is submitted.
+
+## Type Descriptors And Custom Arrays
+
+`Type` carries `oid`, `name`, `schema : String?`, and `kind`. Built-ins have
+`Some("pg_catalog")`; catalog-resolved types retain their actual schema.
+`Type::unknown(oid, name=...)` keeps its existing constructor and has `None`
+for its unresolved schema. Codecs can distinguish identically named types
+in different schemas:
+
+```mbt check
+///|
+fn _accept_status(type_ : @client.Type) -> Bool {
+  type_.schema == Some("app") && type_.name == "status" && type_.kind is Enum(_)
+}
+```
+
+`Kind::Array(element)`, `Domain(base)`, and `Range(subtype)` now carry complete
+`Type` descriptors. Composite fields expose `field.type_`, including nested
+metadata. To migrate code that used their OID payloads, read `element.oid`,
+`base.oid`, or `subtype.oid`; replace `field.type_oid` with `field.type_.oid`.
+Descriptor fields remain read-only. `Eq` compares the entire structure,
+including schema and child descriptors.
+
+The generic `Array[T]` codec uses `Kind::Array` metadata, so implementing only
+`ToSql` and `FromSql` for a custom enum also enables `Array[Enum]` and
+`Array[Enum?]`. Empty arrays and NULL elements are supported. Obtain the
+resolved array descriptor from statement or row metadata when using
+`query_typed`. Custom element encoders must write PostgreSQL **binary** element
+payloads: an array uses binary format for every element, regardless of the
+scalar codec's `format` method. Decoders receive the full element descriptor
+and `Binary`; the payload's element OID must match that descriptor. Built-in
+strings and JSON/JSONB retain their existing array handling.
+
+Catalog metadata is resolved recursively and cached per connection.
+`clear_type_cache()` forces custom types to be resolved again. A cycle raises
+`ClientError::UnsupportedRecursiveType(oid)` for the repeated OID; completed
+shared subtypes are reusable, and descriptors under construction are never
+cached. This is a local transaction error, so a successfully cleaned-up
+operation leaves the connection and transaction usable. If metadata resolution
+fails after preparation, the driver closes the undelivered statement before
+returning the error; a failed Close aborts the connection and preserves the
+original metadata error. Missing types and recoverable catalog database errors
+retain the existing `Unknown` fallback.
+
+Domains are not automatically unwrapped by codecs. Generic composite/range
+codecs, a public type registry, and multidimensional arrays are not provided.
 
 ## Prepared Statements And Portals
 

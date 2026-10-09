@@ -51,6 +51,33 @@ They must never re-enter a public `Client` method and reacquire the gate. This
 is especially important for catalog queries issued by type resolution and for
 temporary prepared-statement cleanup.
 
+## Recursive Type Metadata
+
+`Type` stores the catalog schema (`Some("pg_catalog")` for built-ins, `None`
+for unresolved `Type::unknown`). `Kind::Array`, `Domain`, and `Range` carry full
+child descriptors; `Field.type_` carries the full composite field type. Fields
+and metadata views remain read-only. Structural `Eq` includes schema and all
+children. Callers migrating from OID payloads use the child descriptor's `oid`;
+`field.type_oid` becomes `field.type_.oid`.
+
+Each root lookup owns a fresh active-OID map, passed through recursive catalog
+lookups. Re-entering an active OID raises `UnsupportedRecursiveType(oid)`.
+A `defer` removes the mark on success, error, or cancellation; only a fully
+constructed descriptor is cached. Siblings can reuse completed subtypes
+without being mistaken for cycles. `clear_type_cache()` resets custom metadata.
+All catalog queries reuse the parent's `OpContext`, without acquiring another
+operation permit. The existing missing-row/database-error fallback remains;
+transport, protocol, decode, and cycle errors propagate. The cycle error is
+classified as transaction-local.
+
+Generic arrays inspect `Kind::Array(element)` instead of a fixed OID table.
+Compatibility checks and element serialization/deserialization use the complete
+child descriptor. Binary decoding checks the payload element OID against it.
+Custom scalar encoders must emit binary element payloads regardless of their
+standalone format preference. Built-in string and JSON/JSONB handling is
+preserved, including empty arrays and optional elements. There is no automatic
+domain unwrapping, generic composite/range codec, or multidimensional support.
+
 ## Driver And Queues
 
 The driver keeps one reader task on the socket for the entire established
@@ -145,11 +172,18 @@ errors survive cleanup errors. `Client::with_statement_stream` and
 statement with the caller. `Portal::with_stream` also finishes only its
 current fetch stream; the enclosing portal scope retains the portal.
 
-Temporary inferred/typed queries install statement cleanup immediately after
-`read_prepare_response` succeeds. Close bytes and execution parameters are built
-before submitting Execute; the non-failing RowStream constructor then takes
-ownership. Encoding/submission failures close under the existing permit and
-preserve the original error.
+`read_prepare_response` only reads parameter OIDs and placeholder columns to
+successful `ReadyForQuery`. Named prepares and temporary inferred/typed queries
+then enter `resolve_prepared_metadata`, which registers statement cleanup before
+resolving parameters or columns. Metadata failures close the undelivered
+statement under the existing permit and preserve the original error; any Close
+failure aborts the connection. Portal column resolution retains its existing
+portal cleanup guard.
+
+After metadata succeeds, temporary queries build Close bytes and execution
+parameters before submitting Execute; the non-failing RowStream constructor
+then takes ownership. Encoding/submission failures use the existing temporary
+Close path and preserve the original error.
 
 Named `prepare` methods use a separate handoff path. The owner keeps its client
 or transaction permit and `OpContext` while a protected prepare finishes and

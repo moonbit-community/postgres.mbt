@@ -24,6 +24,7 @@ pub suberror ClientError {
   Encode(String)
   Decode(String)
   WrongType(WrongTypeError)
+  UnsupportedRecursiveType(UInt)
   ColumnNotFound(String)
   RowCount(String)
   UnfinishedChildTransaction
@@ -153,7 +154,7 @@ pub struct DatabaseError {
 
 pub struct Field {
   name : String
-  type_oid : UInt
+  type_ : Type
 } derive(Eq, @debug.Debug)
 
 pub(all) enum IsolationLevel {
@@ -165,11 +166,11 @@ pub(all) enum IsolationLevel {
 
 pub enum Kind {
   Simple
-  Array(UInt)
+  Array(Type)
   Enum(ArrayView[String])
   Composite(ArrayView[Field])
-  Domain(UInt)
-  Range(UInt)
+  Domain(Type)
+  Range(Type)
   Pseudo
   Unknown
 } derive(Eq, @debug.Debug)
@@ -283,6 +284,7 @@ pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel,
 pub struct Type {
   oid : UInt
   name : String
+  schema : String?
   kind : Kind
 } derive(Eq, @debug.Debug)
 pub fn Type::bool() -> Self

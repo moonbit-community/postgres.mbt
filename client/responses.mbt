@@ -125,9 +125,8 @@ async fn start_copy_out(
 /// neither depending on the statement. Database errors are deferred until the
 /// terminal `ReadyForQuery` just like the public stream helpers do.
 async fn read_prepare_response(
-  context : OpContext,
   responses : @async.Queue[@backend.Message],
-) -> (Array[Type], Array[Column]) {
+) -> (Array[@proto.Oid], Array[Column]) {
   let mut param_oids : Array[@proto.Oid] = []
   let mut columns : Array[Column] = []
   let mut database_error : DatabaseError? = None
@@ -153,13 +152,7 @@ async fn read_prepare_response(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          // Resolve cached type metadata once, at the end, so callers see a
-          // fully enriched result without partial-success bookkeeping.
-          let result = (
-            resolve_parameter_types(context, param_oids),
-            resolve_columns(context, columns),
-          )
-          break result
+          break (param_oids, columns)
         }
       _ =>
         fail_response_stream(
@@ -345,4 +338,32 @@ fn join_clauses(clauses : Array[String]) -> String {
     out += clause
   }
   out
+}
+
+///|
+/// Once preparation has reached ReadyForQuery, own the statement before any
+/// catalog lookup can fail. Close failures here abort even after ReadyForQuery.
+async fn resolve_prepared_metadata(
+  context : OpContext,
+  name : Bytes,
+  param_oids : Array[@proto.Oid],
+  columns : Array[Column],
+) -> (Array[Type], Array[Column]) {
+  errdefer @async.protect_from_cancel(() => {
+    close_unresolved_statement_after_error(context, name)
+  })
+  (
+    resolve_parameter_types(context, param_oids),
+    resolve_columns(context, columns),
+  )
+}
+
+///|
+async fn close_unresolved_statement_after_error(
+  context : OpContext,
+  name : Bytes,
+) -> Unit {
+  close_temporary_statement(context, name) catch {
+    _ => context.client.abort()
+  }
 }

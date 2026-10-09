@@ -19,6 +19,7 @@ test "kind retains read-only enum labels and composite fields" {
   let enum_type : Type = {
     oid: 90001U,
     name: "mood",
+    schema: Some("test"),
     kind: Kind::Enum(enum_labels[:]),
   }
   guard enum_type.kind is Kind::Enum(labels) else {
@@ -33,12 +34,13 @@ test "kind retains read-only enum labels and composite fields" {
   }
   assert_eq(reloaded_labels[1], "happy")
   let composite_fields = [
-    { name: "left", type_oid: 23U, },
-    { name: "right", type_oid: 25U, },
+    { name: "left", type_: Type::int4(), },
+    { name: "right", type_: Type::text(), },
   ]
   let composite_type : Type = {
     oid: 90002U,
     name: "pair",
+    schema: Some("test"),
     kind: Kind::Composite(composite_fields[:]),
   }
   guard composite_type.kind is Kind::Composite(fields) else {
@@ -51,8 +53,11 @@ test "kind retains read-only enum labels and composite fields" {
   guard composite_type.kind is Kind::Composite(reloaded_fields) else {
     fail("expected retained composite metadata")
   }
-  assert_eq(reloaded_fields[1].type_oid, 25U)
-  assert_true(Type::int4_array().kind is Kind::Array(23U))
+  assert_eq(reloaded_fields[1].type_.oid, 25U)
+  guard Type::int4_array().kind is Kind::Array(element) else {
+    fail("expected array metadata")
+  }
+  assert_eq(element, Type::int4())
 }
 
 ///|

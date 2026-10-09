@@ -644,6 +644,7 @@ fn local_child_error(error : Error) -> Bool {
   error is ClientError::Encode(_) ||
   error is ClientError::Decode(_) ||
   error is ClientError::WrongType(_) ||
+  error is ClientError::UnsupportedRecursiveType(_) ||
   error is ClientError::ColumnNotFound(_) ||
   error is ClientError::RowCount(_) ||
   error is ClientError::Closed("statement already closed") ||

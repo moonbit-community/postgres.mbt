@@ -149,8 +149,11 @@ pub impl[T : FromSql] FromSql for T? with fn from_sql_null(_, _) {
 }
 
 ///|
-/// Built-in arrays use PostgreSQL's binary array payload and delegate element
-/// encoding to the existing scalar codecs.
+/// Arrays use PostgreSQL's binary array payload and delegate element
+/// encoding to scalar codecs using the complete element descriptor.
+/// Custom element codecs must write PostgreSQL binary element payloads; the
+/// array has one binary format for all elements, regardless of `T::format`.
+/// Text/String and JSON/JSONB retain their built-in binary-array handling.
 pub impl[T : ToSql] ToSql for Array[T] with fn format(_, _) {
   Binary
 }
@@ -210,6 +213,11 @@ pub impl[T : FromSql] FromSql for Array[T] with fn from_sql(type_, format, raw) 
     Text => raise ClientError::Decode("text array decoding is not supported")
     Binary => {
       let pg_array = @types.array_from_sql(raw)
+      if pg_array.element_type != element_type.oid {
+        raise ClientError::Decode(
+          "array element OID does not match type descriptor",
+        )
+      }
       if pg_array.dimensions > 1 {
         raise ClientError::Decode("multidimensional arrays are not supported")
       }
