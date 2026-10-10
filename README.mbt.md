@@ -61,6 +61,13 @@ The driver completes physical transport cleanup while cancellation unwinds.
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)
 
+**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
+decode failures or silently store incorrect text. The client always uses UTF-8
+and currently does not reject encoding changes. Keep `client_encoding=UTF8`
+for the lifetime of every client and pooled session; see the
+[client encoding warning](./client/README.mbt.md#client-encoding) and
+[TODO.md](./TODO.md).
+
 ### TLS
 
 The client and pool now keep three explicit TLS modes:

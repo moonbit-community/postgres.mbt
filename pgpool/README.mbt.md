@@ -281,6 +281,11 @@ offered to the next borrower. The pool does not issue an automatic `ROLLBACK`.
 Idle connections retain session state such as `SET` values and `LISTEN`
 subscriptions under `Fast`; select `Clean` when that state must be cleared.
 
+**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
+decode failures or silently store incorrect text. Keep it at UTF-8 throughout
+each pooled session's lifetime. The client currently does not reject encoding
+changes; see the [client encoding warning](../client/README.mbt.md#client-encoding).
+
 `PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
 Hooks receive an `Operation` that expires when the callback ends. Queries and
 commands issued through it finish before the next borrower uses the connection.
