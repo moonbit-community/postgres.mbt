@@ -68,6 +68,62 @@ async test "query and query_typed close temporary statements after type and enco
 }
 
 ///|
+async test "query and query_typed close temporary statements before returning NUL encoding errors" {
+  let string_error = "PostgreSQL string parameters must not contain NUL (U+0000)"
+  let text_error = "PostgreSQL text-format parameters must not contain NUL (0x00)"
+  let cases : Array[(&ToSql, Type, String, String)] = [
+    ("a\u0000b", Type::text(), "select $1::text", string_error),
+    (
+      ["valid", "a\u0000b"],
+      Type::text_array(),
+      "select $1::text[]",
+      string_error,
+    ),
+    (nul_test_param(b"a\x00b"), Type::text(), "select $1::text", text_error),
+  ]
+  for typed in [false, true] {
+    for case in cases {
+      let (param, type_, sql, expected_error) = case
+      for close_fails in [false, true] {
+        with_cancellation_test_client((group, client, next_request) => {
+          let task = group.spawn(allow_failure=true, () => {
+            if typed {
+              client.query_typed(sql, [type_], params=[param])
+            } else {
+              client.query(sql, params=[param])
+            }
+          })
+          let prepare = next_request()
+          assert_eq(prepare.bytes[0], b'P')
+          scoped_test_prepare(prepare, param_types=[type_])
+          // Pre-encoding failed: cleanup must precede any Bind/Execute.
+          let close = next_request()
+          assert_eq(close.bytes, close_bytes(b'S', b"q1"))
+          assert_true(task.try_wait() is None)
+          assert_false(client.shared.operation_gate.mutex.try_acquire())
+          if close_fails {
+            close.responses.put(
+              copy_test_error_response_message("close failed"),
+            )
+            close.responses.put(copy_test_ready_for_query_message())
+          } else {
+            scoped_test_close(close)
+          }
+          let error = expect_error_async(() => task.wait())
+          guard error is ClientError::Encode(message) else {
+            fail("expected NUL encoding error")
+          }
+          assert_eq(message, expected_error)
+          assert_true(client.shared.requests.try_get() is None)
+          assert_true(client.shared.operation_gate.mutex.try_acquire())
+          client.shared.operation_gate.mutex.release()
+        })
+      }
+    }
+  }
+}
+
+///|
 async test "inferred parameter count mismatch closes its temporary statement" {
   with_cancellation_test_client((group, client, next_request) => {
     let task = group.spawn(allow_failure=true, () => {

@@ -223,8 +223,8 @@ pub(open) trait GenericClient {
     Array[@client.Type],
     params? : Array[&@client.ToSql],
   ) -> Array[@client.Row]
-  /// Execute one command and return its affected row count.
-  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+  /// Execute one command and return its affected row count as `UInt64`.
+  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
   /// Execute one or more SQL commands that do not return rows.
   async fn batch_execute(Self, String) -> Unit
   /// Perform a lightweight round-trip health check.

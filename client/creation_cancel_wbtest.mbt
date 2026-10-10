@@ -256,11 +256,6 @@ async test "pending cancellation prevents new client and transaction stream requ
         columns: [],
         closed: @ref.new(false),
       }
-      let portal : Portal = {
-        name: b"existing",
-        columns: [],
-        closed: @ref.new(false),
-      }
       for mode in 0..<(if transaction_scope { 7 } else { 6 }) {
         let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
         let release_start : @async.Queue[Unit] = Queue(kind=Unbounded)
@@ -276,7 +271,7 @@ async test "pending cancellation prevents new client and transaction stream requ
               1 => tx.batch_execute("select 1")
               2 => ignore(tx.savepoint("cancelled"))
               3 => ignore(tx.query_statement(statement))
-              4 => ignore(tx.query_portal(portal, 1))
+              4 => ignore(tx.query_portal(Portal::new(tx, b"existing", []), 1))
               5 => tx.commit()
               _ => tx.rollback()
             }

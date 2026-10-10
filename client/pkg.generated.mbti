@@ -16,6 +16,7 @@ pub suberror ClientError {
   NotReady
   ExecutorAlreadyStarted
   Closed(String)
+  StatementConnectionMismatch
   Protocol(String)
   InvalidConfig(String)
   InvalidSavepointName(String)
@@ -23,6 +24,7 @@ pub suberror ClientError {
   Encode(String)
   Decode(String)
   WrongType(WrongTypeError)
+  UnsupportedRecursiveType(UInt)
   ColumnNotFound(String)
   RowCount(String)
   UnfinishedChildTransaction
@@ -58,8 +60,8 @@ pub async fn Client::copy_out(Self, String) -> CopyOutStream
 pub fn Client::create(Config) -> (Self, ClientExecutor)
 pub fn Client::create_with_async_message_capacity(Config, Int) -> (Self, ClientExecutor) raise
 pub fn Client::dropped_async_messages(Self) -> Int64
-pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> Int
-pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> UInt64
+pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> UInt64
 pub fn Client::is_closed(Self) -> Bool
 pub fn Client::is_transaction_idle(Self) -> Bool
 pub async fn Client::next_message(Self) -> AsyncMessage?
@@ -119,7 +121,7 @@ pub impl @debug.Debug for Config
 
 type CopyInSink
 pub async fn CopyInSink::abort(Self, message? : String) -> Unit
-pub async fn CopyInSink::finish(Self) -> Int
+pub async fn CopyInSink::finish(Self) -> UInt64
 pub async fn CopyInSink::send(Self, BytesView) -> Unit
 
 type CopyOutStream
@@ -131,35 +133,44 @@ pub async fn CopyOutStream::next(Self) -> Bytes?
 
 pub struct DatabaseError {
   severity : String?
+  severity_nonlocalized : String?
   code : String?
   message : String
   detail : String?
   hint : String?
+  schema : String?
+  table : String?
+  column : String?
+  datatype : String?
+  constraint : String?
+  position : UInt?
+  internal_position : UInt?
+  internal_query : String?
+  where_ : String?
+  file : String?
+  line : UInt?
+  routine : String?
 } derive(Eq, @debug.Debug)
 
 pub struct Field {
   name : String
-  type_oid : UInt
+  type_ : Type
 } derive(Eq, @debug.Debug)
 
-pub enum IsolationLevel {
+pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
 } derive(Eq, @debug.Debug)
-pub fn IsolationLevel::read_committed() -> Self
-pub fn IsolationLevel::read_uncommitted() -> Self
-pub fn IsolationLevel::repeatable_read() -> Self
-pub fn IsolationLevel::serializable() -> Self
 
 pub enum Kind {
   Simple
-  Array(UInt)
+  Array(Type)
   Enum(ArrayView[String])
   Composite(ArrayView[Field])
-  Domain(UInt)
-  Range(UInt)
+  Domain(Type)
+  Range(Type)
   Pseudo
   Unknown
 } derive(Eq, @debug.Debug)
@@ -172,10 +183,12 @@ pub struct Notification {
 
 type Portal
 pub fn Portal::columns(Self) -> ArrayView[Column]
+pub async fn Portal::execute(Self) -> UInt64
+pub async fn[T] Portal::with_stream(Self, Int, async (RowStream) -> T) -> T
 
 pub struct QuerySummary {
   command_tag : String
-  row_count : Int
+  row_count : UInt64
   suspended : Bool
 } derive(Eq, @debug.Debug)
 
@@ -202,16 +215,11 @@ pub async fn RowStream::next(Self) -> Row?
 pub async fn RowStream::one(Self) -> Row
 pub async fn RowStream::opt(Self) -> Row?
 
-type ScopedPortal
-pub fn ScopedPortal::columns(Self) -> ArrayView[Column]
-pub async fn ScopedPortal::execute(Self) -> Int
-pub async fn[T] ScopedPortal::with_stream(Self, Int, async (RowStream) -> T) -> T
-
 type ScopedStatement
 pub fn ScopedStatement::columns(Self) -> ArrayView[Column]
-pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> Int
+pub async fn ScopedStatement::execute(Self, params? : Array[&ToSql]) -> UInt64
 pub fn ScopedStatement::params(Self) -> ArrayView[Type]
-pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
+pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
 
 pub enum SimpleQueryMessage {
@@ -247,22 +255,18 @@ pub fn Statement::params(Self) -> ArrayView[Type]
 
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
-pub async fn Transaction::bind(Self, Statement, params? : Array[&ToSql]) -> Portal
-pub async fn Transaction::close_portal(Self, Portal) -> Unit
 pub async fn Transaction::close_statement(Self, Statement) -> Unit
 pub async fn Transaction::commit(Self) -> Unit
-pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> Int
-pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> Int
+pub async fn Transaction::execute(Self, String, params? : Array[&ToSql]) -> UInt64
+pub async fn Transaction::execute_raw(Self, Statement, params? : Array[&ToSql]) -> UInt64
 pub async fn Transaction::prepare(Self, String) -> Statement
 pub async fn Transaction::prepare_typed(Self, String, Array[Type]) -> Statement
 pub async fn Transaction::query(Self, String, params? : Array[&ToSql]) -> RowStream
-pub async fn Transaction::query_portal(Self, Portal, Int) -> RowStream
 pub async fn Transaction::query_statement(Self, Statement, params? : Array[&ToSql]) -> RowStream
 pub async fn Transaction::rollback(Self) -> Unit
 pub async fn Transaction::savepoint(Self, String) -> Self
 pub async fn Transaction::transaction(Self) -> Self
-pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (ScopedPortal) -> T) -> T
-pub async fn[T] Transaction::with_portal_stream(Self, Portal, Int, async (RowStream) -> T) -> T
+pub async fn[T] Transaction::with_portal(Self, Statement, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] Transaction::with_prepared(Self, String, async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[Type], async (ScopedStatement) -> T) -> T
 pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T
@@ -280,6 +284,7 @@ pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel,
 pub struct Type {
   oid : UInt
   name : String
+  schema : String?
   kind : Kind
 } derive(Eq, @debug.Debug)
 pub fn Type::bool() -> Self

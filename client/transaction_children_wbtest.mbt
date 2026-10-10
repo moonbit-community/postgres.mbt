@@ -164,11 +164,7 @@ async test "transaction stream scopes cover query statement and portal" {
         columns: [],
         closed: @ref.new(false),
       }
-      let portal : Portal = {
-        name: b"existing_portal",
-        columns: [],
-        closed: @ref.new(false),
-      }
+      let portal : @ref.Ref[Portal?] = @ref.new(None)
       let task = group.spawn(() => {
         client.with_transaction(tx => {
           match mode {
@@ -182,11 +178,14 @@ async test "transaction stream scopes cover query statement and portal" {
                 ignore(stream.next())
                 42
               })
-            _ =>
-              tx.with_portal_stream(portal, 1, stream => {
+            _ => {
+              let bound = Portal::new(tx, b"existing_portal", [])
+              portal.val = Some(bound)
+              tx.with_portal_stream(bound, 1, stream => {
                 ignore(stream.next())
                 42
               })
+            }
           }
         })
       })
@@ -209,7 +208,9 @@ async test "transaction stream scopes cover query statement and portal" {
       commit.responses.put(copy_test_ready_for_query_message())
       assert_eq(task.wait(), 42)
       assert_false(statement.closed.val)
-      assert_false(portal.closed.val)
+      if portal.val is Some(portal) {
+        assert_false(portal.closed.val)
+      }
     })
   }
 }

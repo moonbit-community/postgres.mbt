@@ -51,6 +51,33 @@ They must never re-enter a public `Client` method and reacquire the gate. This
 is especially important for catalog queries issued by type resolution and for
 temporary prepared-statement cleanup.
 
+## Recursive Type Metadata
+
+`Type` stores the catalog schema (`Some("pg_catalog")` for built-ins, `None`
+for unresolved `Type::unknown`). `Kind::Array`, `Domain`, and `Range` carry full
+child descriptors; `Field.type_` carries the full composite field type. Fields
+and metadata views remain read-only. Structural `Eq` includes schema and all
+children. Callers migrating from OID payloads use the child descriptor's `oid`;
+`field.type_oid` becomes `field.type_.oid`.
+
+Each root lookup owns a fresh active-OID map, passed through recursive catalog
+lookups. Re-entering an active OID raises `UnsupportedRecursiveType(oid)`.
+A `defer` removes the mark on success, error, or cancellation; only a fully
+constructed descriptor is cached. Siblings can reuse completed subtypes
+without being mistaken for cycles. `clear_type_cache()` resets custom metadata.
+All catalog queries reuse the parent's `OpContext`, without acquiring another
+operation permit. The existing missing-row/database-error fallback remains;
+transport, protocol, decode, and cycle errors propagate. The cycle error is
+classified as transaction-local.
+
+Generic arrays inspect `Kind::Array(element)` instead of a fixed OID table.
+Compatibility checks and element serialization/deserialization use the complete
+child descriptor. Binary decoding checks the payload element OID against it.
+Custom scalar encoders must emit binary element payloads regardless of their
+standalone format preference. Built-in string and JSON/JSONB handling is
+preserved, including empty arrays and optional elements. There is no automatic
+domain unwrapping, generic composite/range codec, or multidimensional support.
+
 ## Driver And Queues
 
 The driver keeps one reader task on the socket for the entire established
@@ -82,6 +109,35 @@ and the writer stops after its current complete frame. The driver joins that
 writer before forwarding the final `ReadyForQuery` or starting another request.
 It is still one logical operation.
 
+## Error And Notice Fields
+
+`parse_database_error` is shared by startup, query/response collectors, streams,
+transactions, COPY, and async Notice delivery. Pool wrappers propagate the same
+`ClientError::Database` value without reconstructing it. The parser retains all
+currently documented PostgreSQL ErrorResponse/NoticeResponse fields:
+`S/V/C/M/D/H/s/t/c/d/n/P/p/q/W/F/L/R`. Unknown tags are ignored after UTF-8
+validation, preserving the previous behavior.
+
+`severity` stores only `S`; `severity_nonlocalized` stores only `V`, so wire order
+cannot overwrite either. Previously both tags wrote `severity`. All optional
+fields initialize independently to `None`; missing `M` retains the
+`"database error"` fallback. Object fields (`schema`, `table`, `column`,
+`datatype`, `constraint`) do not imply one another. `Debug` and `Eq` cover all
+fields, including object names, context, and source location.
+
+`P/p/L` are parsed as `UInt` using ASCII digits and base 10. Empty input, signs,
+separators, non-digits, overflow, and zero `P/p` raise
+`ProtocolError::InvalidInput`; `L` may be zero. Positions remain one-based
+PostgreSQL character indices into the submitted query (`position`) or `q`
+(`internal_position` into `internal_query`), with no byte or UTF-16 conversion.
+`W` is retained verbatim as `where_`, including multiline context. Text decode
+failures also raise `InvalidInput`.
+
+Business errors still drain to `ReadyForQuery` before normal connection reuse;
+no lifecycle or error-routing behavior changes. See the public README for
+SQLSTATE/constraint matching and the
+[protocol field definitions](https://www.postgresql.org/docs/current/protocol-error-fields.html).
+
 ## Streams And Detach
 
 Row, simple-query, and COPY OUT streams own the operation permit.
@@ -95,6 +151,14 @@ Row, simple-query, and COPY OUT streams own the operation permit.
 Cleanup is idempotent. A consumer cancellation must not leak the permit or
 allow the next operation to start before PostgreSQL reaches a safe boundary.
 
+Both normal reads and detached drains accumulate observed `DataRow` counts as
+`UInt64` and expose them through `QuerySummary.row_count`. Affected row counts
+are parsed separately from counted command tags using decimal `UInt64` parsing;
+invalid or overflowing counts raise `ClientError::Protocol`, while commands
+without a count return zero. COPY IN completion collection returns the raw tag
+after `ReadyForQuery`; `CopyInSink::finish` releases its permit before parsing,
+so a parse error cannot start a second abandoned drain over a completed queue.
+
 The six `Client::with_*` stream/COPY APIs use `with_scoped_resource`. Readiness
 and permit acquisition remain cancellable. Only protocol startup and finalizers
 are protected; the business callback runs outside cancellation protection.
@@ -103,14 +167,23 @@ cancellation is checked before and after the callback and after finalization.
 Output scopes finish their streams; COPY IN aborts unless explicitly finished.
 COPY IN records any abandoned drain's completion so its scope can also wait for
 cleanup triggered by cancellation in `send`, `finish`, or `abort`. Callback
-errors survive cleanup errors. The client Statement scope and transaction Portal
-scope own only execution streams, never the parent handles.
+errors survive cleanup errors. `Client::with_statement_stream` and
+`Transaction::with_statement_stream` own only an execution stream, leaving the
+statement with the caller. `Portal::with_stream` also finishes only its
+current fetch stream; the enclosing portal scope retains the portal.
 
-Temporary inferred/typed queries install statement cleanup immediately after
-`read_prepare_response` succeeds. Close bytes and execution parameters are built
-before submitting Execute; the non-failing RowStream constructor then takes
-ownership. Encoding/submission failures close under the existing permit and
-preserve the original error.
+`read_prepare_response` only reads parameter OIDs and placeholder columns to
+successful `ReadyForQuery`. Named prepares and temporary inferred/typed queries
+then enter `resolve_prepared_metadata`, which registers statement cleanup before
+resolving parameters or columns. Metadata failures close the undelivered
+statement under the existing permit and preserve the original error; any Close
+failure aborts the connection. Portal column resolution retains its existing
+portal cleanup guard.
+
+After metadata succeeds, temporary queries build Close bytes and execution
+parameters before submitting Execute; the non-failing RowStream constructor
+then takes ownership. Encoding/submission failures use the existing temporary
+Close path and preserve the original error.
 
 Named `prepare` methods use a separate handoff path. The owner keeps its client
 or transaction permit and `OpContext` while a protected prepare finishes and
@@ -152,6 +225,54 @@ cancellation gives them `ClientError::Closed` while preserving the driver's
 cancellation. The driver's exit defer wakes even cancellation-protected consumers. The
 executor then publishes its repeatable completion result after all local tasks
 and transport cleanup finish, without overwriting an earlier failure.
+
+## Scoped Statements And Portals
+
+`Shared.connection_id` is allocated by a module-level synchronous `UInt64`
+counter, independent of wire resource naming; exhaustion aborts allocation
+before wraparound. Client copies, statements and transactions on a connection
+share that identity. Public Statement receivers check it before readiness/gate
+waits or resource registration, and `OpContext` rechecks before execution,
+binding or closing. Foreign handles, including closed ones, raise
+`StatementConnectionMismatch` without requests, resource changes or connection
+abort. Transaction child-error classification treats this as a local error.
+Manual Statements remain reusable across transactions on the same connection;
+`ScopedStatement` retains its existing callback-owned API and lifecycle.
+
+`Portal` is the only public portal handle. It directly owns the transaction,
+server name, result columns, closed flag, scope activity flag, and active-call
+count. The mutable flags and counter remain shared references so copies of the
+handle observe the same lifecycle. The activity flag rejects new calls before
+the server resource is closed, while calls already started can finish.
+`Transaction::bind`, `query_portal`, `with_portal_stream`, and `close_portal`
+remain package-internal helpers using the existing protocol and transaction
+gates. `Transaction::bind` builds the handle from the name and resolved columns
+returned by `OpContext::bind`; a type-resolution failure closes the bound name
+before propagating the error.
+
+Create a `Portal` through `Transaction::with_portal` for an ordinary Statement
+or `ScopedStatement::with_portal` for a transaction-owned scoped statement.
+There is no public manual portal lifecycle or compatibility alias.
+
+Each `Portal::with_stream` drains one fetch to `ReadyForQuery`, under
+cancellation protection, before returning. The portal can then fetch another
+window; `QuerySummary.suspended` records `PortalSuspended`. `execute` uses the
+same path with an unlimited row count. Portal cleanup closes only the portal,
+so an ordinary Statement remains reusable across scopes and transactions, and
+the pool's prepared-statement cache is unaffected.
+
+On callback exit, the resource scope first rejects new calls, waits for calls
+already started through its handle, then closes its resource. Escaped handles
+report `Closed` for later database operations. Nested scoped resources clean up
+in stream, portal, statement order. Callbacks stay cancellable; finalizers
+run protected and preserve callback errors or cancellation. A portal Close
+failure aborts the connection and invalidates its transaction. Cancellation
+during Bind closes an undelivered portal before releasing the scope.
+
+`scoped_resources` remains registered through acquisition, the callback, and
+finalization. Explicit commit or rollback rejects active resource scopes,
+including those in child transactions. Callback transaction completion waits
+for these scopes before proceeding with its existing stream/child cleanup.
 
 ## Transactions
 

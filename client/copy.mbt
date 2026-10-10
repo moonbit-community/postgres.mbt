@@ -144,12 +144,13 @@ async fn CopyInSink::raise_early_database_error(
 }
 
 ///|
-/// Finish the COPY IN operation and return the affected row count.
+/// Finish the COPY IN operation and return the affected row count as `UInt64`.
 ///
 /// After calling `finish`, the sink cannot be reused. The method waits for the
 /// backend's command-complete sequence and converts its command tag to an
-/// integer row count.
-pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
+/// `UInt64` row count. Invalid or overflowing counts raise `ClientError::Protocol`
+/// after completion has been drained and the operation permit released.
+pub async fn CopyInSink::finish(self : CopyInSink) -> UInt64 {
   guard !self.finished.val else {
     raise ClientError::Closed("copy sink already finished")
   }
@@ -164,7 +165,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
     )
   })
   self.enqueue_action(Finish)
-  let rows = collect_copy_in_completion(self.responses) catch {
+  let command_tag = collect_copy_in_completion(self.responses) catch {
     ClientError::Database(_) as err => {
       self.permit.release()
       raise err
@@ -172,7 +173,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> Int {
     err => raise err
   }
   self.permit.release()
-  rows
+  rows_affected(command_tag)
 }
 
 ///|
@@ -206,9 +207,9 @@ pub async fn CopyInSink::abort(
       err => raise err
     }
     // Known COPY shutdown errors are best-effort once `CopyFail` is queued;
-    // the cleanup row count is irrelevant.
+    // the cleanup command tag is irrelevant.
     let _ = collect_copy_in_completion(self.responses) catch {
-      ClientError::Database(_) => 0
+      ClientError::Database(_) => ""
       err => raise err
     }
     self.permit.release()

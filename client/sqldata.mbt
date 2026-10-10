@@ -32,9 +32,9 @@ fn decode_wire_format(code : Int) -> WireFormat raise {
 ///
 /// The driver asks three questions before sending a parameter:
 /// 1. `accepts`: does the codec support the PostgreSQL target type?
-/// 2. `format`: should PostgreSQL receive `WireFormat::Text` or
+/// 2. `to_sql`: write the actual payload or mark the value as `NULL`.
+/// 3. `format`: should PostgreSQL receive `WireFormat::Text` or
 ///    `WireFormat::Binary` data?
-/// 3. `to_sql`: write the actual payload or mark the value as `NULL`.
 ///
 /// The compatibility check happens before serialization, which keeps failures
 /// deterministic and improves error messages for callers.
@@ -42,6 +42,12 @@ fn decode_wire_format(code : Int) -> WireFormat raise {
 /// `WireFormat::Text`,
 /// checks the target OID in `accepts`, writes UTF-8 bytes in `to_sql`, and
 /// returns `IsNull::No`.
+/// Built-in strings reject NUL (U+0000) with `ClientError::Encode` before
+/// UTF-8 encoding, including views, optional values, and array elements.
+/// After serialization, the driver rejects zero bytes in non-NULL text-format
+/// payloads, including custom codecs, with `ClientError::Encode`. NULL payloads
+/// are ignored; binary payloads are not scanned for zero bytes.
+/// These errors can occur after preparation but before Bind/Execute is sent.
 pub(open) trait ToSql {
   /// Return the PostgreSQL wire format to use for this value.
   fn format(Self, Type) -> WireFormat = _
@@ -149,8 +155,11 @@ pub impl[T : FromSql] FromSql for T? with fn from_sql_null(_, _) {
 }
 
 ///|
-/// Built-in arrays use PostgreSQL's binary array payload and delegate element
-/// encoding to the existing scalar codecs.
+/// Arrays use PostgreSQL's binary array payload and delegate element
+/// encoding to scalar codecs using the complete element descriptor.
+/// Custom element codecs must write PostgreSQL binary element payloads; the
+/// array has one binary format for all elements, regardless of `T::format`.
+/// Text/String and JSON/JSONB retain their built-in binary-array handling.
 pub impl[T : ToSql] ToSql for Array[T] with fn format(_, _) {
   Binary
 }
@@ -210,6 +219,11 @@ pub impl[T : FromSql] FromSql for Array[T] with fn from_sql(type_, format, raw) 
     Text => raise ClientError::Decode("text array decoding is not supported")
     Binary => {
       let pg_array = @types.array_from_sql(raw)
+      if pg_array.element_type != element_type.oid {
+        raise ClientError::Decode(
+          "array element OID does not match type descriptor",
+        )
+      }
       if pg_array.dimensions > 1 {
         raise ClientError::Decode("multidimensional arrays are not supported")
       }

@@ -42,6 +42,27 @@
 方法并再次获取门控许可。这一点对类型解析发起的系统目录查询，以及临时预处理语句的
 清理尤为重要。
 
+## 递归类型元数据
+
+`Type` 保存目录 schema：内置类型为 `Some("pg_catalog")`，未解析的
+`Type::unknown` 为 `None`，其构造函数签名保持不变。`Kind::Array`、`Domain`、
+`Range` 携带完整子类型，复合字段改为 `Field.type_`。字段和元数据集合保持只读，
+结构化 `Eq` 包括 schema 和完整子类型。旧 OID 载荷改用子描述符的 `.oid`，
+`field.type_oid` 迁移为 `field.type_.oid`。
+
+每次根解析创建独立的活动 OID Map，并传给递归目录解析。再次进入活动 OID 时抛出
+`UnsupportedRecursiveType(oid)`；`defer` 在成功、失败和取消时移除标记。
+只有构造完成的描述符才进入连接缓存，同级重复引用可以复用完整子类型，不会误判为循环。
+`clear_type_cache()` 清除自定义类型元数据。目录查询始终复用父操作的 `OpContext`，
+不重复获取许可。缺失类型和目录数据库错误维持现有回退；传输、协议、解码和循环错误继续
+传播。循环错误归类为事务本地错误。
+
+通用数组从 `Kind::Array(element)` 获取完整子类型，取代固定 OID 列表，元素兼容性
+检查和编解码都使用该描述符。二进制读取校验数组载荷中的元素 OID。
+自定义标量编码器用于数组时必须输出二进制元素载荷，不受其单独使用时的 `format` 偏好
+影响。内置字符串、JSON/JSONB、空数组和 NULL 元素处理保持不变。本次不自动解包域，
+不提供通用复合/range 编解码、公开类型注册表或多维数组支持。
+
 ## 驱动器与队列
 
 驱动器在连接建立后的整个生命周期维持一个套接字读取任务，包括空闲时段。
@@ -67,6 +88,29 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 停止。驱动器会等待该写入任务结束，然后才转发最终的 `ReadyForQuery` 或开始另一个请求。
 整个过程仍然属于同一个逻辑操作。
 
+## 错误与 Notice 字段
+
+启动、查询响应收集器、流、事务、COPY 以及异步 Notice 共用
+`parse_database_error`。连接池直接透传同一 `ClientError::Database`，不重建错误对象。
+解析器保留 PostgreSQL 当前定义的全部错误与 Notice 标签：
+`S/V/C/M/D/H/s/t/c/d/n/P/p/q/W/F/L/R`。未知标签仍在 UTF-8 校验后忽略。
+
+`severity` 仅保存 `S`，`severity_nonlocalized` 仅保存 `V`，不会因字段顺序互相覆盖；
+此前两个标签都会写入 `severity`。所有可选字段独立初始化为 `None`；缺失 `M` 时
+仍使用 `"database error"` 默认消息。`schema`、`table`、`column`、`datatype` 和
+`constraint` 的存在互不蕴含。`Debug` 和 `Eq` 包含所有字段，包括对象名、上下文和
+源代码位置。
+
+`P/p/L` 只接受 ASCII 十进制数字并解析为 `UInt`；空串、符号、分隔符、非数字、
+溢出和为零的 `P/p` 统一抛出 `ProtocolError::InvalidInput`，`L` 可以为零。
+`position` 是原查询中的一基字符索引；`internal_position` 是 `internal_query`
+（`q`）中的一基字符索引。解析器不转换为字节偏移或 UTF-16 索引。
+`where_`（`W`）原样保存上下文及其中的换行。无效 UTF-8 也抛出 `InvalidInput`。
+
+业务错误仍按原路径排空至 `ReadyForQuery` 后恢复连接复用，不改变生命周期或路由。
+按 SQLSTATE 和约束名处理错误的示例见客户端 README；字段语义见
+[PostgreSQL 错误与 Notice 协议](https://www.postgresql.org/docs/current/protocol-error-fields.html)。
+
 ## 流与分离
 
 行流、简单查询流和 COPY OUT 流持有操作许可。
@@ -79,16 +123,29 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 清理是幂等的。消费者取消时，既不能泄漏许可，也不能让下一个操作在 PostgreSQL
 到达安全边界之前开始。
 
+正常读取和分离排空都以 `UInt64` 累加观察到的 DataRow 数量，并通过
+`QuerySummary.row_count` 返回。受影响行数另从带计数的命令标签按十进制解析为
+`UInt64`：无计数命令返回零，非法或超限计数抛出 `ClientError::Protocol`。
+COPY IN 完成收集器消费完 `ReadyForQuery` 后返回原始标签；`CopyInSink::finish`
+先释放操作许可，再解析行数，避免解析失败对已完成的响应队列再次启动遗弃排空。
+
 六个 `Client::with_*` 流/COPY API 共用 `with_scoped_resource`。等待就绪和获取许可仍可
 取消；仅协议启动和 finalizer 受到取消保护，业务回调保持可取消。资源获取后立即安装
 `errdefer`，在回调前、回调后和清理后检查待处理取消。输出流调用 `finish()`；COPY IN
 若未显式完成则调用 `abort()`。COPY IN 记录遗弃排空的完成信号，作用域因此也能等待
 `send`、`finish` 或 `abort` 被取消时启动的后台清理。清理错误不覆盖回调原错误。
-Client 的 Statement 作用域和事务的 Portal 作用域仅拥有本次执行流，不关闭父句柄。
+`Client::with_statement_stream` 和 `Transaction::with_statement_stream` 仅拥有
+本次执行流，Statement 仍由调用方持有。`Portal::with_stream` 也只结束当前
+分页流，portal 仍由外层 portal 作用域持有。
 
-inferred/typed 临时查询在 `read_prepare_response` 成功后立即安装语句清理。Close 字节和
-执行参数均在提交 Execute 前构造；随后由不会抛错的 RowStream 构造器接管清理责任。
-编码或提交失败时，使用已有许可关闭语句，并保留原始错误。
+`read_prepare_response` 仅将参数 OID 和占位列描述读取到成功的 `ReadyForQuery`。
+命名 prepare 和 inferred/typed 临时查询随后进入 `resolve_prepared_metadata`，先注册
+语句清理，再解析参数和列。元数据失败时，在已有许可下关闭未交付的语句，并保留原始
+解析错误；任何 Close 失败都会中止连接。Portal 列解析继续保留现有 portal 清理保护。
+
+元数据解析成功后，临时查询在提交 Execute 前构造 Close 字节和执行参数，随后由不会
+抛错的 RowStream 构造器接管清理责任。编码或提交失败维持原有临时 Close 路径，保留
+原始错误。
 
 命名 `prepare` 使用专门的句柄交付路径：客户端或事务在受保护的准备过程结束后，仍持有
 许可和 `OpContext`，然后检查待处理取消。若已取消，就受保护地发送 Close 并等待
@@ -117,6 +174,43 @@ MoonBit 任务取消有独立的生命周期规则。一旦 `execute_raw` 持有
 标记为已关闭。普通驱动器错误会传递给等待中的请求；取消则向这些请求传递
 `ClientError::Closed`，同时保留驱动器自身的取消。驱动器退出时的 defer 清理会唤醒所有消费者，包括处于取消保护中的消费者。
 执行器在局部任务和传输层清理结束后发布可重复等待的终态，且不会覆盖此前的失败。
+
+## Statement 与 Portal 资源作用域
+
+`Shared.connection_id` 由模块级同步 `UInt64` 计数器分配，与协议资源命名计数器独立；
+耗尽时终止分配，禁止回绕。Client 副本、Statement 和同连接事务共享此身份。
+接收 Statement 的公开入口在等待就绪、许可或注册资源前校验归属，`OpContext` 在执行、
+绑定和关闭请求提交前复核。即使外部连接的 Statement 已关闭，仍返回
+`StatementConnectionMismatch`，不提交请求、不改资源、不终止正常连接。
+该错误属于事务本地错误，不触发协议失步处理。手动 Statement 仍可在同连接上跨事务
+复用；`ScopedStatement` 保留原有回调作用域接口和生命周期。
+
+`Portal` 是唯一公开的 portal 句柄，直接持有事务、服务器名称、结果列、关闭标记、
+作用域活动标记和活动调用计数。可变标记与计数仍使用共享引用，确保句柄副本观察到
+相同的生命周期。作用域活动标记先拒绝新调用，已经开始的调用完成后才关闭服务器资源。
+`Transaction::bind`、`query_portal`、`with_portal_stream` 和 `close_portal` 仍是包内
+助手，沿用现有协议和事务门控调用链。`OpContext::bind` 返回名称和解析后的结果列，
+由 `Transaction::bind` 构造句柄；列类型解析失败时，先按名称关闭已绑定的 portal，
+再传播错误。
+
+通过 `Transaction::with_portal` 绑定普通 Statement，或通过事务内的
+`ScopedStatement::with_portal` 创建 `Portal`。不存在公开的手动 portal 生命周期 API，
+也不提供兼容别名。
+
+每次 `Portal::with_stream` 返回前，都会在取消保护下将当前分页流排空至
+`ReadyForQuery`。随后可通过同一 portal 继续获取下一页；`QuerySummary.suspended`
+记录服务器的 `PortalSuspended`。`execute` 沿用此路径，并设置不限行数。
+portal 清理仅关闭 portal，普通 Statement 仍可跨作用域、跨事务复用，连接池的
+预处理语句缓存也不受影响。
+
+回调退出时，资源作用域先拒绝新调用，等待通过该句柄已经开始的调用结束，再关闭资源。
+逃逸句柄的后续数据库操作报 `Closed`。嵌套资源按 stream → portal → statement 的顺序清理。
+回调保持可取消；finalizer 受取消保护，并保留回调原错误或取消。portal Close 失败
+会中止连接并使事务失效。Bind 期间发生取消时，先关闭尚未交付的 portal，再释放作用域。
+
+`scoped_resources` 在获取资源、执行回调和最终清理期间始终保持注册。显式提交或回滚
+会拒绝仍有活动资源作用域的事务，包括存在于子事务中的作用域。回调式事务结束时，
+会等待这些作用域完成，再执行已有的流和子事务清理。
 
 ## 事务
 

@@ -226,7 +226,41 @@ pub impl FromSql for UInt with fn from_sql(_, format, raw) {
 }
 
 ///|
-// `String` prefers text format because PostgreSQL text types are naturally textual.
+// Strings use text format except for versioned ltree extension binary payloads.
+fn string_format(type_ : Type) -> WireFormat {
+  match type_.name {
+    "ltree" | "lquery" | "ltxtquery" => Binary
+    _ => Text
+  }
+}
+
+///|
+fn validate_string_param(value : StringView) -> Unit raise ClientError {
+  if value.contains("\u0000") {
+    raise ClientError::Encode(
+      "PostgreSQL string parameters must not contain NUL (U+0000)",
+    )
+  }
+}
+
+///|
+// Keep extension framing in the scalar codec so array elements are framed once.
+fn string_to_sql(
+  value : StringView,
+  type_ : Type,
+  buf : @buffer.Buffer,
+) -> Unit raise ClientError {
+  validate_string_param(value)
+  let bytes = @utf8.encode(value)
+  match type_.name {
+    "ltree" => @types.ltree_to_sql(bytes[:], buf)
+    "lquery" => @types.lquery_to_sql(bytes[:], buf)
+    "ltxtquery" => @types.ltxtquery_to_sql(bytes[:], buf)
+    _ => buf.write_bytes(bytes)
+  }
+}
+
+///|
 pub impl ToSql for String with fn accepts(_, type_) {
   is_text_type(type_)
 }
@@ -237,18 +271,18 @@ pub impl ToSql for String with fn moonbit_type_name(_) {
 }
 
 ///|
-pub impl ToSql for String with fn format(_, _) {
-  Text
+pub impl ToSql for String with fn format(_, type_) {
+  string_format(type_)
 }
 
 ///|
-pub impl ToSql for String with fn to_sql(self, _, buf) {
-  buf.write_bytes(@proto.utf8_encode(self))
+pub impl ToSql for String with fn to_sql(self, type_, buf) {
+  string_to_sql(self[:], type_, buf)
   No
 }
 
 ///|
-// `StringView` uses the same text codec as `String` without materializing the view.
+// `StringView` shares the string codec without materializing an owned string.
 pub impl ToSql for StringView with fn accepts(_, type_) {
   is_text_type(type_)
 }
@@ -259,13 +293,13 @@ pub impl ToSql for StringView with fn moonbit_type_name(_) {
 }
 
 ///|
-pub impl ToSql for StringView with fn format(_, _) {
-  Text
+pub impl ToSql for StringView with fn format(_, type_) {
+  string_format(type_)
 }
 
 ///|
-pub impl ToSql for StringView with fn to_sql(self, _, buf) {
-  buf.write_bytes(@utf8.encode(self))
+pub impl ToSql for StringView with fn to_sql(self, type_, buf) {
+  string_to_sql(self, type_, buf)
   No
 }
 
@@ -280,8 +314,18 @@ pub impl FromSql for String with fn moonbit_type_name() {
 }
 
 ///|
-pub impl FromSql for String with fn from_sql(_, _, raw) {
-  decode_utf8(raw)
+// Text payloads are plain UTF-8; extension binary payloads have a version byte.
+pub impl FromSql for String with fn from_sql(type_, format, raw) {
+  match format {
+    Text => decode_utf8(raw)
+    Binary =>
+      match type_.name {
+        "ltree" => decode_utf8(@types.ltree_from_sql(raw)[:])
+        "lquery" => decode_utf8(@types.lquery_from_sql(raw)[:])
+        "ltxtquery" => decode_utf8(@types.ltxtquery_from_sql(raw)[:])
+        _ => decode_utf8(raw)
+      }
+  }
 }
 
 ///|

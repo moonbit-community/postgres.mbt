@@ -335,7 +335,7 @@ async test "integration pooled transaction options and savepoint" {
         .get_name("value")
       },
       options=TransactionOptions(
-        isolation_level=@pgpool.IsolationLevel::serializable(),
+        isolation_level=@pgpool.IsolationLevel::Serializable,
         read_only=false,
       ),
     )

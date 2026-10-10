@@ -57,7 +57,7 @@ async test "integration transaction options savepoints and raw statement helpers
 
     let tx = client.transaction(
       options=TransactionOptions(
-        isolation_level=@client.IsolationLevel::serializable(),
+        isolation_level=@client.IsolationLevel::Serializable,
         read_only=false,
         deferrable=false,
       ),
@@ -107,16 +107,20 @@ async test "integration transaction options savepoints and raw statement helpers
       ),
       1,
     )
-    let portal = nested.bind(select_statement)
+    nested.with_portal(select_statement, portal => {
+      @debug.assert_eq(
+        portal.with_stream(1, stream => transaction_row_values(stream.collect())),
+        [1],
+      )
+      @debug.assert_eq(
+        portal.with_stream(8, stream => transaction_row_values(stream.collect())),
+        [3],
+      )
+    })
     @debug.assert_eq(
-      transaction_row_values(nested.query_portal(portal, 1).collect()),
-      [1],
+      transaction_row_values(nested.query_statement(select_statement).collect()),
+      [1, 3],
     )
-    @debug.assert_eq(
-      transaction_row_values(nested.query_portal(portal, 8).collect()),
-      [3],
-    )
-    nested.close_portal(portal)
     nested.commit()
 
     let isolation : String = tx.query("show transaction_isolation").collect()[0].get_name(

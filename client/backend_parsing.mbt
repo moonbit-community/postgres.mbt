@@ -119,34 +119,90 @@ fn parse_database_error(
   fields : @backend.ErrorFields,
 ) -> DatabaseError raise @proto.ProtocolError {
   let mut severity = None
+  let mut severity_nonlocalized = None
   let mut code = None
   let mut message = None
   let mut detail = None
   let mut hint = None
-  // Preserve the subset of PostgreSQL error fields that the public
-  // `DatabaseError` struct exposes; all other tags are intentionally ignored.
+  let mut schema = None
+  let mut table = None
+  let mut column = None
+  let mut datatype = None
+  let mut constraint = None
+  let mut position = None
+  let mut internal_position = None
+  let mut internal_query = None
+  let mut where_ = None
+  let mut file = None
+  let mut line = None
+  let mut routine = None
+  // Decode every value, including unknown tags, to preserve UTF-8 validation.
   for field = fields.next() {
     if field is Some(field) {
       let value = decode_utf8(field.value_bytes())
       match field.type_ {
-        b'S' | b'V' => severity = Some(value)
+        b'S' => severity = Some(value)
+        b'V' => severity_nonlocalized = Some(value)
         b'C' => code = Some(value)
         b'M' => message = Some(value)
         b'D' => detail = Some(value)
         b'H' => hint = Some(value)
+        b's' => schema = Some(value)
+        b't' => table = Some(value)
+        b'c' => column = Some(value)
+        b'd' => datatype = Some(value)
+        b'n' => constraint = Some(value)
+        b'P' => position = Some(parse_error_uint(value, positive=true))
+        b'p' => internal_position = Some(parse_error_uint(value, positive=true))
+        b'q' => internal_query = Some(value)
+        b'W' => where_ = Some(value)
+        b'F' => file = Some(value)
+        b'L' => line = Some(parse_error_uint(value, positive=false))
+        b'R' => routine = Some(value)
         _ => ()
       }
       continue fields.next()
     } else {
       break {
         severity,
+        severity_nonlocalized,
         code,
         message: message.unwrap_or("database error"),
         detail,
         hint,
+        schema,
+        table,
+        column,
+        datatype,
+        constraint,
+        position,
+        internal_position,
+        internal_query,
+        where_,
+        file,
+        line,
+        routine,
       }
     }
   }
+}
+
+///|
+/// Protocol numeric error fields contain ASCII decimal digits only.
+fn parse_error_uint(
+  value : String,
+  positive~ : Bool,
+) -> UInt raise @proto.ProtocolError {
+  guard !value.is_empty() && value.iter().all(c => c >= '0' && c <= '9') else {
+    raise InvalidInput("invalid numeric error field: \{value}")
+  }
+  let number = @string.parse_uint(value, base=10) catch {
+    _ => raise InvalidInput("invalid numeric error field: \{value}")
+  }
+  guard !positive || number > 0U else {
+    raise InvalidInput("error position must be positive: \{value}")
+  }
+  number
 }
 
 ///|

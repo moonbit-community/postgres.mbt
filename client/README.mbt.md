@@ -103,16 +103,25 @@ Choose the smallest result shape that matches the query:
 | Incremental rows | `Client::with_stream` |
 | Explicit parameter types | `Client::with_typed_stream` |
 | Execute a prepared statement | `Client::with_statement_stream` |
-| Fetch a portal window | `Transaction::with_portal_stream` |
+| Fetch a portal window | `Portal::with_stream` |
 | Affected row count | `Client::execute` |
 | SQL batch without parameters | `Client::batch_execute` |
 | Text/simple protocol frames | `Client::with_simple_query` |
 | Bulk import/export | `Client::with_copy_in`, `Client::with_copy_out` |
 
-`Client::simple_query`, `Client::query_statement`, and
-`Transaction::query_portal` are asynchronous because they must wait for an
-operation permit before returning a stream.
+`Client::simple_query` and `Client::query_statement` are asynchronous because
+they must wait for an operation permit before returning a stream.
 MoonBit async calls do not use an `await` keyword.
+
+`QuerySummary.row_count` is a `UInt64` count of observed `DataRow` messages,
+including rows discarded during cleanup. All `execute` and `execute_raw`
+methods, including transaction, scoped-statement, and portal methods, return
+the affected row count as `UInt64` from the command tag. Commands without a
+count return zero. Counted tags (`INSERT oid rows` and
+`DELETE/UPDATE/MERGE/SELECT/MOVE/FETCH/COPY rows`) require decimal digits within
+the `UInt64` range; missing, invalid, or overflowing counts raise
+`ClientError::Protocol` after the execution stream has been drained. Portal
+`max_rows` remains an `Int` protocol limit.
 
 Rows decode by index or PostgreSQL column name:
 
@@ -127,8 +136,48 @@ async fn _query_example(client : @client.Client) -> Int {
 }
 ```
 
-`StringView` query parameters use the same text codec as `String`, so a string
+`StringView` query parameters use the same codec as `String`, so a string
 slice can be passed without first materializing an owned string.
+Ordinary string parameters use text format. The `ltree` extension types
+`ltree`, `lquery`, and `ltxtquery` use binary format with a version byte followed
+by UTF-8. String decoding supports both text and binary results for these
+types; binary decoding validates and removes the version byte.
+
+String parameters must not contain NUL (`U+0000`). Built-in string codecs
+raise `ClientError::Encode` before UTF-8 encoding or writing the value,
+including `StringView`, `Some` values, string array elements, and the string
+extension types above. Only the viewed slice is checked for `StringView`.
+The driver also rejects zero bytes (`0x00`) in non-NULL text-format parameter
+payloads produced by custom `ToSql` codecs. NULL payloads are ignored, and
+binary payloads such as `bytea` may contain zero bytes. Literal `\u0000` text
+and JSON escapes are allowed; this check does not validate JSON/JSONB logical
+values. Encoding errors may occur after Parse/Describe prepares the statement,
+but before any Bind/Execute is submitted. Temporary statements are closed
+before the error is returned, so a transaction callback that catches the error
+can continue with a valid query.
+
+### Client Encoding
+
+**Dangerous operation: changing `client_encoding` away from UTF-8.** The
+client requests `client_encoding=UTF8` at startup and always encodes and
+decodes strings as UTF-8. Keep this setting at UTF-8 for the entire connection
+lifetime, including when using transactions or pooled sessions. Do not change
+it through `SET client_encoding`, `SET NAMES`, `set_config`, or startup options.
+
+The current implementation records server `ParameterStatus` updates but does
+not reject an unsupported encoding or adapt its codecs. An encoding mismatch
+can cause invalid UTF-8 errors or silently write incorrect text. For example,
+with a UTF-8 database and `client_encoding=LATIN1`, a parameter containing `é`
+is sent as UTF-8 bytes but interpreted as the two characters `Ã` and `©`.
+Reading it back on the same connection can produce `é` again, hiding the
+incorrect stored value. Switching parameters or results to binary `text`
+format does not bypass PostgreSQL's client encoding conversion.
+
+If the encoding has been changed, discard the affected connection and verify
+any affected writes through a separate UTF-8 connection. Restoring UTF-8 does
+not repair text already stored incorrectly. Enforcement is tracked in
+[TODO.md](../TODO.md). See PostgreSQL's
+[client encoding documentation](https://www.postgresql.org/docs/current/multibyte.html#MULTIBYTE-CHARSET).
 
 Inspect result data and metadata through `Row::columns()`, `Row::values()`,
 `RowStream::columns()`, `SimpleQueryRow::columns()`, and
@@ -139,10 +188,10 @@ the stream. `SimpleQueryMessage::RowDescription` also carries a read-only
 column-label view. `CopyOutStream::formats()` exposes the COPY wire formats in
 the same way.
 
-Prepared statements, portals, and their scoped handles expose `params()` and
-`columns()` metadata views where applicable. Type descriptors expose their
-`Kind` through `Type::kind()`; enum labels and composite fields are read-only
-views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
+`Statement` and `ScopedStatement` expose `params()` and `columns()` metadata
+views; `Portal` exposes `columns()`. Type descriptors expose their
+classification through `type_.kind`; enum labels and composite fields are
+read-only views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
 
 `query_typed` supplies PostgreSQL parameter types explicitly. The former
 `query_typed_raw` compatibility alias has been removed.
@@ -169,6 +218,54 @@ temporary statement before the scope returns. If parameter count, type, or
 encoding validation fails after preparation, the temporary statement is closed
 under the same operation permit before the original error is returned; no
 Execute request is submitted.
+
+## Type Descriptors And Custom Arrays
+
+`Type` carries `oid`, `name`, `schema : String?`, and `kind`. Built-ins have
+`Some("pg_catalog")`; catalog-resolved types retain their actual schema.
+`Type::unknown(oid, name=...)` keeps its existing constructor and has `None`
+for its unresolved schema. Codecs can distinguish identically named types
+in different schemas:
+
+```mbt check
+///|
+fn _accept_status(type_ : @client.Type) -> Bool {
+  type_.schema == Some("app") && type_.name == "status" && type_.kind is Enum(_)
+}
+```
+
+`Kind::Array(element)`, `Domain(base)`, and `Range(subtype)` now carry complete
+`Type` descriptors. Composite fields expose `field.type_`, including nested
+metadata. To migrate code that used their OID payloads, read `element.oid`,
+`base.oid`, or `subtype.oid`; replace `field.type_oid` with `field.type_.oid`.
+Descriptor fields remain read-only. `Eq` compares the entire structure,
+including schema and child descriptors.
+
+The generic `Array[T]` codec uses `Kind::Array` metadata, so implementing only
+`ToSql` and `FromSql` for a custom enum also enables `Array[Enum]` and
+`Array[Enum?]`. Empty arrays and NULL elements are supported. Obtain the
+resolved array descriptor from statement or row metadata when using
+`query_typed`. Custom element encoders must write PostgreSQL **binary** element
+payloads: an array uses binary format for every element, regardless of the
+scalar codec's `format` method. Decoders receive the full element descriptor
+and `Binary`; the payload's element OID must match that descriptor. Built-in
+string arrays include `ltree[]`, `lquery[]`, and `ltxtquery[]`: their scalar
+codecs add and remove the version byte for each non-NULL element. Ordinary
+strings and JSON/JSONB retain their existing array handling.
+
+Catalog metadata is resolved recursively and cached per connection.
+`clear_type_cache()` forces custom types to be resolved again. A cycle raises
+`ClientError::UnsupportedRecursiveType(oid)` for the repeated OID; completed
+shared subtypes are reusable, and descriptors under construction are never
+cached. This is a local transaction error, so a successfully cleaned-up
+operation leaves the connection and transaction usable. If metadata resolution
+fails after preparation, the driver closes the undelivered statement before
+returning the error; a failed Close aborts the connection and preserves the
+original metadata error. Missing types and recoverable catalog database errors
+retain the existing `Unknown` fallback.
+
+Domains are not automatically unwrapped by codecs. Generic composite/range
+codecs, a public type registry, and multidimensional arrays are not provided.
 
 ## Prepared Statements And Portals
 
@@ -198,21 +295,27 @@ use `Transaction::close_statement`: direct `Statement::close` immediately raises
 permit. A named Statement may outlive the transaction, so rollback does not
 close it.
 
-Create and use portals inside an explicit transaction. The former
-`Client::bind`, `Client::query_portal`, `Client::with_portal_stream`, and
-`Portal::close` methods have been removed. Replace them with `Transaction::bind`,
-`Transaction::query_portal` or `Transaction::with_portal_stream`, and
-`Transaction::close_portal`. A portal becomes invalid when its enclosing
-PostgreSQL transaction ends.
-`with_prepared` and its transaction-only `with_portal` method close each
-resource in stream, Portal, Statement order:
+Every Statement belongs to its creating connection. Passing it to another
+Client or Transaction raises `ClientError::StatementConnectionMismatch` before
+waiting or submitting requests, even if the Statement is already closed.
+Client copies share this identity; Statements remain reusable across
+transactions on that same connection.
+
+`Portal` is the only public portal handle. Create one inside a transaction
+with `Transaction::with_portal(statement, params?, callback)` or a
+transaction-owned `ScopedStatement::with_portal(params?, callback)`. Both entry
+points close the portal on return, error, or cancellation. A client-owned
+`ScopedStatement` cannot create portals.
+
+With `with_prepared`, nested callbacks clean up in stream, portal, statement
+order:
 
 ```mbt check
 ///|
 async fn _portal_example(client : @client.Client) -> Int {
   client.with_transaction(tx => {
     tx.with_prepared("select 7::int4 as value", statement => {
-      statement.with_portal(portal => {
+      statement.with_portal((portal : @client.Portal) => {
         portal.with_stream(1, stream => {
           let result : Int = stream.next().unwrap().get_name("value")
           result
@@ -223,11 +326,50 @@ async fn _portal_example(client : @client.Client) -> Int {
 }
 ```
 
-`Transaction::with_portal(statement, f)` also scopes a manually prepared
-Statement's Portal. Both scoped handles expire at callback end. Explicit
-`commit()` or `rollback()` raises `ClientError::Closed` while either resource
-scope is active. The lower-level `with_portal_stream` finishes only one fetch
-window, leaving the Portal and Statement with their caller.
+`Portal` owns both its server resource and callback scope. The former scoped
+handle has been renamed to `Portal` without a compatibility alias. Portal
+creation and cleanup use `with_portal`; `Transaction::bind`, `query_portal`,
+`with_portal_stream`, and `close_portal` remain package-internal helpers.
+Replace a manual bind/query/close sequence with one `with_portal`
+callback and successive `portal.with_stream` calls. Each fetch finishes only
+its current stream, so the same portal can resume at the next window. Unread
+rows in that window are discarded before the next call. Use `max_rows=0` to
+fetch all remaining rows, or inspect `QuerySummary.suspended` to decide whether
+to fetch another window:
+
+```mbt check
+///|
+async fn _portal_pagination(client : @client.Client) -> Array[Int] {
+  let statement = client.prepare("select generate_series(1, $1::int4) as value")
+  defer @async.protect_from_cancel(() => statement.close())
+  client.with_transaction(tx => {
+    tx.with_portal(statement, params=[3 as &ToSql], portal => {
+      let values : Array[Int] = []
+      for ;; {
+        let summary = portal.with_stream(2, stream => {
+          for row in stream.collect() {
+            values.push(row.get_name("value"))
+          }
+          stream.finish()
+        })
+        if !summary.suspended {
+          break values
+        }
+      }
+    })
+  })
+}
+```
+
+`Portal::execute()` consumes the portal to completion and returns the
+affected row count. `Transaction::with_portal` leaves its ordinary `Statement`
+open; the caller can reuse it after the portal scope or transaction ends and
+closes it separately. The pool's prepared-statement cache is unchanged.
+
+Both scoped handles reject new database operations with `ClientError::Closed`
+after their callback ends, wait for calls already started, then close their resource.
+Explicit `commit()` or `rollback()` raises `ClientError::Closed` while either
+resource scope is active, including while cleanup is waiting for a fetch.
 
 If cancellation arrives while `prepare` is waiting for PostgreSQL, the driver
 closes an already created statement before propagating cancellation. A failed
@@ -256,8 +398,11 @@ async fn _transaction_example(client : @client.Client) -> Unit {
 }
 ```
 
-Set an isolation level with `@client.IsolationLevel`; `TransactionOptions`
-accepts an enum value instead of an SQL string:
+Set an isolation level directly with `@client.IsolationLevel::ReadUncommitted`,
+`ReadCommitted`, `RepeatableRead`, or `Serializable`. `TransactionOptions`
+accepts an enum value instead of an SQL string. The former `read_uncommitted()`,
+`read_committed()`, `repeatable_read()`, and `serializable()` factory methods have
+been removed; use the corresponding enum constructors:
 
 ```mbt check
 ///|
@@ -265,7 +410,7 @@ async fn _serializable_transaction(client : @client.Client) -> Unit {
   client.with_transaction(
     _tx => (),
     options=@client.TransactionOptions(
-      isolation_level=@client.IsolationLevel::serializable(),
+      isolation_level=@client.IsolationLevel::Serializable,
     ),
   )
 }
@@ -280,10 +425,11 @@ recursively rolls back open nested transactions. A manual commit with an open
 nested transaction instead rolls it back and raises
 `UnfinishedChildTransaction` after rolling back the parent.
 
-Inside a transaction, `with_stream`, `with_statement_stream`, and
-`with_portal_stream` scope one execution stream. They discard unread rows and
-wait for cleanup when the callback returns, raises, or is cancelled. The latter
-two leave the Statement and Portal owned by the caller. Use
+Inside a transaction, `with_stream` and `with_statement_stream` scope one
+execution stream. They discard unread rows and wait for cleanup when the
+callback returns, raises, or is cancelled. `with_statement_stream` leaves the
+Statement open. `Portal::with_stream` likewise finishes one fetch, with
+the portal retained until its enclosing `with_portal` callback ends. Use
 `with_transaction` or `with_savepoint` on a transaction to scope nested work:
 
 ```mbt check
@@ -312,10 +458,13 @@ Prefer `with_copy_in` and `with_copy_out` for bulk transfer. COPY IN requires an
 explicit `sink.finish()` inside the callback to commit the COPY. Returning
 without finishing, throwing, or being cancelled aborts unfinished COPY input
 and waits for cleanup. A completed COPY is not undone by a later callback error.
+`finish()` returns the affected row count as `UInt64`. If its command tag has an
+invalid or overflowing count, it raises `ClientError::Protocol` after consuming
+`ReadyForQuery` and releasing the operation permit; the connection is reusable.
 
 ```mbt check
 ///|
-async fn _copy_rows(client : @client.Client) -> Int {
+async fn _copy_rows(client : @client.Client) -> UInt64 {
   client.with_copy_in("copy events(value) from stdin", sink => {
     sink.send(b"first\nsecond\n")
     sink.finish()
@@ -325,8 +474,8 @@ async fn _copy_rows(client : @client.Client) -> Int {
 
 The raw client APIs (`query`, `query_typed`, `query_statement`, `simple_query`,
 `copy_in`, and `copy_out`) remain available when the caller needs to transfer
-ownership or control draining explicitly. `Transaction::query_portal` provides
-the raw portal stream inside a transaction:
+ownership or control draining explicitly. Portal streams are available only
+inside `Portal::with_stream`:
 
 - `RowStream`, `SimpleQueryStream`, and `CopyOutStream` expose `next`,
   `collect`, `finish`, and `detach` as appropriate.
@@ -447,3 +596,44 @@ A fatal driver error becomes the terminal result for the active request and
 requests already accepted by the submission queue. Calls still waiting at the
 operation gate have not submitted a request; after the driver stops, they
 observe `ClientError::Closed` instead.
+
+`ClientError::Database(err)` and `AsyncMessage::Notice(err)` expose the same
+`DatabaseError` fields. All fields except `message` are independently optional;
+absent values are `None`, and an absent message defaults to `"database error"`.
+Object fields need not appear together or refer to objects that currently exist.
+
+| Fields | Meaning |
+| --- | --- |
+| `severity`, `severity_nonlocalized` | Localizable severity from `S`, nonlocalized severity from `V` |
+| `code`, `message`, `detail`, `hint` | SQLSTATE, primary message, extra detail, suggested action |
+| `schema`, `table`, `column`, `datatype`, `constraint` | Associated object names; `constraint` can also name an index |
+| `position`, `internal_position` | One-based character indices into the submitted query and `internal_query` |
+| `internal_query`, `where_` | Internally generated SQL and error context (possibly multiline) |
+| `file`, `line`, `routine` | Server source location |
+
+`position` and `internal_position` are positive `UInt` values, preserved as
+supplied by the server. They count characters, including in Unicode queries;
+they are not byte offsets or MoonBit UTF-16 indices. `line` is an optional
+`UInt`. Malformed decimal values, overflow, zero positions, and invalid UTF-8
+raise `ProtocolError::InvalidInput` in the shared parser.
+
+Previously `severity` could be overwritten by `V` depending on field order.
+It now preserves only `S`; use `severity_nonlocalized` for stable severity
+matching. `Debug` and `Eq` include every field. Query, transaction, COPY, and
+pool operations preserve the same structured fields.
+
+Branch on SQLSTATE and constraint name instead of parsing the message:
+
+```mbt check
+///|
+fn _is_email_conflict(error : Error) -> Bool {
+  match error {
+    @client.ClientError::Database(err) =>
+      err.code == Some("23505") && err.constraint == Some("accounts_email_key")
+    _ => false
+  }
+}
+```
+
+The field meanings follow the
+[PostgreSQL error and notice protocol](https://www.postgresql.org/docs/current/protocol-error-fields.html).

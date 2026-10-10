@@ -93,7 +93,10 @@ async fn OpContext::prepare_typed(
   let name = next_name(self.client.shared, "s")
   let bytes = prepare_bytes(name[:], sql, types)
   let responses = self.client.send_request(Messages, bytes)
-  let (params, columns) = read_prepare_response(self, responses)
+  let (param_oids, raw_columns) = read_prepare_response(responses)
+  let (params, columns) = resolve_prepared_metadata(
+    self, name, param_oids, raw_columns,
+  )
   { client: self.client, name, params, columns, closed: @ref.new(false), }
 }
 
@@ -119,6 +122,7 @@ async fn OpContext::close_statement(
   self : OpContext,
   statement : Statement,
 ) -> Unit {
+  self.client.assert_statement_connection(statement)
   if statement.closed.val {
     return
   }
@@ -178,10 +182,13 @@ async fn OpContext::query(
     Messages,
     prepare_bytes(name[:], sql, []),
   )
-  let (param_types, columns) = read_prepare_response(self, prepare_responses)
+  let (param_oids, raw_columns) = read_prepare_response(prepare_responses)
   // Own the server-side statement immediately after preparation succeeds.
   // All fallible encoding happens before submission; RowStream::new cannot
   // fail, so successful submission transfers cleanup without another gap.
+  let (param_types, columns) = resolve_prepared_metadata(
+    self, name, param_oids, raw_columns,
+  )
   errdefer @async.protect_from_cancel(() => {
     close_temporary_statement_after_error(self, name)
   })
@@ -272,7 +279,8 @@ async fn OpContext::query_typed(
     Messages,
     prepare_bytes(name[:], sql, param_types),
   )
-  let (_, columns) = read_prepare_response(self, prepare_responses)
+  let (_, raw_columns) = read_prepare_response(prepare_responses)
+  let (_, columns) = resolve_prepared_metadata(self, name, [], raw_columns)
   errdefer @async.protect_from_cancel(() => {
     close_temporary_statement_after_error(self, name)
   })
@@ -298,6 +306,7 @@ pub async fn Client::query_statement(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> RowStream {
+  self.assert_statement_connection(statement)
   let (context, permit) = self.begin_stream_operation()
   errdefer permit.release()
   context.query_statement(statement, params, permit~)
@@ -310,6 +319,7 @@ fn OpContext::query_statement(
   params : Array[&ToSql],
   permit? : OperationPermit,
 ) -> RowStream raise {
+  self.client.assert_statement_connection(statement)
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -331,10 +341,12 @@ fn OpContext::query_statement(
 }
 
 ///|
-/// Execute SQL and return the affected row count.
+/// Execute SQL and return the affected row count as `UInt64`.
 ///
 /// This convenience helper prepares a temporary statement, executes it once,
 /// waits for completion, and then closes the prepared statement.
+/// Missing, invalid, or overflowing counts in counted command tags raise
+/// `ClientError::Protocol` after the execution stream has been drained.
 /// If execution is cancelled, cleanup drains the results before closing the
 /// temporary statement, then propagates cancellation. This can wait for the
 /// current SQL command to finish so the connection remains reusable.
@@ -342,7 +354,7 @@ pub async fn Client::execute(
   self : Client,
   sql : String,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.run_operation(context => context.execute(sql, params))
 }
 
@@ -351,7 +363,7 @@ async fn OpContext::execute(
   self : OpContext,
   sql : String,
   params : Array[&ToSql],
-) -> Int {
+) -> UInt64 {
   let statement = self.prepare_typed(sql, [])
   let rows = {
     errdefer @async.protect_from_cancel(() => {
@@ -367,17 +379,20 @@ async fn OpContext::execute(
 }
 
 ///|
-/// Execute a prepared statement and return the affected row count.
+/// Execute a prepared statement and return the affected row count as `UInt64`.
 ///
 /// The result stream is drained internally so the command tag can be parsed and
 /// converted into a numeric row count. On cancellation, remaining results are
 /// drained before cancellation propagates, which may wait for the SQL command
 /// to finish. The caller retains ownership of the prepared statement.
+/// Missing, invalid, or overflowing counts in counted command tags raise
+/// `ClientError::Protocol` after the execution stream has been drained.
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
+  self.assert_statement_connection(statement)
   self.run_operation(context => context.execute_raw(statement, params))
 }
 
@@ -386,7 +401,7 @@ async fn OpContext::execute_raw(
   self : OpContext,
   statement : Statement,
   params : Array[&ToSql],
-) -> Int {
+) -> UInt64 {
   let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
     // A decoding failure may already have started a detached drain.
@@ -412,7 +427,8 @@ async fn OpContext::bind(
   self : OpContext,
   statement : Statement,
   params : Array[&ToSql],
-) -> Portal {
+) -> (Bytes, Array[Column]) {
+  self.client.assert_statement_connection(statement)
   guard !statement.closed.val else {
     raise ClientError::Closed("statement already closed")
   }
@@ -446,21 +462,15 @@ async fn OpContext::bind(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
           errdefer @async.protect_from_cancel(() => {
-            self.close_portal(raw_portal) catch {
+            self.close_portal_by_name(name) catch {
               ClientError::Database(_) => ()
               _ => self.client.abort()
             }
           })
-          let portal = Portal::{
-            name,
-            // Resolve column OIDs lazily here so callers still get enriched
-            // type descriptors even when portals are bound later.
-            columns: resolve_columns(self, columns),
-            closed: @ref.new(false),
-          }
-          break portal
+          // Resolve column OIDs lazily here so callers still get enriched
+          // type descriptors even when portals are bound later.
+          break (name, resolve_columns(self, columns))
         }
       _ =>
         fail_response_stream(
@@ -472,15 +482,20 @@ async fn OpContext::bind(
 }
 
 ///|
+async fn OpContext::close_portal_by_name(
+  self : OpContext,
+  name : Bytes,
+) -> Unit {
+  let responses = self.client.send_request(Messages, close_bytes(b'P', name[:]))
+  drain_close_response(responses)
+}
+
+///|
 async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
   if portal.closed.val {
     return
   }
-  let responses = self.client.send_request(
-    Messages,
-    close_bytes(b'P', portal.name[:]),
-  )
-  drain_close_response(responses)
+  self.close_portal_by_name(portal.name)
   portal.closed.val = true
 }
 

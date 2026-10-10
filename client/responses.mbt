@@ -125,9 +125,8 @@ async fn start_copy_out(
 /// neither depending on the statement. Database errors are deferred until the
 /// terminal `ReadyForQuery` just like the public stream helpers do.
 async fn read_prepare_response(
-  context : OpContext,
   responses : @async.Queue[@backend.Message],
-) -> (Array[Type], Array[Column]) {
+) -> (Array[@proto.Oid], Array[Column]) {
   let mut param_oids : Array[@proto.Oid] = []
   let mut columns : Array[Column] = []
   let mut database_error : DatabaseError? = None
@@ -153,13 +152,7 @@ async fn read_prepare_response(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          // Resolve cached type metadata once, at the end, so callers see a
-          // fully enriched result without partial-success bookkeeping.
-          let result = (
-            resolve_parameter_types(context, param_oids),
-            resolve_columns(context, columns),
-          )
-          break result
+          break (param_oids, columns)
         }
       _ =>
         fail_response_stream(
@@ -171,10 +164,11 @@ async fn read_prepare_response(
 }
 
 ///|
-/// Drain the backend completion sequence for COPY IN and return affected rows.
+/// Drain the backend completion sequence for COPY IN and return its raw tag.
+/// Parse affected rows only after the caller releases the operation permit.
 async fn collect_copy_in_completion(
   responses : @async.Queue[@backend.Message],
-) -> Int {
+) -> String {
   let mut command_tag = ""
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -194,7 +188,7 @@ async fn collect_copy_in_completion(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          break rows_affected(command_tag)
+          break command_tag
         }
       _ =>
         fail_response_stream(
@@ -280,14 +274,56 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 }
 
 ///|
-/// Extract the trailing numeric row count from a PostgreSQL command tag.
-fn rows_affected(command_tag : String) -> Int {
-  if command_tag.split(" ").last() is Some(last) {
-    @string.parse_int(last) catch {
-      _ => 0
+/// Parse the decimal row count of a PostgreSQL command tag.
+/// Commands without a count return zero; malformed counted tags are errors.
+fn rows_affected(command_tag : String) -> UInt64 raise {
+  let fields = command_tag.split(" ").to_array()
+  let count = match fields[:] {
+    ["INSERT", oid, count] => {
+      guard !oid.is_empty() && oid.iter().all(c => c >= '0' && c <= '9') else {
+        raise ClientError::Protocol(
+          "invalid INSERT command tag: \{command_tag}",
+        )
+      }
+      count
     }
-  } else {
-    0
+    [
+      "DELETE"
+      | "UPDATE"
+      | "MERGE"
+      | "SELECT"
+      | "MOVE"
+      | "FETCH"
+      | "COPY",
+      count,
+    ] => count
+    [
+      "INSERT"
+      | "DELETE"
+      | "UPDATE"
+      | "MERGE"
+      | "SELECT"
+      | "MOVE"
+      | "FETCH"
+      | "COPY",
+      ..,
+    ] =>
+      raise ClientError::Protocol(
+        "invalid row count in command tag: \{command_tag}",
+      )
+    _ => return 0
+  }
+  // The core parser also accepts separators, but protocol counts are digits only.
+  guard !count.is_empty() && count.iter().all(c => c >= '0' && c <= '9') else {
+    raise ClientError::Protocol(
+      "invalid row count in command tag: \{command_tag}",
+    )
+  }
+  @string.parse_uint64(count, base=10) catch {
+    _ =>
+      raise ClientError::Protocol(
+        "invalid row count in command tag: \{command_tag}",
+      )
   }
 }
 
@@ -302,4 +338,32 @@ fn join_clauses(clauses : Array[String]) -> String {
     out += clause
   }
   out
+}
+
+///|
+/// Once preparation has reached ReadyForQuery, own the statement before any
+/// catalog lookup can fail. Close failures here abort even after ReadyForQuery.
+async fn resolve_prepared_metadata(
+  context : OpContext,
+  name : Bytes,
+  param_oids : Array[@proto.Oid],
+  columns : Array[Column],
+) -> (Array[Type], Array[Column]) {
+  errdefer @async.protect_from_cancel(() => {
+    close_unresolved_statement_after_error(context, name)
+  })
+  (
+    resolve_parameter_types(context, param_oids),
+    resolve_columns(context, columns),
+  )
+}
+
+///|
+async fn close_unresolved_statement_after_error(
+  context : OpContext,
+  name : Bytes,
+) -> Unit {
+  close_temporary_statement(context, name) catch {
+    _ => context.client.abort()
+  }
 }

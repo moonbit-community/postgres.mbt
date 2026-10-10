@@ -51,12 +51,12 @@ pub async fn Session::query_typed_all(
 }
 
 ///|
-/// Execute one command on this lease and return its affected row count.
+/// Execute one command on this lease and return its affected row count as `UInt64`.
 pub async fn Session::execute(
   self : Session,
   sql : String,
   params? : Array[&@client.ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.with_prepared(sql, prepared => prepared.execute(params~))
 }
 

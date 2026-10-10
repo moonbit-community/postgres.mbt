@@ -6,20 +6,20 @@
 /// Most user-facing codecs only care whether a type is a simple scalar or an
 /// array, but the richer variants let the client cache enough metadata for
 /// advanced introspection and future extension points. Inspect this read-only
-/// classification through `Type::kind`.
+/// classification through `type_.kind`.
 pub enum Kind {
   /// A plain scalar type such as `int4` or `timestamp`.
   Simple
-  /// An array type whose element type is identified by OID.
-  Array(@proto.Oid)
+  /// An array type carrying its complete element descriptor.
+  Array(Type)
   /// An enum type with its ordered labels.
   Enum(ArrayView[String])
   /// A composite/record-like type with named fields.
   Composite(ArrayView[Field])
-  /// A domain that wraps another base type.
-  Domain(@proto.Oid)
-  /// A range type whose subtype is identified by OID.
-  Range(@proto.Oid)
+  /// A domain carrying its complete base type descriptor.
+  Domain(Type)
+  /// A range type carrying its complete subtype descriptor.
+  Range(Type)
   /// A pseudo type such as `void`.
   Pseudo
   /// A placeholder used when only the OID is known.
@@ -31,8 +31,8 @@ pub enum Kind {
 pub struct Field {
   /// Field name as reported by PostgreSQL system catalogs.
   name : String
-  /// OID of the field type.
-  type_oid : @proto.Oid
+  /// Complete descriptor of the field type.
+  type_ : Type
 } derive(Debug, Eq)
 
 ///|
@@ -40,12 +40,16 @@ pub struct Field {
 ///
 /// Built-in descriptors are created eagerly for common scalar and array types.
 /// Less common server-defined types are resolved lazily through catalog queries
-/// and then cached in the shared client state.
+/// and then cached in the shared client state. Equality compares schema and
+/// complete child descriptors as well as OID and name. Cyclic catalog metadata
+/// raises `ClientError::UnsupportedRecursiveType` rather than forming a cycle.
 pub struct Type {
   /// Numeric PostgreSQL object identifier.
   oid : @proto.Oid
   /// Server-visible type name, such as `"int4"` or `"_uuid"`.
   name : String
+  /// Catalog schema; absent only for unresolved descriptors.
+  schema : String?
   /// Structural classification used by higher-level logic.
   kind : Kind
 } derive(Debug, Eq)
@@ -53,209 +57,294 @@ pub struct Type {
 ///|
 /// Return the built-in PostgreSQL `bool` type descriptor.
 pub fn Type::bool() -> Type {
-  { oid: BOOL_OID, name: "bool", kind: Simple, }
+  { oid: BOOL_OID, name: "bool", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bytea` type descriptor.
 pub fn Type::bytea() -> Type {
-  { oid: BYTEA_OID, name: "bytea", kind: Simple, }
+  { oid: BYTEA_OID, name: "bytea", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `char` type descriptor.
 pub fn Type::char() -> Type {
-  { oid: CHAR_OID, name: "char", kind: Simple, }
+  { oid: CHAR_OID, name: "char", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `name` type descriptor.
 pub fn Type::name_type() -> Type {
-  { oid: NAME_OID, name: "name", kind: Simple, }
+  { oid: NAME_OID, name: "name", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int8` type descriptor.
 pub fn Type::int8() -> Type {
-  { oid: INT8_OID, name: "int8", kind: Simple, }
+  { oid: INT8_OID, name: "int8", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int2` type descriptor.
 pub fn Type::int2() -> Type {
-  { oid: INT2_OID, name: "int2", kind: Simple, }
+  { oid: INT2_OID, name: "int2", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int4` type descriptor.
 pub fn Type::int4() -> Type {
-  { oid: INT4_OID, name: "int4", kind: Simple, }
+  { oid: INT4_OID, name: "int4", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `text` type descriptor.
 pub fn Type::text() -> Type {
-  { oid: TEXT_OID, name: "text", kind: Simple, }
+  { oid: TEXT_OID, name: "text", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `oid` type descriptor.
 pub fn Type::oid_type() -> Type {
-  { oid: OID_TYPE_OID, name: "oid", kind: Simple, }
+  { oid: OID_TYPE_OID, name: "oid", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float4` type descriptor.
 pub fn Type::float4() -> Type {
-  { oid: FLOAT4_OID, name: "float4", kind: Simple, }
+  { oid: FLOAT4_OID, name: "float4", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float8` type descriptor.
 pub fn Type::float8() -> Type {
-  { oid: FLOAT8_OID, name: "float8", kind: Simple, }
+  { oid: FLOAT8_OID, name: "float8", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `varchar` type descriptor.
 pub fn Type::varchar() -> Type {
-  { oid: VARCHAR_OID, name: "varchar", kind: Simple, }
+  {
+    oid: VARCHAR_OID,
+    name: "varchar",
+    schema: Some("pg_catalog"),
+    kind: Simple,
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `date` type descriptor.
 pub fn Type::date() -> Type {
-  { oid: DATE_OID, name: "date", kind: Simple, }
+  { oid: DATE_OID, name: "date", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `time` type descriptor.
 pub fn Type::time() -> Type {
-  { oid: TIME_OID, name: "time", kind: Simple, }
+  { oid: TIME_OID, name: "time", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamp` type descriptor.
 pub fn Type::timestamp() -> Type {
-  { oid: TIMESTAMP_OID, name: "timestamp", kind: Simple, }
+  {
+    oid: TIMESTAMP_OID,
+    name: "timestamp",
+    schema: Some("pg_catalog"),
+    kind: Simple,
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamptz` type descriptor.
 pub fn Type::timestamptz() -> Type {
-  { oid: TIMESTAMPTZ_OID, name: "timestamptz", kind: Simple, }
+  {
+    oid: TIMESTAMPTZ_OID,
+    name: "timestamptz",
+    schema: Some("pg_catalog"),
+    kind: Simple,
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `uuid` type descriptor.
 pub fn Type::uuid() -> Type {
-  { oid: UUID_OID, name: "uuid", kind: Simple, }
+  { oid: UUID_OID, name: "uuid", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `json` type descriptor.
 pub fn Type::json() -> Type {
-  { oid: JSON_OID, name: "json", kind: Simple, }
+  { oid: JSON_OID, name: "json", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `json[]` type descriptor.
 pub fn Type::json_array() -> Type {
-  { oid: JSON_ARRAY_OID, name: "_json", kind: Array(JSON_OID), }
+  {
+    oid: JSON_ARRAY_OID,
+    name: "_json",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::json()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `jsonb` type descriptor.
 pub fn Type::jsonb() -> Type {
-  { oid: JSONB_OID, name: "jsonb", kind: Simple, }
+  { oid: JSONB_OID, name: "jsonb", schema: Some("pg_catalog"), kind: Simple, }
 }
 
 ///|
 /// Return the built-in PostgreSQL `jsonb[]` type descriptor.
 pub fn Type::jsonb_array() -> Type {
-  { oid: JSONB_ARRAY_OID, name: "_jsonb", kind: Array(JSONB_OID), }
+  {
+    oid: JSONB_ARRAY_OID,
+    name: "_jsonb",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::jsonb()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bool[]` type descriptor.
 pub fn Type::bool_array() -> Type {
-  { oid: BOOL_ARRAY_OID, name: "_bool", kind: Array(BOOL_OID), }
+  {
+    oid: BOOL_ARRAY_OID,
+    name: "_bool",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::bool()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `bytea[]` type descriptor.
 pub fn Type::bytea_array() -> Type {
-  { oid: BYTEA_ARRAY_OID, name: "_bytea", kind: Array(BYTEA_OID), }
+  {
+    oid: BYTEA_ARRAY_OID,
+    name: "_bytea",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::bytea()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int2[]` type descriptor.
 pub fn Type::int2_array() -> Type {
-  { oid: INT2_ARRAY_OID, name: "_int2", kind: Array(INT2_OID), }
+  {
+    oid: INT2_ARRAY_OID,
+    name: "_int2",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::int2()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int4[]` type descriptor.
 pub fn Type::int4_array() -> Type {
-  { oid: INT4_ARRAY_OID, name: "_int4", kind: Array(INT4_OID), }
+  {
+    oid: INT4_ARRAY_OID,
+    name: "_int4",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::int4()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `text[]` type descriptor.
 pub fn Type::text_array() -> Type {
-  { oid: TEXT_ARRAY_OID, name: "_text", kind: Array(TEXT_OID), }
+  {
+    oid: TEXT_ARRAY_OID,
+    name: "_text",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::text()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `varchar[]` type descriptor.
 pub fn Type::varchar_array() -> Type {
-  { oid: VARCHAR_ARRAY_OID, name: "_varchar", kind: Array(VARCHAR_OID), }
+  {
+    oid: VARCHAR_ARRAY_OID,
+    name: "_varchar",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::varchar()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `int8[]` type descriptor.
 pub fn Type::int8_array() -> Type {
-  { oid: INT8_ARRAY_OID, name: "_int8", kind: Array(INT8_OID), }
+  {
+    oid: INT8_ARRAY_OID,
+    name: "_int8",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::int8()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float4[]` type descriptor.
 pub fn Type::float4_array() -> Type {
-  { oid: FLOAT4_ARRAY_OID, name: "_float4", kind: Array(FLOAT4_OID), }
+  {
+    oid: FLOAT4_ARRAY_OID,
+    name: "_float4",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::float4()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `float8[]` type descriptor.
 pub fn Type::float8_array() -> Type {
-  { oid: FLOAT8_ARRAY_OID, name: "_float8", kind: Array(FLOAT8_OID), }
+  {
+    oid: FLOAT8_ARRAY_OID,
+    name: "_float8",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::float8()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `timestamp[]` type descriptor.
 pub fn Type::timestamp_array() -> Type {
-  { oid: TIMESTAMP_ARRAY_OID, name: "_timestamp", kind: Array(TIMESTAMP_OID), }
+  {
+    oid: TIMESTAMP_ARRAY_OID,
+    name: "_timestamp",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::timestamp()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `date[]` type descriptor.
 pub fn Type::date_array() -> Type {
-  { oid: DATE_ARRAY_OID, name: "_date", kind: Array(DATE_OID), }
+  {
+    oid: DATE_ARRAY_OID,
+    name: "_date",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::date()),
+  }
 }
 
 ///|
 /// Return the built-in PostgreSQL `uuid[]` type descriptor.
 pub fn Type::uuid_array() -> Type {
-  { oid: UUID_ARRAY_OID, name: "_uuid", kind: Array(UUID_OID), }
+  {
+    oid: UUID_ARRAY_OID,
+    name: "_uuid",
+    schema: Some("pg_catalog"),
+    kind: Array(Type::uuid()),
+  }
 }
 
 ///|
-/// Construct a placeholder descriptor for a type that has not been catalogued.
+/// Construct an unresolved placeholder descriptor with no schema.
 ///
 /// Unknown descriptors let the client carry OID information through error
 /// messages and metadata paths even when it has not yet queried PostgreSQL's
 /// system catalogs for richer shape information.
 pub fn Type::unknown(oid : @proto.Oid, name? : String = "unknown") -> Type {
-  { oid, name, kind: Unknown, }
+  { oid, name, schema: None, kind: Unknown, }
 }
 
 ///|
@@ -354,21 +443,10 @@ fn is_json_type(type_ : Type) -> Bool {
 }
 
 ///|
-/// Return the built-in element descriptor for a supported PostgreSQL array.
+/// Return the complete element descriptor of any PostgreSQL array.
 fn array_element_type(type_ : Type) -> Type? {
-  match type_.oid {
-    BOOL_ARRAY_OID => Some(Type::bool())
-    BYTEA_ARRAY_OID => Some(Type::bytea())
-    INT2_ARRAY_OID => Some(Type::int2())
-    INT4_ARRAY_OID => Some(Type::int4())
-    TEXT_ARRAY_OID => Some(Type::text())
-    VARCHAR_ARRAY_OID => Some(Type::varchar())
-    INT8_ARRAY_OID => Some(Type::int8())
-    FLOAT4_ARRAY_OID => Some(Type::float4())
-    FLOAT8_ARRAY_OID => Some(Type::float8())
-    UUID_ARRAY_OID => Some(Type::uuid())
-    JSON_ARRAY_OID => Some(Type::json())
-    JSONB_ARRAY_OID => Some(Type::jsonb())
+  match type_.kind {
+    Array(element_type) => Some(element_type)
     _ => None
   }
 }

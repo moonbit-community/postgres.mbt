@@ -77,6 +77,7 @@ pub async fn[T] Client::with_statement_stream(
   params? : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
+  self.assert_statement_connection(statement)
   self.with_scoped_resource(
     (context, permit) => context.query_statement(statement, params, permit~),
     stream => ignore(stream.finish()),

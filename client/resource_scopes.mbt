@@ -27,19 +27,19 @@ struct ScopedStatement {
 }
 
 ///|
-priv struct ScopedPortalState {
-  transaction : Transaction
-  portal : Portal
-  active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
-}
-
-///|
 /// A bound portal usable only during its `with_portal` callback.
-struct ScopedPortal {
+/// Fetch multiple windows with `with_stream` or execute to completion with
+/// `execute`. The scope waits for started calls before closing the portal.
+/// Database operations through a saved handle report `Closed` after its
+/// callback ends.
+struct Portal {
+  transaction : Transaction
+  name : Bytes
   /// Result columns associated with the portal.
   columns : Array[Column]
-  state : ScopedPortalState
+  closed : @ref.Ref[Bool]
+  active : @ref.Ref[Bool]
+  active_calls : @ref.Ref[Int]
 }
 
 ///|
@@ -55,8 +55,8 @@ pub fn ScopedStatement::columns(self : ScopedStatement) -> ArrayView[Column] {
 }
 
 ///|
-/// Return a read-only view of the scoped portal's result columns.
-pub fn ScopedPortal::columns(self : ScopedPortal) -> ArrayView[Column] {
+/// Return a read-only view of the portal's result columns.
+pub fn Portal::columns(self : Portal) -> ArrayView[Column] {
   self.columns[:]
 }
 
@@ -78,18 +78,18 @@ fn ScopedStatement::new(
 }
 
 ///|
-fn ScopedPortal::new(
+fn Portal::new(
   transaction : Transaction,
-  portal : Portal,
-) -> ScopedPortal {
+  name : Bytes,
+  columns : Array[Column],
+) -> Portal {
   {
-    columns: portal.columns.copy(),
-    state: {
-      transaction,
-      portal,
-      active: @ref.new(true),
-      active_calls: @ref.new(0),
-    },
+    transaction,
+    name,
+    columns,
+    closed: @ref.new(false),
+    active: @ref.new(true),
+    active_calls: @ref.new(0),
   }
 }
 
@@ -102,7 +102,7 @@ fn ScopedStatementState::begin_call(self : ScopedStatementState) -> Unit raise {
 }
 
 ///|
-fn ScopedPortalState::begin_call(self : ScopedPortalState) -> Unit raise {
+fn Portal::begin_call(self : Portal) -> Unit raise {
   if !self.active.val {
     raise ClientError::Closed("portal scope expired")
   }
@@ -137,7 +137,7 @@ async fn Client::close_statement_for_scope(
 }
 
 ///|
-async fn ScopedPortalState::finish(self : ScopedPortalState) -> Unit {
+async fn Portal::finish(self : Portal) -> Unit {
   self.active.val = false
   while self.active_calls.val > 0 {
     @async.pause()
@@ -146,7 +146,7 @@ async fn ScopedPortalState::finish(self : ScopedPortalState) -> Unit {
     self.transaction.client.abort()
     self.transaction.invalidate_if_connection_closed()
   }
-  self.transaction.close_portal(self.portal)
+  self.transaction.close_portal(self)
 }
 
 ///|
@@ -247,11 +247,11 @@ pub async fn[T] ScopedStatement::with_stream(
 }
 
 ///|
-/// Execute this prepared statement and return its affected row count.
+/// Execute this prepared statement and return its affected row count as `UInt64`.
 pub async fn ScopedStatement::execute(
   self : ScopedStatement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.state.begin_call()
   defer {
     self.state.active_calls.val -= 1
@@ -264,11 +264,12 @@ pub async fn ScopedStatement::execute(
 }
 
 ///|
-/// Bind a portal from a transaction-owned scoped statement.
+/// Bind a portal from a transaction-owned scoped statement and close it on
+/// every callback exit. The statement remains usable within its own scope.
 pub async fn[T] ScopedStatement::with_portal(
   self : ScopedStatement,
   params? : Array[&ToSql] = [],
-  f : async (ScopedPortal) -> T,
+  f : async (Portal) -> T,
 ) -> T {
   self.state.begin_call()
   defer {
@@ -284,52 +285,57 @@ pub async fn[T] ScopedStatement::with_portal(
 
 ///|
 /// Bind a portal, run one callback, and close the portal on every exit.
+/// The caller retains the statement and may reuse it after this scope ends.
+/// Explicit commit or rollback reports an error until this scope has finished.
 pub async fn[T] Transaction::with_portal(
   self : Transaction,
   statement : Statement,
   params? : Array[&ToSql] = [],
-  f : async (ScopedPortal) -> T,
+  f : async (Portal) -> T,
 ) -> T {
+  self.client.assert_statement_connection(statement)
   self.assert_open()
   self.scoped_resources.val += 1
   defer {
     self.scoped_resources.val -= 1
   }
   let portal = self.bind(statement, params~)
-  let scoped = ScopedPortal::new(self, portal)
   errdefer @async.protect_from_cancel(() => {
-    scoped.state.finish() catch {
+    portal.finish() catch {
       ClientError::Closed(_) => ()
       _ => self.client.abort()
     }
   })
   check_pending_cancellation()
-  let result = f(scoped)
+  let result = f(portal)
   check_pending_cancellation()
   {
     defer check_pending_cancellation()
-    @async.protect_from_cancel(() => scoped.state.finish())
+    @async.protect_from_cancel(() => portal.finish())
   }
   result
 }
 
 ///|
 /// Fetch rows from this portal, finishing the stream on every exit.
-pub async fn[T] ScopedPortal::with_stream(
-  self : ScopedPortal,
+/// The portal remains available for later fetches within its callback. A zero
+/// row limit fetches all remaining rows; `QuerySummary.suspended` reports when
+/// PostgreSQL stops at a row limit.
+pub async fn[T] Portal::with_stream(
+  self : Portal,
   max_rows : Int,
   f : async (RowStream) -> T,
 ) -> T {
-  self.state.begin_call()
+  self.begin_call()
   defer {
-    self.state.active_calls.val -= 1
+    self.active_calls.val -= 1
   }
-  self.state.transaction.with_portal_stream(self.state.portal, max_rows, f)
+  self.transaction.with_portal_stream(self, max_rows, f)
 }
 
 ///|
-/// Execute this portal to completion and return its affected row count.
-pub async fn ScopedPortal::execute(self : ScopedPortal) -> Int {
+/// Execute this portal to completion and return its affected row count as `UInt64`.
+pub async fn Portal::execute(self : Portal) -> UInt64 {
   self.with_stream(0, stream => {
     let summary = stream.finish()
     rows_affected(summary.command_tag)

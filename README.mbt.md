@@ -22,16 +22,29 @@ ordinary pool methods checkout and return sessions automatically, while
 
 For client streams and COPY, prefer `Client::with_stream`,
 `with_typed_stream`, `with_statement_stream`, `with_simple_query`,
-`with_copy_in`, and `with_copy_out`. Fetch portals inside a transaction with
-`Transaction::with_portal_stream`. These scopes keep the callback cancellable
+`with_copy_in`, and `with_copy_out`. Create portals with
+`Transaction::with_portal` or a transaction-owned `ScopedStatement::with_portal`,
+then fetch successive windows through `Portal::with_stream`.
+These scopes keep the callback cancellable
 and wait for cleanup on every exit. COPY IN commits only when the callback
 explicitly calls `finish()`; otherwise it is aborted.
 For named statements, `Client::with_prepared` and
 `Transaction::with_prepared` close the Statement after the callback.
-`Transaction::with_portal` closes a bound Portal before its Statement scope
-ends. Async backend messages use bounded buffers on both Client and Pool.
+Statements belong to their creating connection; passing one to another Client
+or Transaction raises `ClientError::StatementConnectionMismatch` locally.
+`Portal` is the only public portal handle: each fetch finishes its stream,
+and the portal closes when its callback ends. A caller-owned `Statement` remains
+open for reuse, including across transactions. The former manual portal
+bind/query/close API has been removed; see the
+[pagination migration example](./client/README.mbt.md#prepared-statements-and-portals).
+Async backend messages use bounded buffers on both Client and Pool.
 Transaction scopes also drain unfinished query streams before completion and
 roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
+
+Observed row counts (`QuerySummary.row_count`) and affected row counts from
+`execute`, `execute_raw`, and COPY IN `finish` use `UInt64` throughout the client
+and pool. Commands without a row count return zero. Missing, invalid, or
+overflowing counts in counted command tags raise `ClientError::Protocol`.
 
 In `0.1.0`, `Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await
@@ -47,6 +60,13 @@ The driver completes physical transport cleanup while cancellation unwinds.
 
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)
+
+**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
+decode failures or silently store incorrect text. The client always uses UTF-8
+and currently does not reject encoding changes. Keep `client_encoding=UTF8`
+for the lifetime of every client and pooled session; see the
+[client encoding warning](./client/README.mbt.md#client-encoding) and
+[TODO.md](./TODO.md).
 
 ### TLS
 

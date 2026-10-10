@@ -2,36 +2,12 @@
 
 ///|
 /// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
-pub enum IsolationLevel {
+pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
 } derive(Eq, Debug)
-
-///|
-/// Construct `READ UNCOMMITTED`.
-pub fn IsolationLevel::read_uncommitted() -> IsolationLevel {
-  ReadUncommitted
-}
-
-///|
-/// Construct `READ COMMITTED`.
-pub fn IsolationLevel::read_committed() -> IsolationLevel {
-  ReadCommitted
-}
-
-///|
-/// Construct `REPEATABLE READ`.
-pub fn IsolationLevel::repeatable_read() -> IsolationLevel {
-  RepeatableRead
-}
-
-///|
-/// Construct `SERIALIZABLE`.
-pub fn IsolationLevel::serializable() -> IsolationLevel {
-  Serializable
-}
 
 ///|
 /// Return one fixed SQL spelling for a transaction isolation level.
@@ -258,12 +234,12 @@ pub async fn[T] Transaction::with_stream(
 }
 
 ///|
-/// Execute SQL within this transaction and return the affected row count.
+/// Execute SQL within this transaction and return the affected row count as `UInt64`.
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
   self.run_scope_operation(context => context.execute(sql, params))
 }
 
@@ -311,15 +287,13 @@ pub async fn Transaction::close_statement(
   self : Transaction,
   statement : Statement,
 ) -> Unit {
+  self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.close_statement(statement))
 }
 
 ///|
 /// Close a portal without leaving this transaction's operation scope.
-pub async fn Transaction::close_portal(
-  self : Transaction,
-  portal : Portal,
-) -> Unit {
+async fn Transaction::close_portal(self : Transaction, portal : Portal) -> Unit {
   self.run_scope_operation(context => context.close_portal(portal))
 }
 
@@ -422,6 +396,7 @@ pub async fn Transaction::query_statement(
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> RowStream {
+  self.client.assert_statement_connection(statement)
   self.start_stream(permit => {
     self.context.query_statement(statement, params, permit~)
   })
@@ -436,35 +411,39 @@ pub async fn[T] Transaction::with_statement_stream(
   params? : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
+  self.client.assert_statement_connection(statement)
   with_transaction_stream(() => self.query_statement(statement, params~), f)
 }
 
 ///|
-/// Execute a previously prepared statement and return its affected row count.
+/// Execute a previously prepared statement and return its affected row count as `UInt64`.
 pub async fn Transaction::execute_raw(
   self : Transaction,
   statement : Statement,
   params? : Array[&ToSql] = [],
-) -> Int {
+) -> UInt64 {
+  self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.execute_raw(statement, params))
 }
 
 ///|
-/// Bind parameters to a statement while the transaction is open. The portal
-/// remains valid only within its enclosing PostgreSQL transaction.
-pub async fn Transaction::bind(
+/// Bind a portal for a resource scope while the transaction is open.
+/// Close an undelivered portal before propagating cancellation.
+async fn Transaction::bind(
   self : Transaction,
   statement : Statement,
   params? : Array[&ToSql] = [],
 ) -> Portal {
+  self.client.assert_statement_connection(statement)
   let permit = self.scope_gate.acquire()
   defer permit.release()
   self.assert_open()
   errdefer self.invalidate_if_connection_closed()
   check_pending_cancellation()
-  let portal = @async.protect_from_cancel(() => {
+  let (name, columns) = @async.protect_from_cancel(() => {
     self.context.bind(statement, params)
   })
+  let portal = Portal::new(self, name, columns)
   errdefer @async.protect_from_cancel(() => {
     self.context.close_portal(portal) catch {
       ClientError::Database(_) => ()
@@ -478,9 +457,9 @@ pub async fn Transaction::bind(
 ///|
 /// Fetch up to `max_rows` from a portal while the transaction is open.
 /// `QuerySummary.suspended` reports when PostgreSQL has more rows. An
-/// unfinished result is drained at transaction end; the portal remains owned
-/// by the caller.
-pub async fn Transaction::query_portal(
+/// unfinished result is drained at transaction end; the enclosing resource
+/// scope retains the portal.
+async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,
   max_rows : Int,
@@ -491,9 +470,9 @@ pub async fn Transaction::query_portal(
 }
 
 ///|
-/// Scope one portal fetch stream. The portal and its statement remain owned by
-/// the caller and must be closed separately.
-pub async fn[T] Transaction::with_portal_stream(
+/// Finish one portal fetch stream before returning to its resource scope.
+/// The scope can fetch again and closes the portal when its callback ends.
+async fn[T] Transaction::with_portal_stream(
   self : Transaction,
   portal : Portal,
   max_rows : Int,
@@ -661,9 +640,11 @@ async fn Transaction::cleanup_child(self : Transaction) -> Bool {
 
 ///|
 fn local_child_error(error : Error) -> Bool {
+  error is ClientError::StatementConnectionMismatch ||
   error is ClientError::Encode(_) ||
   error is ClientError::Decode(_) ||
   error is ClientError::WrongType(_) ||
+  error is ClientError::UnsupportedRecursiveType(_) ||
   error is ClientError::ColumnNotFound(_) ||
   error is ClientError::RowCount(_) ||
   error is ClientError::Closed("statement already closed") ||

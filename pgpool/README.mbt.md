@@ -79,6 +79,12 @@ calls. Transaction, streaming/COPY, and cancellable callbacks keep an exclusive
 session operation until their protocol work finishes, so use the capability
 passed to those callbacks.
 
+`Pool`, `Session`, `Transaction`, `Operation`, `PreparedStatement`, and
+`GenericClient::execute` return affected row counts as `UInt64`. COPY IN
+`finish()` and `QuerySummary.row_count` also use `UInt64`. Commands without a
+count return zero; missing, invalid, or overflowing counted command tags
+propagate `ClientError::Protocol` from the client.
+
 ## Transactions
 
 Pool and session transaction helpers reserve one physical connection for the
@@ -95,8 +101,9 @@ async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
 ```
 
 Pool transaction options use the `client` isolation enum re-exported as
-`@pgpool.IsolationLevel`; existing enum constructor calls remain valid. The
-isolation level is selected from four fixed SQL spellings:
+`@pgpool.IsolationLevel`. Use its `ReadUncommitted`, `ReadCommitted`,
+`RepeatableRead`, or `Serializable` constructors directly, selecting from four
+fixed SQL spellings:
 
 ```mbt check
 ///|
@@ -104,7 +111,7 @@ async fn _pool_serializable_transaction(pool : @pgpool.Pool) -> Unit {
   pool.with_transaction(
     _tx => (),
     options=@pgpool.TransactionOptions(
-      isolation_level=@pgpool.IsolationLevel::serializable(),
+      isolation_level=@pgpool.IsolationLevel::Serializable,
     ),
   )
 }
@@ -273,6 +280,11 @@ transaction is discarded, along with its statement cache, instead of being
 offered to the next borrower. The pool does not issue an automatic `ROLLBACK`.
 Idle connections retain session state such as `SET` values and `LISTEN`
 subscriptions under `Fast`; select `Clean` when that state must be cleared.
+
+**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
+decode failures or silently store incorrect text. Keep it at UTF-8 throughout
+each pooled session's lifetime. The client currently does not reject encoding
+changes; see the [client encoding warning](../client/README.mbt.md#client-encoding).
 
 `PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
 Hooks receive an `Operation` that expires when the callback ends. Queries and
