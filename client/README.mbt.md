@@ -143,6 +143,29 @@ Ordinary string parameters use text format. The `ltree` extension types
 by UTF-8. String decoding supports both text and binary results for these
 types; binary decoding validates and removes the version byte.
 
+### Client Encoding
+
+**Dangerous operation: changing `client_encoding` away from UTF-8.** The
+client requests `client_encoding=UTF8` at startup and always encodes and
+decodes strings as UTF-8. Keep this setting at UTF-8 for the entire connection
+lifetime, including when using transactions or pooled sessions. Do not change
+it through `SET client_encoding`, `SET NAMES`, `set_config`, or startup options.
+
+The current implementation records server `ParameterStatus` updates but does
+not reject an unsupported encoding or adapt its codecs. An encoding mismatch
+can cause invalid UTF-8 errors or silently write incorrect text. For example,
+with a UTF-8 database and `client_encoding=LATIN1`, a parameter containing `é`
+is sent as UTF-8 bytes but interpreted as the two characters `Ã` and `©`.
+Reading it back on the same connection can produce `é` again, hiding the
+incorrect stored value. Switching parameters or results to binary `text`
+format does not bypass PostgreSQL's client encoding conversion.
+
+If the encoding has been changed, discard the affected connection and verify
+any affected writes through a separate UTF-8 connection. Restoring UTF-8 does
+not repair text already stored incorrectly. Enforcement is tracked in
+[TODO.md](../TODO.md). See PostgreSQL's
+[client encoding documentation](https://www.postgresql.org/docs/current/multibyte.html#MULTIBYTE-CHARSET).
+
 Inspect result data and metadata through `Row::columns()`, `Row::values()`,
 `RowStream::columns()`, `SimpleQueryRow::columns()`, and
 `SimpleQueryRow::values()`. These return read-only `ArrayView` values; use
