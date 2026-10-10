@@ -264,3 +264,212 @@ test "wire format parser rejects unsupported codes" {
   }
   @debug.assert_eq(message, "unsupported wire format code: 2")
 }
+
+///|
+fn text_extension_type(name : String) -> Type {
+  Type::unknown(90010U, name~)
+}
+
+///|
+fn text_extension_array_type(element : Type) -> Type {
+  {
+    oid: 90011U,
+    name: "_\{element.name}",
+    schema: element.schema,
+    kind: Array(element),
+  }
+}
+
+///|
+test "extension strings and views encode versioned binary UTF-8" {
+  let cases : Array[(String, String, Bytes)] = [
+    ("ltree", "a.b", b"\x01a.b"),
+    ("lquery", "*.x", b"\x01*.x"),
+    ("ltxtquery", "foo & bar", b"\x01foo & bar"),
+  ]
+  for case in cases {
+    let (name, value, expected) = case
+    let type_ = text_extension_type(name)
+    let encoded = encode_param(value, type_)
+    assert_eq(encoded.format, Binary)
+    assert_eq(encoded.value, Some(expected))
+    let source = "prefix-\{value}-suffix"
+    let view = source.exact_view(start=7, end=7 + value.length())
+    let encoded_view = encode_param(view, type_)
+    assert_eq(encoded_view.format, Binary)
+    assert_eq(encoded_view.value, Some(expected))
+    let unicode = "树.🌙"
+    let unicode_bytes : Bytes = b"\x01\xe6\xa0\x91.\xf0\x9f\x8c\x99"
+    assert_eq(encode_param(unicode, type_).value, Some(unicode_bytes))
+    let unicode_source = "prefix-树.🌙-suffix"
+    let unicode_view = unicode_source.exact_view(start=7, end=11)
+    assert_eq(encode_param(unicode_view, type_).value, Some(unicode_bytes))
+    assert_eq(encode_param("", type_).value, Some(b"\x01"))
+    assert_encode_format(Some(value), type_, Binary)
+    let null = encode_param((None : String?), type_)
+    assert_eq(null.format, Binary)
+    assert_eq(null.value, None)
+  }
+}
+
+///|
+test "extension strings decode text and versioned binary including Unicode and NULL" {
+  for name in ["ltree", "lquery", "ltxtquery"] {
+    let type_ = text_extension_type(name)
+    for
+      case in [
+        (Text, b"\xe6\xa0\x91.\xf0\x9f\x8c\x99"),
+        (Binary, b"\x01\xe6\xa0\x91.\xf0\x9f\x8c\x99"),
+      ] {
+      let (format, bytes) = case
+      let value : String = make_row(type_, bytes, format~).get(0)
+      assert_eq(value, "树.🌙")
+      let optional : String? = make_row(type_, bytes, format~).get(0)
+      assert_eq(optional, Some(value))
+      let null_row = { ..make_row(type_, bytes, format~), values: [None], }
+      let null : String? = null_row.get(0)
+      assert_eq(null, None)
+      assert_true(
+        @test.expect_error(() => {
+          let _ : String = null_row.get(0)
+        })
+        is ClientError::Decode(_),
+      )
+    }
+    let empty_text : String = make_row(type_, b"").get(0)
+    let empty_binary : String = make_row(type_, b"\x01", format=Binary).get(0)
+    assert_eq(empty_text, "")
+    assert_eq(empty_binary, "")
+    // A leading version-like byte in text format must remain part of the text.
+    let text : String = make_row(type_, b"\x01a").get(0)
+    assert_eq(text, "\u0001a")
+  }
+}
+
+///|
+test "extension string decoders reject missing versions wrong versions and invalid UTF-8" {
+  for name in ["ltree", "lquery", "ltxtquery"] {
+    let type_ = text_extension_type(name)
+    for bytes in [b"", b"\x00a", b"\x02a", b"a.b"] {
+      let error = @test.expect_error(() => {
+        let _ : String = make_row(type_, bytes, format=Binary).get(0)
+      })
+      guard error is @proto.ProtocolError::InvalidInput(message) else {
+        fail("expected invalid version")
+      }
+      assert_eq(message, "\{name} version 1 only supported")
+    }
+    for case in [(Text, b"\xff"), (Binary, b"\x01\xff")] {
+      let (format, bytes) = case
+      assert_true(
+        @test.expect_error(() => {
+          let _ : String = make_row(type_, bytes, format~).get(0)
+        })
+        is @proto.ProtocolError::InvalidInput("invalid UTF-8"),
+      )
+    }
+  }
+}
+
+///|
+test "extension string arrays reuse scalar framing for empty multiple and NULL elements" {
+  for name in ["ltree", "lquery", "ltxtquery"] {
+    let element_type = text_extension_type(name)
+    let type_ = text_extension_array_type(element_type)
+    let cases : Array[Array[String?]] = [
+      [],
+      [Some("a"), Some("树.🌙")],
+      [Some("a"), None, Some("")],
+      [None],
+    ]
+    for values in cases {
+      let encoded = encode_param(values, type_)
+      assert_eq(encoded.format, Binary)
+      let bytes = encoded.value.unwrap()
+      let pg_array = @types.array_from_sql(bytes[:])
+      assert_eq(pg_array.element_type, element_type.oid)
+      assert_eq(pg_array.elements, values.length())
+      let payloads = pg_array.values()
+      for value in values {
+        if value is Some(text) {
+          let expected = Buffer()
+          expected.write_byte(b'\x01')
+          expected.write_bytes(@utf8.encode(text))
+          assert_eq(payloads.next(), Some(Some(expected.to_bytes())))
+        } else {
+          assert_eq(payloads.next(), Some(None))
+        }
+      }
+      assert_eq(payloads.next(), None)
+      let decoded : Array[String?] = make_row(type_, bytes, format=Binary).get(
+        0,
+      )
+      assert_eq(decoded, values)
+    }
+    for values in [([] : Array[String]), ["a", "b"]] {
+      let bytes = encode_param(values, type_).value.unwrap()
+      let decoded : Array[String] = make_row(type_, bytes, format=Binary).get(0)
+      assert_eq(decoded, values)
+    }
+    let views = ["prefix-a-suffix".exact_view(start=7, end=8), "b"[:]]
+    let bytes = encode_param(views, type_).value.unwrap()
+    let decoded : Array[String] = make_row(type_, bytes, format=Binary).get(0)
+    assert_eq(decoded, ["a", "b"])
+  }
+}
+
+///|
+test "ordinary string codecs preserve raw UTF-8 and text parameter formats" {
+  for
+    type_ in [
+      Type::text(),
+      Type::varchar(),
+      Type::name_type(),
+      Type::unknown(90012U, name="bpchar"),
+      Type::unknown(90013U, name="citext"),
+      Type::unknown(90014U, name="unknown"),
+    ] {
+    assert_encode_format("moonbit", type_, Text)
+    assert_encode_format("moonbit"[:], type_, Text)
+    assert_eq(encode_param("moonbit", type_).value, Some(b"moonbit"))
+    let value : String = make_row(type_, b"\x01moonbit", format=Binary).get(0)
+    assert_eq(value, "\u0001moonbit")
+  }
+}
+
+///|
+test "extension string arrays propagate scalar binary validation errors" {
+  for name in ["ltree", "lquery", "ltxtquery"] {
+    let element = text_extension_type(name)
+    let type_ = text_extension_array_type(element)
+    for invalid in [b"", b"\x02a", b"\x01\xff"] {
+      let buf = Buffer()
+      @types.array_to_sql(
+        [@types.ArrayDimension::new(1, 1)].iter(),
+        element.oid,
+        [invalid].iter(),
+        (bytes, out) => {
+          out.write_bytes(bytes)
+          No
+        },
+        buf,
+      )
+      let error = @test.expect_error(() => {
+        let _ : Array[String] = make_row(type_, buf.to_bytes(), format=Binary).get(
+          0,
+        )
+      })
+      guard error is @proto.ProtocolError::InvalidInput(message) else {
+        fail("expected scalar protocol error from array decoding")
+      }
+      assert_eq(
+        message,
+        if invalid == b"\x01\xff" {
+          "invalid UTF-8"
+        } else {
+          "\{name} version 1 only supported"
+        },
+      )
+    }
+  }
+}
