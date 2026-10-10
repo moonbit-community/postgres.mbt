@@ -235,12 +235,22 @@ fn string_format(type_ : Type) -> WireFormat {
 }
 
 ///|
+fn validate_string_param(value : StringView) -> Unit raise ClientError {
+  if value.contains("\u0000") {
+    raise ClientError::Encode(
+      "PostgreSQL string parameters must not contain NUL (U+0000)",
+    )
+  }
+}
+
+///|
 // Keep extension framing in the scalar codec so array elements are framed once.
 fn string_to_sql(
   value : StringView,
   type_ : Type,
   buf : @buffer.Buffer,
-) -> Unit {
+) -> Unit raise ClientError {
+  validate_string_param(value)
   let bytes = @utf8.encode(value)
   match type_.name {
     "ltree" => @types.ltree_to_sql(bytes[:], buf)
