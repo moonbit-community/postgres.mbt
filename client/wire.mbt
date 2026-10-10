@@ -107,7 +107,17 @@ fn encode_param(param : &ToSql, type_ : Type) -> EncodedParam raise {
     Yes => None
     No => Some(payload.to_bytes())
   }
-  { format: param.format(type_), value, }
+  let format = param.format(type_)
+  if format is Text && value is Some(bytes) {
+    for byte in bytes {
+      if byte == b'\x00' {
+        raise ClientError::Encode(
+          "PostgreSQL text-format parameters must not contain NUL (0x00)",
+        )
+      }
+    }
+  }
+  { format, value, }
 }
 
 ///|

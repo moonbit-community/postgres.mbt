@@ -143,6 +143,19 @@ Ordinary string parameters use text format. The `ltree` extension types
 by UTF-8. String decoding supports both text and binary results for these
 types; binary decoding validates and removes the version byte.
 
+String parameters must not contain NUL (`U+0000`). Built-in string codecs
+raise `ClientError::Encode` before UTF-8 encoding or writing the value,
+including `StringView`, `Some` values, string array elements, and the string
+extension types above. Only the viewed slice is checked for `StringView`.
+The driver also rejects zero bytes (`0x00`) in non-NULL text-format parameter
+payloads produced by custom `ToSql` codecs. NULL payloads are ignored, and
+binary payloads such as `bytea` may contain zero bytes. Literal `\u0000` text
+and JSON escapes are allowed; this check does not validate JSON/JSONB logical
+values. Encoding errors may occur after Parse/Describe prepares the statement,
+but before any Bind/Execute is submitted. Temporary statements are closed
+before the error is returned, so a transaction callback that catches the error
+can continue with a valid query.
+
 ### Client Encoding
 
 **Dangerous operation: changing `client_encoding` away from UTF-8.** The
