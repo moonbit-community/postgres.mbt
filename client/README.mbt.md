@@ -136,8 +136,12 @@ async fn _query_example(client : @client.Client) -> Int {
 }
 ```
 
-`StringView` query parameters use the same text codec as `String`, so a string
+`StringView` query parameters use the same codec as `String`, so a string
 slice can be passed without first materializing an owned string.
+Ordinary string parameters use text format. The `ltree` extension types
+`ltree`, `lquery`, and `ltxtquery` use binary format with a version byte followed
+by UTF-8. String decoding supports both text and binary results for these
+types; binary decoding validates and removes the version byte.
 
 Inspect result data and metadata through `Row::columns()`, `Row::values()`,
 `RowStream::columns()`, `SimpleQueryRow::columns()`, and
@@ -209,6 +213,8 @@ resolved array descriptor from statement or row metadata when using
 payloads: an array uses binary format for every element, regardless of the
 scalar codec's `format` method. Decoders receive the full element descriptor
 and `Binary`; the payload's element OID must match that descriptor. Built-in
+string arrays include `ltree[]`, `lquery[]`, and `ltxtquery[]`: their scalar
+codecs add and remove the version byte for each non-NULL element. Ordinary
 strings and JSON/JSONB retain their existing array handling.
 
 Catalog metadata is resolved recursively and cached per connection.
