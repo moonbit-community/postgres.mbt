@@ -5,7 +5,7 @@ async fn with_cancellation_test_client(
   f : async (@async.TaskGroup[Unit], Client, async () -> Request) -> Unit,
 ) -> Unit {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(@ref.Ref(Some(group)))
     let client : Client = { shared, }
     let requests : Array[Request] = []
     defer {
@@ -77,7 +77,7 @@ async test "transaction cancellation during SQL rolls back before releasing owne
 ///|
 async test "cancelled BEGIN rolls back before handing out a transaction" {
   with_cancellation_test_client((group, client, next_request) => {
-    let delivered = @ref.new(false)
+    let delivered = @ref.Ref(false)
     let task = group.spawn(allow_failure=true, () => {
       let tx = client.transaction()
       delivered.val = true
@@ -104,7 +104,7 @@ async test "cancelled SAVEPOINT restores the parent scope before releasing owner
     let begin_task = group.spawn(() => client.transaction())
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let outer = begin_task.wait()
-    let delivered = @ref.new(false)
+    let delivered = @ref.Ref(false)
     let name = "Cancelled; \"名字 with space\""
     let quoted = "\"Cancelled; \"\"名字 with space\"\"\""
     let task = group.spawn(allow_failure=true, () => {
@@ -169,7 +169,7 @@ async test "query creation cancellation transfers the stream and permit to drain
       } else {
         None
       }
-      let delivered = @ref.new(false)
+      let delivered = @ref.Ref(false)
       let task = group.spawn(allow_failure=true, () => {
         let stream = if transaction is Some(tx) {
           tx.query("select 1")
@@ -215,7 +215,7 @@ async test "query creation cancellation transfers the stream and permit to drain
 ///|
 async test "COPY OUT creation cancellation drains and releases its permit" {
   with_cancellation_test_client((group, client, next_request) => {
-    let delivered = @ref.new(false)
+    let delivered = @ref.Ref(false)
     let task = group.spawn(allow_failure=true, () => {
       let stream = client.copy_out("COPY t TO STDOUT")
       delivered.val = true
@@ -254,12 +254,12 @@ async test "pending cancellation prevents new client and transaction stream requ
         name: b"existing",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: @ref.Ref(false),
       }
       let portal : Portal = {
         name: b"existing",
         columns: [],
-        closed: @ref.new(false),
+        closed: @ref.Ref(false),
       }
       for mode in 0..<(if transaction_scope { 7 } else { 6 }) {
         let entered : @async.Queue[Unit] = Queue(kind=Unbounded)

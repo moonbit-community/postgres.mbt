@@ -1,5 +1,5 @@
 ///|
-async fn scoped_prepared_count(client : @client.Client) -> Int {
+async fn scoped_prepared_count(client : @client.Client) -> Int32 {
   client.with_simple_query("select count(*) from pg_prepared_statements", stream => {
     for message = stream.next() {
       match message {
@@ -25,13 +25,13 @@ async test "integration scoped streams drain early exits and release temporary s
     defer client.abort()
     @async.with_timeout(5000, () => {
       let prepared_before = scoped_prepared_count(client)
-      let first : Int = client.with_stream(
+      let first : Int32 = client.with_stream(
         "select generate_series(1, 64) as value",
         stream => stream.next().unwrap().get_name("value"),
       )
       assert_eq(first, 1)
       let count = 64
-      let first_typed : Int = client.with_typed_stream(
+      let first_typed : Int32 = client.with_typed_stream(
         "select generate_series(1, $1::int4) as value",
         [@client.Type::int4()],
         params=[count as &@client.ToSql],
@@ -49,12 +49,12 @@ async test "integration scoped streams drain early exits and release temporary s
       let statement = client.prepare("select generate_series(1, 64) as value")
       defer @async.protect_from_cancel(() => statement.close())
       for _ in 0..<2 {
-        let value : Int = client.with_statement_stream(statement, stream => {
+        let value : Int32 = client.with_statement_stream(statement, stream => {
           stream.next().unwrap().get_name("value")
         })
         assert_eq(value, 1)
       }
-      let probe : Int = client.query_one("select 42::int4").get(0)
+      let probe : Int32 = client.query_one("select 42::int4").get(0)
       assert_eq(probe, 42)
     })
     client.close()
@@ -106,7 +106,7 @@ async test "integration scoped COPY IN aborts unfinished returns errors and canc
         is @async.WaitedTaskAlreadyCancelled,
       )
 
-      let count : Int = client
+      let count : Int32 = client
         .query_one("select count(*)::int4 from scoped_copy")
         .get(0)
       assert_eq(count, 0)
@@ -117,7 +117,7 @@ async test "integration scoped COPY IN aborts unfinished returns errors and canc
         }),
         2,
       )
-      let committed : Int = client
+      let committed : Int32 = client
         .query_one("select count(*)::int4 from scoped_copy")
         .get(0)
       assert_eq(committed, 2)
@@ -145,7 +145,7 @@ async test "integration scoped row decoding and parameter encoding errors keep c
           client.with_stream(
             "select 'text'::text from generate_series(1, 64)",
             stream => {
-              let value : Int = stream.next().unwrap().get(0)
+              let value : Int32 = stream.next().unwrap().get(0)
               value
             },
           )
@@ -167,7 +167,7 @@ async test "integration scoped row decoding and parameter encoding errors keep c
         )
         assert_eq(scoped_prepared_count(client), prepared_before)
       }
-      let probe : Int = client.query_one("select 42::int4").get(0)
+      let probe : Int32 = client.query_one("select 42::int4").get(0)
       assert_eq(probe, 42)
     })
     client.close()

@@ -1,5 +1,5 @@
 ///|
-fn row_values(rows : Array[@client.Row]) -> Array[Int] raise {
+fn row_values(rows : Array[@client.Row]) -> Array[Int32] raise {
   rows.map(row => row.get_name("value"))
 }
 
@@ -15,7 +15,7 @@ async test "integration pooled row stream callback restores session" {
       make_pool_config(1),
     )
 
-    let first : Int = pool.with_session(session => {
+    let first : Int32 = pool.with_session(session => {
       session.with_stream(
         "select generate_series(1, 4)::int4 as value order by value",
         stream => {
@@ -27,7 +27,7 @@ async test "integration pooled row stream callback restores session" {
     })
     assert_eq(first, 1)
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 5::int4 as value")
       .get_name("value")
     assert_eq(probe, 5)
@@ -61,7 +61,7 @@ async test "integration pooled simple query callback collects frames" {
     @debug.assert_eq(try! left.get_name("side"), Some("left"))
     @debug.assert_eq(try! right.get_name("side"), Some("right"))
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 6::int4 as value")
       .get_name("value")
     assert_eq(probe, 6)
@@ -80,7 +80,7 @@ async test "integration pooled COPY callbacks keep connection reusable" {
       make_pool_config(1),
     )
 
-    let values : Array[Int] = pool.with_session(session => {
+    let values : Array[Int32] = pool.with_session(session => {
       session.batch_execute("create temp table moon_pool_copy(value int4)")
       let inserted = session.with_copy_in("copy moon_pool_copy from stdin", sink => {
         let _ : @client.CopyInSink = sink
@@ -105,7 +105,7 @@ async test "integration pooled COPY callbacks keep connection reusable" {
     })
     assert_true(values == [1, 2, 3])
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 7::int4 as value")
       .get_name("value")
     assert_eq(probe, 7)
@@ -129,7 +129,7 @@ async test "integration pooled prepared statement scope and typed parameters" {
     )
     let stale : @async.Queue[@pgpool.PreparedStatement] = Queue(kind=Unbounded)
 
-    let value : Int = pool.with_session(session => {
+    let value : Int32 = pool.with_session(session => {
       session.with_prepared_typed(
         "select $1::int4 + 1 as value",
         [@client.Type::int4()],
@@ -145,7 +145,7 @@ async test "integration pooled prepared statement scope and typed parameters" {
     let expired = stale.get()
     expect_pool_scope_expired(expect_error_async(() => expired.query_one()))
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 10::int4 as value")
       .get_name("value")
     assert_eq(probe, 10)
@@ -168,9 +168,9 @@ async test "integration prepared callback composes same-session SQL and nested s
         ),
         make_pool_config(1, statement_cache_capacity=capacity),
       )
-      let result : (Int, Int, Int, Int) = pool.with_session(session => {
+      let result : (Int32, Int32, Int32, Int32) = pool.with_session(session => {
         session.with_prepared("select $1::int4 + 1 as value", outer => {
-          let same : Int = session.with_prepared(
+          let same : Int32 = session.with_prepared(
             "select $1::int4 + 1 as value",
             inner => {
               let input = 1
@@ -179,14 +179,14 @@ async test "integration prepared callback composes same-session SQL and nested s
               .get_name("value")
             },
           )
-          let ordinary : Int = session
+          let ordinary : Int32 = session
             .query_one("select 3::int4 as value")
             .get_name("value")
-          let other : Int = session.with_prepared("select 4::int4 as value", inner => {
+          let other : Int32 = session.with_prepared("select 4::int4 as value", inner => {
             inner.query_one().get_name("value")
           })
           let input = 4
-          let retained : Int = outer
+          let retained : Int32 = outer
             .query_one(params=[input as &@client.ToSql])
             .get_name("value")
           (same, ordinary, other, retained)
@@ -282,7 +282,7 @@ async test "integration pooled cancellable handles expire by scope" {
       kind=Unbounded,
     )
 
-    let value : Int = pool.with_session(session => {
+    let value : Int32 = pool.with_session(session => {
       session.run_cancellable((op, token) => {
         operations.put(op)
         tokens.put(token)
@@ -298,7 +298,7 @@ async test "integration pooled cancellable handles expire by scope" {
     )
     stale_token.cancel()
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 13::int4 as value")
       .get_name("value")
     assert_eq(probe, 13)
@@ -321,7 +321,7 @@ async test "integration pooled transaction options and savepoint" {
       make_pool_config(1),
     )
 
-    let value : Int = pool.with_transaction(
+    let value : Int32 = pool.with_transaction(
       tx => {
         tx.batch_execute(
           "create temp table moon_pool_savepoint(value int4); insert into moon_pool_savepoint values (1)",

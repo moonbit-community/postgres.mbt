@@ -12,13 +12,13 @@ pub struct Column {
   /// Source table OID, or `0` when PostgreSQL cannot provide one.
   table_oid : @proto.Oid
   /// Source column number inside the table, or `0` when unavailable.
-  column_id : Int
+  column_id : Int32
   /// Resolved PostgreSQL type descriptor.
   type_ : Type
   /// Storage size reported by PostgreSQL, or `-1` for variable-width types.
-  type_size : Int
+  type_size : Int32
   /// Type modifier reported by PostgreSQL.
-  type_modifier : Int
+  type_modifier : Int32
   /// Wire format used for this column in the current result stream.
   format : WireFormat
 } derive(Debug, Eq)
@@ -50,7 +50,7 @@ pub fn Row::values(self : Row) -> ArrayView[Bytes?] {
 
 ///|
 /// Return the number of values in this row.
-pub fn Row::len(self : Row) -> Int {
+pub fn Row::len(self : Row) -> Int32 {
   self.values.length()
 }
 
@@ -59,7 +59,7 @@ pub fn Row::len(self : Row) -> Int {
 ///
 /// Column matching is exact and scans from left to right, so the first matching
 /// name wins when a query produces duplicate column labels.
-pub fn Row::index_of(self : Row, name : String) -> Int? {
+pub fn Row::index_of(self : Row, name : String) -> Int32? {
   for index, column in self.columns {
     if column.name == name {
       return Some(index)
@@ -73,7 +73,7 @@ pub fn Row::index_of(self : Row, name : String) -> Int? {
 ///
 /// This is the escape hatch for callers that want to perform custom decoding or
 /// inspect values that do not yet have a `FromSql` implementation.
-pub fn Row::get_raw(self : Row, index : Int) -> Bytes? {
+pub fn Row::get_raw(self : Row, index : Int32) -> Bytes? {
   self.values[index]
 }
 
@@ -93,7 +93,7 @@ pub fn Row::get_raw_name(self : Row, name : String) -> Bytes? raise {
 /// The compatibility check happens before any decoder code runs, so a custom
 /// `FromSql` implementation can rely on receiving a PostgreSQL type it claimed
 /// to support.
-pub fn[T : FromSql] Row::get(self : Row, index : Int) -> T raise {
+pub fn[T : FromSql] Row::get(self : Row, index : Int32) -> T raise {
   let column = self.columns[index]
   guard T::accepts(column.type_) else {
     raise wrong_type_error(T::moonbit_type_name(), column.type_)
@@ -117,7 +117,7 @@ pub fn[T : FromSql] Row::get_name(self : Row, name : String) -> T raise {
 
 ///|
 /// Decode the field at `index` as `T`, returning `None` when out of range.
-pub fn[T : FromSql] Row::try_get(self : Row, index : Int) -> T? raise {
+pub fn[T : FromSql] Row::try_get(self : Row, index : Int32) -> T? raise {
   if index < 0 || index >= self.len() {
     return None
   }
@@ -139,7 +139,7 @@ pub fn[T : FromSql] Row::try_get_name(self : Row, name : String) -> T? raise {
 ///
 /// This is shorthand for `self.get[String?](index)` and therefore preserves SQL
 /// `NULL` as `None`.
-pub fn Row::get_text(self : Row, index : Int) -> String? raise {
+pub fn Row::get_text(self : Row, index : Int32) -> String? raise {
   self.get(index)
 }
 

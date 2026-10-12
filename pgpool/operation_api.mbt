@@ -110,7 +110,7 @@ pub async fn[T] Session::run_cancellable(
 pub async fn Operation::query_all(
   self : Operation,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.run_request(client => client.query(sql, params~).collect())
 }
@@ -120,7 +120,7 @@ pub async fn Operation::query_all(
 pub async fn Operation::query_one(
   self : Operation,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row {
   self.run_request(client => client.query_one(sql, params~))
 }
@@ -130,7 +130,7 @@ pub async fn Operation::query_one(
 pub async fn Operation::query_opt(
   self : Operation,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
   self.run_request(client => client.query_opt(sql, params~))
 }
@@ -141,7 +141,7 @@ pub async fn Operation::query_typed_all(
   self : Operation,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.run_request(client => {
     client.query_typed(sql, param_types, params~).collect()
@@ -153,8 +153,8 @@ pub async fn Operation::query_typed_all(
 pub async fn Operation::execute(
   self : Operation,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
-) -> Int {
+  params~ : Array[&@client.ToSql] = [],
+) -> Int32 {
   self.run_request(client => client.execute(sql, params~))
 }
 

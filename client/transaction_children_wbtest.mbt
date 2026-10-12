@@ -162,12 +162,12 @@ async test "transaction stream scopes cover query statement and portal" {
         name: b"existing",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: @ref.Ref(false),
       }
       let portal : Portal = {
         name: b"existing_portal",
         columns: [],
-        closed: @ref.new(false),
+        closed: @ref.Ref(false),
       }
       let task = group.spawn(() => {
         client.with_transaction(tx => {
@@ -228,7 +228,7 @@ async test "manual completion drains its unfinished stream before final command"
         name: b"existing",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: @ref.Ref(false),
       }
       let created = group.spawn(() => tx.query_statement(statement))
       let execute = next_request()
@@ -272,7 +272,7 @@ async test "manual rollback recursively closes nested stream and savepoint" {
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: @ref.Ref(false),
     }
     let query = group.spawn(() => nested.query_statement(statement))
     let execute = next_request()
@@ -339,7 +339,7 @@ async test "cancellation after stream drain leaves manual commit rollbackable" {
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: @ref.Ref(false),
     }
     let created = group.spawn(() => tx.query_statement(statement))
     let execute = next_request()
@@ -375,7 +375,7 @@ async test "closing a transaction while a query is being created cleans it first
     let begin = group.spawn(() => client.transaction())
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let tx = begin.wait()
-    let delivered = @ref.new(false)
+    let delivered = @ref.Ref(false)
     let creator = group.spawn(allow_failure=true, () => {
       ignore(tx.query("select value"))
       delivered.val = true
@@ -442,7 +442,7 @@ async test "closing a transaction while creating a savepoint rolls it back" {
     let begin = group.spawn(() => client.transaction())
     next_request().responses.put(copy_test_ready_for_query_message(status=b'T'))
     let tx = begin.wait()
-    let delivered = @ref.new(false)
+    let delivered = @ref.Ref(false)
     let creator = group.spawn(allow_failure=true, () => {
       ignore(tx.savepoint("pending"))
       delivered.val = true
@@ -523,7 +523,7 @@ async test "transaction stream scope leaves its callback cancellable" {
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: @ref.Ref(false),
     }
     let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
     let wait_forever : @async.Queue[Unit] = Queue(kind=Unbounded)

@@ -7,9 +7,9 @@ async test "pgpool session gate rejects work after scope expiry" {
       pool: pool.shared,
       connection,
       gate: Mutex(),
-      active_ops: @ref.new(0),
-      releasing: @ref.new(true),
-      released: @ref.new(false),
+      active_ops: @ref.Ref(0),
+      releasing: @ref.Ref(true),
+      released: @ref.Ref(false),
     }
 
     expect_pool_lease_released(
@@ -41,9 +41,9 @@ async test "pgpool session release waits for the active gate owner" {
       pool: pool.shared,
       connection,
       gate: Mutex(),
-      active_ops: @ref.new(1),
-      releasing: @ref.new(false),
-      released: @ref.new(false),
+      active_ops: @ref.Ref(1),
+      releasing: @ref.Ref(false),
+      released: @ref.Ref(false),
     }
     assert_true(state.gate.try_acquire())
     let session : Session = { state, }

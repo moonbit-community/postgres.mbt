@@ -81,7 +81,7 @@ pub const READY_FOR_QUERY_TAG : Byte = b'Z'
 /// `len` includes the 4-byte length word itself, but not the initial tag byte.
 pub struct Header {
   tag : Byte
-  len : Int
+  len : Int32
 } derive(Debug)
 
 ///|
@@ -109,7 +109,7 @@ pub fn Header::parse(buf : BytesView) -> Header? raise @proto.ProtocolError {
 /// body.
 pub struct ParsedMessage {
   message : Message
-  consumed : Int
+  consumed : Int32
 }
 
 ///|
@@ -444,8 +444,8 @@ pub fn AuthenticationSaslFinalBody::data(
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-BACKENDKEYDATA
 pub struct BackendKeyDataBody {
-  process_id : Int
-  secret_key : Int
+  process_id : Int32
+  secret_key : Int32
 }
 
 ///|
@@ -510,7 +510,7 @@ pub fn CopyDataBody::data(self : CopyDataBody) -> BytesView {
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYINRESPONSE
 pub struct CopyInResponseBody {
   format : Byte
-  len : Int
+  len : Int32
   storage : Bytes
 }
 
@@ -527,14 +527,14 @@ pub fn CopyInResponseBody::column_formats(
 /// messages.
 pub struct ColumnFormats {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
 
 ///|
 /// Read the next COPY column format code.
 pub fn ColumnFormats::next(
   self : ColumnFormats,
-) -> Int? raise @proto.ProtocolError {
+) -> Int32? raise @proto.ProtocolError {
   if self.remaining == 0 {
     if self.buf.length() == 0 {
       return None
@@ -562,7 +562,7 @@ pub fn ColumnFormats::next(
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYOUTRESPONSE
 pub struct CopyOutResponseBody {
   format : Byte
-  len : Int
+  len : Int32
   storage : Bytes
 }
 
@@ -590,7 +590,7 @@ pub fn CopyOutResponseBody::column_formats(
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DATAROW
 pub struct DataRowBody {
   storage : Bytes
-  len : Int
+  len : Int32
 } derive(Debug, Eq)
 
 ///|
@@ -608,8 +608,8 @@ pub fn DataRowBody::buffer(self : DataRowBody) -> BytesView {
 ///|
 /// Half-open byte range into `DataRowBody::buffer`.
 pub struct ByteRange {
-  start : Int
-  end : Int
+  start : Int32
+  end : Int32
 }
 
 ///|
@@ -622,8 +622,8 @@ pub struct ByteRange {
 /// the original full message frame.
 pub struct DataRowRanges {
   mut buf : BytesView
-  len : Int
-  mut remaining : Int
+  len : Int32
+  mut remaining : Int32
 }
 
 ///|
@@ -756,7 +756,7 @@ pub fn NoticeResponseBody::fields(self : NoticeResponseBody) -> ErrorFields {
 /// See:
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-NOTIFICATIONRESPONSE
 pub struct NotificationResponseBody {
-  process_id : Int
+  process_id : Int32
   channel : Bytes
   message : Bytes
 }
@@ -807,7 +807,7 @@ pub fn NotificationResponseBody::message_str(
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PARAMETERDESCRIPTION
 pub struct ParameterDescriptionBody {
   storage : Bytes
-  len : Int
+  len : Int32
 }
 
 ///|
@@ -825,7 +825,7 @@ pub fn ParameterDescriptionBody::parameters(
 /// first 4-byte OID.
 pub struct Parameters {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
 
 ///|
@@ -931,7 +931,7 @@ pub struct ReadyForQueryBody {
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-ROWDESCRIPTION
 pub struct RowDescriptionBody {
   storage : Bytes
-  len : Int
+  len : Int32
 }
 
 ///|
@@ -947,7 +947,7 @@ pub fn RowDescriptionBody::fields(self : RowDescriptionBody) -> Fields {
 /// the first column descriptor.
 pub struct Fields {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
 
 ///|
@@ -998,11 +998,11 @@ pub fn Fields::next(self : Fields) -> Field? raise @proto.ProtocolError {
 pub struct Field {
   name : Bytes
   table_oid : @proto.Oid
-  column_id : Int
+  column_id : Int32
   type_oid : @proto.Oid
-  type_size : Int
-  type_modifier : Int
-  format : Int
+  type_size : Int32
+  type_modifier : Int32
+  format : Int32
 }
 
 ///|
@@ -1019,7 +1019,10 @@ pub fn Field::name_str(self : Field) -> String raise @proto.ProtocolError {
 
 ///|
 /// Find the next NUL terminator used by backend protocol `String` values.
-fn find_null(buf : BytesView, start : Int) -> Int raise @proto.ProtocolError {
+fn find_null(
+  buf : BytesView,
+  start : Int32,
+) -> Int32 raise @proto.ProtocolError {
   let mut i = start
   while i < buf.length() {
     if buf[i] == 0 {

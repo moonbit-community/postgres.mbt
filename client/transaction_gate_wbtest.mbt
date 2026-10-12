@@ -1,20 +1,20 @@
 ///|
 async test "failed top-level commit finishes transaction and releases client" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(@ref.Ref(None))
     let client : Client = { shared, }
     let root_permit = shared.operation_gate.acquire()
     let transaction : Transaction = {
       client,
       context: client.operation_context(),
       scope_gate: OperationGate::new(),
-      child: @ref.new(None),
-      scoped_resources: @ref.new(0),
-      closing: @ref.new(None),
+      child: @ref.Ref(None),
+      scoped_resources: @ref.Ref(0),
+      closing: @ref.Ref(None),
       root_permit: Some(root_permit),
       parent_permit: None,
       savepoint: None,
-      finished: @ref.new(false),
+      finished: @ref.Ref(false),
     }
     group.spawn_bg(() => {
       let request = shared.requests.get()
@@ -38,7 +38,7 @@ async test "failed top-level commit finishes transaction and releases client" {
 ///|
 async test "failed nested completion returns its permit to parent transaction" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(@ref.Ref(None))
     let client : Client = { shared, }
     let parent_gate = OperationGate::new()
     let parent_permit = parent_gate.acquire()
@@ -46,13 +46,13 @@ async test "failed nested completion returns its permit to parent transaction" {
       client,
       context: client.operation_context(),
       scope_gate: OperationGate::new(),
-      child: @ref.new(None),
-      scoped_resources: @ref.new(0),
-      closing: @ref.new(None),
+      child: @ref.Ref(None),
+      scoped_resources: @ref.Ref(0),
+      closing: @ref.Ref(None),
       root_permit: None,
       parent_permit: Some(parent_permit),
       savepoint: Some("nested"),
-      finished: @ref.new(false),
+      finished: @ref.Ref(false),
     }
     group.spawn_bg(() => {
       let request = shared.requests.get()

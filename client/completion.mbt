@@ -10,8 +10,8 @@ priv struct Completion {
 ///|
 fn Completion::new() -> Completion {
   {
-    done: @ref.new(false),
-    error: @ref.new(None),
+    done: @ref.Ref(false),
+    error: @ref.Ref(None),
     signal: Queue(kind=Unbounded),
   }
 }
@@ -43,13 +43,13 @@ async fn Completion::wait(self : Completion) -> Unit {
 priv struct DrainControl {
   queue : @async.Queue[async () -> Unit]
   pending : Array[DrainCompletion]
-  next_id : @ref.Ref[Int]
+  next_id : @ref.Ref[Int32]
   closed : @ref.Ref[Bool]
 }
 
 ///|
 priv struct DrainCompletion {
-  id : Int
+  id : Int32
   completion : Completion
 }
 
@@ -58,15 +58,15 @@ fn DrainControl::new() -> DrainControl {
   {
     queue: Queue(kind=Unbounded),
     pending: [],
-    next_id: @ref.new(0),
-    closed: @ref.new(false),
+    next_id: @ref.Ref(0),
+    closed: @ref.Ref(false),
   }
 }
 
 ///|
 fn DrainControl::finish(
   self : DrainControl,
-  id : Int,
+  id : Int32,
   completion : Completion,
   error : Error?,
 ) -> Unit {
@@ -82,7 +82,7 @@ fn DrainControl::finish(
 ///|
 fn DrainControl::close(
   self : DrainControl,
-  error? : Error = ClientError::Closed("connection is closed"),
+  error~ : Error = ClientError::Closed("connection is closed"),
 ) -> Unit {
   if self.closed.val {
     return

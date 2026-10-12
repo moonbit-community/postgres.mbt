@@ -5,7 +5,7 @@
 pub async fn Pool::query_all(
   self : Pool,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_session(session => session.query_all(sql, params~))
 }
@@ -15,7 +15,7 @@ pub async fn Pool::query_all(
 pub async fn Pool::query_one(
   self : Pool,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row {
   self.with_session(session => session.query_one(sql, params~))
 }
@@ -25,7 +25,7 @@ pub async fn Pool::query_one(
 pub async fn Pool::query_opt(
   self : Pool,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
   self.with_session(session => session.query_opt(sql, params~))
 }
@@ -36,7 +36,7 @@ pub async fn Pool::query_typed_all(
   self : Pool,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_session(session => {
     session.query_typed_all(sql, param_types, params~)
@@ -48,8 +48,8 @@ pub async fn Pool::query_typed_all(
 pub async fn Pool::execute(
   self : Pool,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
-) -> Int {
+  params~ : Array[&@client.ToSql] = [],
+) -> Int32 {
   self.with_session(session => session.execute(sql, params~))
 }
 
@@ -70,7 +70,7 @@ pub async fn Pool::check_connection(self : Pool) -> Unit {
 pub async fn[T] Pool::with_transaction(
   self : Pool,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions(),
+  options~ : TransactionOptions = TransactionOptions(),
 ) -> T {
   self.with_session(session => session.with_transaction(f, options~))
 }

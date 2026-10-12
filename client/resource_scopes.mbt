@@ -11,7 +11,7 @@ priv struct ScopedStatementState {
   owner : ScopedStatementOwner
   statement : Statement
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
+  active_calls : @ref.Ref[Int32]
 }
 
 ///|
@@ -31,7 +31,7 @@ priv struct ScopedPortalState {
   transaction : Transaction
   portal : Portal
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
+  active_calls : @ref.Ref[Int32]
 }
 
 ///|
@@ -71,8 +71,8 @@ fn ScopedStatement::new(
     state: {
       owner,
       statement,
-      active: @ref.new(true),
-      active_calls: @ref.new(0),
+      active: @ref.Ref(true),
+      active_calls: @ref.Ref(0),
     },
   }
 }
@@ -87,8 +87,8 @@ fn ScopedPortal::new(
     state: {
       transaction,
       portal,
-      active: @ref.new(true),
-      active_calls: @ref.new(0),
+      active: @ref.Ref(true),
+      active_calls: @ref.Ref(0),
     },
   }
 }
@@ -231,7 +231,7 @@ pub async fn[T] Transaction::with_prepared_typed(
 /// Execute one statement stream and finish it before this call returns.
 pub async fn[T] ScopedStatement::with_stream(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.state.begin_call()
@@ -250,8 +250,8 @@ pub async fn[T] ScopedStatement::with_stream(
 /// Execute this prepared statement and return its affected row count.
 pub async fn ScopedStatement::execute(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
-) -> Int {
+  params~ : Array[&ToSql] = [],
+) -> Int32 {
   self.state.begin_call()
   defer {
     self.state.active_calls.val -= 1
@@ -267,7 +267,7 @@ pub async fn ScopedStatement::execute(
 /// Bind a portal from a transaction-owned scoped statement.
 pub async fn[T] ScopedStatement::with_portal(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (ScopedPortal) -> T,
 ) -> T {
   self.state.begin_call()
@@ -287,7 +287,7 @@ pub async fn[T] ScopedStatement::with_portal(
 pub async fn[T] Transaction::with_portal(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (ScopedPortal) -> T,
 ) -> T {
   self.assert_open()
@@ -317,7 +317,7 @@ pub async fn[T] Transaction::with_portal(
 /// Fetch rows from this portal, finishing the stream on every exit.
 pub async fn[T] ScopedPortal::with_stream(
   self : ScopedPortal,
-  max_rows : Int,
+  max_rows : Int32,
   f : async (RowStream) -> T,
 ) -> T {
   self.state.begin_call()
@@ -329,7 +329,7 @@ pub async fn[T] ScopedPortal::with_stream(
 
 ///|
 /// Execute this portal to completion and return its affected row count.
-pub async fn ScopedPortal::execute(self : ScopedPortal) -> Int {
+pub async fn ScopedPortal::execute(self : ScopedPortal) -> Int32 {
   self.with_stream(0, stream => {
     let summary = stream.finish()
     rows_affected(summary.command_tag)

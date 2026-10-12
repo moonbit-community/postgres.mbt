@@ -8,7 +8,7 @@
 pub async fn Session::query_all(
   self : Session,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_prepared(sql, prepared => prepared.query_all(params~))
 }
@@ -20,7 +20,7 @@ pub async fn Session::query_all(
 pub async fn Session::query_one(
   self : Session,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row {
   self.with_prepared(sql, prepared => prepared.query_one(params~))
 }
@@ -32,7 +32,7 @@ pub async fn Session::query_one(
 pub async fn Session::query_opt(
   self : Session,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
   self.with_prepared(sql, prepared => prepared.query_opt(params~))
 }
@@ -43,7 +43,7 @@ pub async fn Session::query_typed_all(
   self : Session,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_prepared_typed(sql, param_types, prepared => {
     prepared.query_all(params~)
@@ -55,8 +55,8 @@ pub async fn Session::query_typed_all(
 pub async fn Session::execute(
   self : Session,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
-) -> Int {
+  params~ : Array[&@client.ToSql] = [],
+) -> Int32 {
   self.with_prepared(sql, prepared => prepared.execute(params~))
 }
 

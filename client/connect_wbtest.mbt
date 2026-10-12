@@ -32,8 +32,8 @@ fn parameter_status_packet(
 
 ///|
 fn backend_key_data_packet(
-  process_id : Int,
-  secret_key : Int,
+  process_id : Int32,
+  secret_key : Int32,
 ) -> Bytes raise @proto.ProtocolError {
   let payload = Buffer()
   payload.write_int_be(process_id)
@@ -51,9 +51,9 @@ fn ready_for_query_packet(status : Byte) -> Bytes raise @proto.ProtocolError {
 ///|
 fn make_shared(
   group? : @async.TaskGroup[Unit],
-  parameters? : Map[String, String] = {},
-  closed? : Bool = false,
-  closing? : Bool = false,
+  parameters~ : Map[String, String] = {},
+  closed~ : Bool = false,
+  closing~ : Bool = false,
 ) -> Shared {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
@@ -72,26 +72,26 @@ fn make_shared(
     ),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
-    dropped_async_messages: @ref.new(0L),
-    async_message_handler: @ref.new(None),
-    root_transaction_occupancy: @ref.new(0),
+    dropped_async_messages: @ref.Ref(0L),
+    async_message_handler: @ref.Ref(None),
+    root_transaction_occupancy: @ref.Ref(0),
     control,
     ready,
     done: Completion::new(),
-    started: @ref.new(true),
-    runtime_error: @ref.new(None),
+    started: @ref.Ref(true),
+    runtime_error: @ref.Ref(None),
     parameters,
     types,
-    process_id: @ref.new(321),
-    secret_key: @ref.new(654),
-    transaction_status: @ref.new(b'I'),
-    closed: @ref.new(closed),
-    closing: @ref.new(closing),
-    close_requested: @ref.new(false),
-    aborted: @ref.new(false),
+    process_id: @ref.Ref(321),
+    secret_key: @ref.Ref(654),
+    transaction_status: @ref.Ref(b'I'),
+    closed: @ref.Ref(closed),
+    closing: @ref.Ref(closing),
+    close_requested: @ref.Ref(false),
+    aborted: @ref.Ref(false),
     operation_gate: OperationGate::new(),
-    driver_task: @ref.new(None),
-    next_id: @ref.new(0),
+    driver_task: @ref.Ref(None),
+    next_id: @ref.Ref(0),
   }
 }
 

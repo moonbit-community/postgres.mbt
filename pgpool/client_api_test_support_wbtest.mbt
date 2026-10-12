@@ -32,7 +32,7 @@ fn client_api_test_pool(group : @async.TaskGroup[Unit]) -> Pool raise {
 fn start_test_pool(
   config : Config,
   group : @async.TaskGroup[Unit],
-  options? : PoolOptions = PoolOptions(),
+  options~ : PoolOptions = PoolOptions(),
 ) -> Pool raise {
   let (pool, executor) = Pool::create(config, options~)
   group.spawn_bg(allow_failure=true, () => executor.run())
@@ -53,11 +53,11 @@ async fn start_test_client(
 ///|
 fn client_api_test_connection(
   _group : @async.TaskGroup[Unit],
-  id? : Int = 1,
+  id~ : Int32 = 1,
 ) -> ConnectionState {
   {
     id,
-    client: @ref.new(None),
+    client: @ref.Ref(None),
     statement_cache_capacity: 100,
     statement_cache: [],
   }

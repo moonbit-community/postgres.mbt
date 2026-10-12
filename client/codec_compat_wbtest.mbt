@@ -1,5 +1,5 @@
 ///|
-fn make_row(type_ : Type, raw : Bytes, format? : WireFormat = Text) -> Row {
+fn make_row(type_ : Type, raw : Bytes, format~ : WireFormat = Text) -> Row {
   let columns : Array[Column] = [
     {
       name: "value",
@@ -87,16 +87,16 @@ test "built-in FromSql compatibility remains stable" {
   let bool_value : Bool = make_row(Type::bool(), b"true").get(0)
   @debug.assert_eq(bool_value, true)
 
-  let int2_value : Int = make_row(Type::int2(), b"7").get(0)
+  let int2_value : Int32 = make_row(Type::int2(), b"7").get(0)
   @debug.assert_eq(int2_value, 7)
 
-  let int4_value : Int = make_row(Type::int4(), b"9").get(0)
+  let int4_value : Int32 = make_row(Type::int4(), b"9").get(0)
   @debug.assert_eq(int4_value, 9)
 
   let int8_value : Int64 = make_row(Type::int8(), b"11").get(0)
   @debug.assert_eq(int8_value, 11L)
 
-  let oid_value : UInt = make_row(Type::oid_type(), b"13").get(0)
+  let oid_value : UInt32 = make_row(Type::oid_type(), b"13").get(0)
   @debug.assert_eq(oid_value, 13U)
 
   let float_value : Float = make_row(Type::float4(), b"1.5").get(0)
@@ -154,7 +154,7 @@ test "built-in Array codecs support binary arrays" {
   guard encoded_ints.value is Some(int_bytes) else {
     fail("expected encoded int array bytes")
   }
-  let decoded_ints : Array[Int] = make_row(
+  let decoded_ints : Array[Int32] = make_row(
     Type::int4_array(),
     int_bytes,
     format=Binary,
@@ -228,7 +228,7 @@ test "built-in Array codecs reject unsupported and mismatched arrays" {
 ///|
 test "built-in FromSql rejects unsupported types before decoding" {
   let int_error = @test.expect_error(() => {
-    let _ : Int = make_row(Type::int8(), b"1").get(0)
+    let _ : Int32 = make_row(Type::int8(), b"1").get(0)
   })
   guard int_error is ClientError::WrongType(_) else {
     fail("expected int wrong type")

@@ -10,7 +10,7 @@ fn[T] invalid_utf8() -> T raise ProtocolError {
 }
 
 ///|
-fn byte_in_range(b : Byte, lower : Int, upper : Int) -> Bool {
+fn byte_in_range(b : Byte, lower : Int32, upper : Int32) -> Bool {
   let value = b.to_int()
   value >= lower && value <= upper
 }
@@ -36,8 +36,8 @@ fn consume_two_byte_scalar(bytes : BytesView) -> BytesView raise ProtocolError {
 ///|
 fn consume_three_byte_scalar(
   bytes : BytesView,
-  second_lower : Int,
-  second_upper : Int,
+  second_lower : Int32,
+  second_upper : Int32,
 ) -> BytesView raise ProtocolError {
   match bytes {
     [_, b1, b2, .. tail] =>
@@ -54,8 +54,8 @@ fn consume_three_byte_scalar(
 ///|
 fn consume_four_byte_scalar(
   bytes : BytesView,
-  second_lower : Int,
-  second_upper : Int,
+  second_lower : Int32,
+  second_upper : Int32,
 ) -> BytesView raise ProtocolError {
   match bytes {
     [_, b1, b2, b3, .. tail] =>

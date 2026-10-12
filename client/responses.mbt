@@ -6,8 +6,8 @@ fn RowStream::new(
   control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
-  initial_columns? : Array[Column] = [],
-  cleanup? : StreamCleanup? = None,
+  initial_columns~ : Array[Column] = [],
+  cleanup~ : StreamCleanup? = None,
 ) -> RowStream {
   {
     control,
@@ -174,7 +174,7 @@ async fn read_prepare_response(
 /// Drain the backend completion sequence for COPY IN and return affected rows.
 async fn collect_copy_in_completion(
   responses : @async.Queue[@backend.Message],
-) -> Int {
+) -> Int32 {
   let mut command_tag = ""
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
@@ -281,7 +281,7 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
 
 ///|
 /// Extract the trailing numeric row count from a PostgreSQL command tag.
-fn rows_affected(command_tag : String) -> Int {
+fn rows_affected(command_tag : String) -> Int32 {
   if command_tag.split(" ").last() is Some(last) {
     @string.parse_int(last) catch {
       _ => 0

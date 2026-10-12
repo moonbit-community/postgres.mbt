@@ -33,7 +33,7 @@ async fn assert_copy_in_early_error_reuses_connection(
   )
   @debug.assert_eq(database_error.code, Some("22P02"))
 
-  let probe : Int = client
+  let probe : Int32 = client
     .query_one("select 31::int4 as value")
     .get_name("value")
   @debug.assert_eq(probe, 31)
@@ -80,7 +80,7 @@ async test "integration copy in startup error keeps connection reusable" {
     )
     @debug.assert_eq(err.code, Some("42P01"))
 
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 17::int4 as value")
       .get_name("value")
     @debug.assert_eq(probe, 17)
@@ -115,7 +115,7 @@ async test "integration copy in finish closes sink and commits rows" {
     )
     @debug.assert_eq(finish_closed, "copy sink already finished")
 
-    let count : Int = client
+    let count : Int32 = client
       .query_one("select count(*)::int4 as value from moon_copy_finish")
       .get_name("value")
     @debug.assert_eq(count, 2)
@@ -140,7 +140,7 @@ async test "integration copy out collect keeps connection reusable" {
     )
     assert_true(stream.collect() == [b"alpha\n", b"beta\n"])
 
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 23::int4 as value")
       .get_name("value")
     @debug.assert_eq(probe, 23)
@@ -166,7 +166,7 @@ async test "integration copy out finish drains large payload and keeps connectio
     assert_true(stream.formats() == [Text])
     stream.finish()
 
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 29::int4 as value")
       .get_name("value")
     @debug.assert_eq(probe, 29)

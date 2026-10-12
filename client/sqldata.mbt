@@ -8,7 +8,7 @@ pub(all) enum WireFormat {
 } derive(Debug, Eq)
 
 ///|
-fn encode_wire_format(format : WireFormat) -> Int {
+fn encode_wire_format(format : WireFormat) -> Int32 {
   match format {
     Text => 0
     Binary => 1
@@ -16,7 +16,7 @@ fn encode_wire_format(format : WireFormat) -> Int {
 }
 
 ///|
-fn decode_wire_format(code : Int) -> WireFormat raise {
+fn decode_wire_format(code : Int32) -> WireFormat raise {
   match code {
     0 => Text
     1 => Binary

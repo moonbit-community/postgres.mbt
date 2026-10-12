@@ -1,5 +1,5 @@
 ///|
-fn secure_random_bytes(num : Int) -> Bytes raise {
+fn secure_random_bytes(num : Int32) -> Bytes raise {
   if @env.rand(num) is Some(bytes) {
     bytes
   } else {

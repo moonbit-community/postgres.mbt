@@ -37,7 +37,7 @@ pub impl FromSql for Bool with fn from_sql(_, format, raw) {
 
 ///|
 // `Int` is intentionally limited to PostgreSQL `int2` and `int4`.
-pub impl ToSql for Int with fn to_sql(self, type_, buf) {
+pub impl ToSql for Int32 with fn to_sql(self, type_, buf) {
   match type_.oid {
     INT2_OID => @types.int2_to_sql(self, buf)
     INT4_OID => @types.int4_to_sql(self, buf)
@@ -47,7 +47,7 @@ pub impl ToSql for Int with fn to_sql(self, type_, buf) {
 }
 
 ///|
-pub impl ToSql for Int with fn accepts(_, type_) {
+pub impl ToSql for Int32 with fn accepts(_, type_) {
   match type_.oid {
     INT2_OID | INT4_OID => true
     _ => false
@@ -55,12 +55,12 @@ pub impl ToSql for Int with fn accepts(_, type_) {
 }
 
 ///|
-pub impl ToSql for Int with fn moonbit_type_name(_) {
+pub impl ToSql for Int32 with fn moonbit_type_name(_) {
   "Int"
 }
 
 ///|
-pub impl FromSql for Int with fn from_sql(type_, format, raw) {
+pub impl FromSql for Int32 with fn from_sql(type_, format, raw) {
   match format {
     Text => @string.parse_int(decode_utf8(raw))
     Binary =>
@@ -73,7 +73,7 @@ pub impl FromSql for Int with fn from_sql(type_, format, raw) {
 }
 
 ///|
-pub impl FromSql for Int with fn accepts(type_) {
+pub impl FromSql for Int32 with fn accepts(type_) {
   match type_.oid {
     INT2_OID | INT4_OID => true
     _ => false
@@ -81,7 +81,7 @@ pub impl FromSql for Int with fn accepts(type_) {
 }
 
 ///|
-pub impl FromSql for Int with fn moonbit_type_name() {
+pub impl FromSql for Int32 with fn moonbit_type_name() {
   "Int"
 }
 
@@ -192,33 +192,33 @@ pub impl FromSql for Double with fn from_sql(_, format, raw) {
 
 ///|
 // `UInt` is reserved for PostgreSQL `oid`.
-pub impl ToSql for UInt with fn accepts(_, type_) {
+pub impl ToSql for UInt32 with fn accepts(_, type_) {
   type_.oid == OID_TYPE_OID
 }
 
 ///|
-pub impl ToSql for UInt with fn moonbit_type_name(_) {
+pub impl ToSql for UInt32 with fn moonbit_type_name(_) {
   "UInt"
 }
 
 ///|
-pub impl ToSql for UInt with fn to_sql(self, _, buf) {
+pub impl ToSql for UInt32 with fn to_sql(self, _, buf) {
   @types.oid_to_sql(self, buf)
   No
 }
 
 ///|
-pub impl FromSql for UInt with fn accepts(type_) {
+pub impl FromSql for UInt32 with fn accepts(type_) {
   type_.oid == OID_TYPE_OID
 }
 
 ///|
-pub impl FromSql for UInt with fn moonbit_type_name() {
+pub impl FromSql for UInt32 with fn moonbit_type_name() {
   "UInt"
 }
 
 ///|
-pub impl FromSql for UInt with fn from_sql(_, format, raw) {
+pub impl FromSql for UInt32 with fn from_sql(_, format, raw) {
   match format {
     Text => @string.parse_uint(decode_utf8(raw))
     Binary => @types.oid_from_sql(raw)

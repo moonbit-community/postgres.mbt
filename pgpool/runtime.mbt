@@ -20,9 +20,9 @@ priv struct Shared {
   started : @ref.Ref[Bool]
   create_requests : @async.Queue[CreateRequest]
   close_requests : @async.Queue[@client.Client]
-  pending_creations : @ref.Ref[Int]
+  pending_creations : @ref.Ref[Int32]
   active_creations : Array[CreateRequest]
-  next_creation_id : @ref.Ref[Int]
+  next_creation_id : @ref.Ref[Int32]
   targets : Array[@client.Config]
   connector : Connector
   post_create : (async (Operation) -> Unit)?
@@ -32,14 +32,14 @@ priv struct Shared {
   load_balance_hosts : LoadBalanceHosts
   pool_config : @ref.Ref[PoolConfig]
   slots : @async.Queue[Unit]
-  resize_debt : @ref.Ref[Int]
+  resize_debt : @ref.Ref[Int32]
   idle : Array[ConnectionState]
   connections : Array[ConnectionState]
-  next_connection_id : @ref.Ref[Int]
+  next_connection_id : @ref.Ref[Int32]
   async_messages : @async.Queue[PoolAsyncMessage]
   dropped_async_messages : @ref.Ref[Int64]
-  size : @ref.Ref[Int]
-  waiting : @ref.Ref[Int]
+  size : @ref.Ref[Int32]
+  waiting : @ref.Ref[Int32]
   closed : @ref.Ref[Bool]
 }
 
@@ -55,7 +55,7 @@ struct Pool {
 ///|
 /// Asynchronous backend message tagged with its physical pool connection.
 pub struct PoolAsyncMessage {
-  connection_id : Int
+  connection_id : Int32
   message : @client.AsyncMessage
 } derive(Debug, Eq)
 
@@ -73,10 +73,10 @@ struct PoolExecutor {
 
 ///|
 priv struct CreateRequest {
-  id : Int
-  physical_id : Int
+  id : Int32
+  physical_id : Int32
   target : @client.Config
-  result : @async.Queue[(@client.Client, Int)]
+  result : @async.Queue[(@client.Client, Int32)]
   cancelled : @ref.Ref[Bool]
   task : @ref.Ref[@async.Task[Unit]?]
 }
@@ -106,9 +106,9 @@ pub struct PoolOptions {
 ///|
 /// Physical PostgreSQL session plus its connection-local statement cache.
 priv struct ConnectionState {
-  id : Int
+  id : Int32
   client : @ref.Ref[@client.Client?]
-  statement_cache_capacity : Int
+  statement_cache_capacity : Int32
   statement_cache : Array[CachedStatementEntry]
 }
 
@@ -118,7 +118,7 @@ priv struct CachedStatementEntry {
   sql : String
   param_types : Array[@client.Type]
   statement : @client.Statement
-  in_use : @ref.Ref[Int]
+  in_use : @ref.Ref[Int32]
   evicted : @ref.Ref[Bool]
 }
 
@@ -148,7 +148,7 @@ priv struct PreparedStatementState {
   scope : PreparedStatementScope
   handle : PreparedStatementHandle
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
+  active_calls : @ref.Ref[Int32]
   released : @ref.Ref[Bool]
 }
 
@@ -158,7 +158,7 @@ priv struct ClientLeaseState {
   pool : Shared
   connection : ConnectionState
   gate : @async.Mutex
-  active_ops : @ref.Ref[Int]
+  active_ops : @ref.Ref[Int32]
   releasing : @ref.Ref[Bool]
   released : @ref.Ref[Bool]
 }
@@ -224,7 +224,7 @@ pub(open) trait GenericClient {
     params? : Array[&@client.ToSql],
   ) -> Array[@client.Row]
   /// Execute one command and return its affected row count.
-  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int
+  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> Int32
   /// Execute one or more SQL commands that do not return rows.
   async fn batch_execute(Self, String) -> Unit
   /// Perform a lightweight round-trip health check.
@@ -240,10 +240,10 @@ priv struct OperationScopeState {
   active : @ref.Ref[Bool]
   closing : @ref.Ref[Bool]
   request_in_flight : @ref.Ref[Bool]
-  next_request_id : @ref.Ref[Int]
-  active_request_id : @ref.Ref[Int]
-  last_cancelled_request_id : @ref.Ref[Int]
-  cancel_in_flight : @ref.Ref[Int]
+  next_request_id : @ref.Ref[Int32]
+  active_request_id : @ref.Ref[Int32]
+  last_cancelled_request_id : @ref.Ref[Int32]
+  cancel_in_flight : @ref.Ref[Int32]
 }
 
 ///|
@@ -301,9 +301,9 @@ fn Session::new(pool : Shared, connection : ConnectionState) -> Session {
       pool,
       connection,
       gate: Mutex(),
-      active_ops: @ref.new(0),
-      releasing: @ref.new(false),
-      released: @ref.new(false),
+      active_ops: @ref.Ref(0),
+      releasing: @ref.Ref(false),
+      released: @ref.Ref(false),
     },
   }
 }
@@ -322,13 +322,13 @@ fn make_pooled_operation(
     connection,
     cancel_token: client.cancel_token(),
     gate: Mutex(),
-    active: @ref.new(true),
-    closing: @ref.new(false),
-    request_in_flight: @ref.new(false),
-    next_request_id: @ref.new(0),
-    active_request_id: @ref.new(0),
-    last_cancelled_request_id: @ref.new(0),
-    cancel_in_flight: @ref.new(0),
+    active: @ref.Ref(true),
+    closing: @ref.Ref(false),
+    request_in_flight: @ref.Ref(false),
+    next_request_id: @ref.Ref(0),
+    active_request_id: @ref.Ref(0),
+    last_cancelled_request_id: @ref.Ref(0),
+    cancel_in_flight: @ref.Ref(0),
   }
   ({ state, }, { state, })
 }
@@ -343,11 +343,11 @@ fn Transaction::new(
   {
     state: {
       connection,
-      transaction: @ref.new(Some(transaction)),
+      transaction: @ref.Ref(Some(transaction)),
       gate: Mutex(),
-      finished: @ref.new(false),
+      finished: @ref.Ref(false),
       owner,
-      owner_released: @ref.new(false),
+      owner_released: @ref.Ref(false),
     },
   }
 }
@@ -380,9 +380,9 @@ fn PreparedStatement::new(
     state: {
       scope,
       handle,
-      active: @ref.new(true),
-      active_calls: @ref.new(0),
-      released: @ref.new(false),
+      active: @ref.Ref(true),
+      active_calls: @ref.Ref(0),
+      released: @ref.Ref(false),
     },
   }
 }

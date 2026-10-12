@@ -35,7 +35,7 @@ async fn _pool_quick_start(
     let (pool, executor) = @pgpool.Pool::create(config)
     let task = group.spawn(no_wait=true, () => executor.run())
     pool.ready()
-    let value : Int = pool
+    let value : Int32 = pool
       .query_one("select 1::int4 as value")
       .get_name("value")
     ignore(value)
@@ -61,7 +61,7 @@ session:
 
 ```mbt check
 ///|
-async fn _session_example(pool : @pgpool.Pool) -> Int {
+async fn _session_example(pool : @pgpool.Pool) -> Int32 {
   pool.with_session(session => {
     session.batch_execute("set application_name = 'pool-example'")
     session.query_one("select 42::int4 as value").get_name("value")
@@ -205,7 +205,7 @@ async fn _cancellable(pool : @pgpool.Pool) -> Unit {
             @async.sleep(50)
             token.cancel()
           })
-          let value : Int = op
+          let value : Int32 = op
             .query_one("select pg_sleep(5), 1::int4 as value")
             .get_name("value")
           ignore(value)

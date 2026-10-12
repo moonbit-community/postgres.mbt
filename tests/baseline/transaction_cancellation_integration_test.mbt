@@ -38,14 +38,14 @@ async test "integration client transaction cancellation rolls back" {
         wait_for_cancel()
       })
     })
-    let count : Int = client
+    let count : Int32 = client
       .query_one("select count(*)::int4 as value from moon_tx_cancel")
       .get_name("value")
     assert_eq(count, 0)
     client.with_transaction(tx => {
       tx.batch_execute("insert into moon_tx_cancel values (2)")
     })
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select value from moon_tx_cancel")
       .get_name("value")
     assert_eq(value, 2)
@@ -74,14 +74,14 @@ async test "integration pool transaction cancellation releases lease" {
       })
     })
     pool.with_session(client => {
-      let count : Int = client
+      let count : Int32 = client
         .query_one("select count(*)::int4 as value from moon_tx_cancel")
         .get_name("value")
       assert_eq(count, 0)
       client.with_transaction(tx => {
         tx.batch_execute("insert into moon_tx_cancel values (2)")
       })
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select value from moon_tx_cancel")
         .get_name("value")
       assert_eq(value, 2)
@@ -115,12 +115,12 @@ async test "integration pool nested transaction cancellation preserves outer wor
             wait_for_cancel()
           })
         })
-        let value : Int = outer
+        let value : Int32 = outer
           .query_one("select value from moon_tx_cancel")
           .get_name("value")
         assert_eq(value, 1)
       })
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select value from moon_tx_cancel")
         .get_name("value")
       assert_eq(value, 1)

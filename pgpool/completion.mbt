@@ -10,8 +10,8 @@ priv struct Completion {
 ///|
 fn Completion::new() -> Completion {
   {
-    done: @ref.new(false),
-    error: @ref.new(None),
+    done: @ref.Ref(false),
+    error: @ref.Ref(None),
     signal: Queue(kind=Unbounded),
   }
 }

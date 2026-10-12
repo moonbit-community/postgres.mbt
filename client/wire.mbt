@@ -82,7 +82,10 @@ fn bind_portal_bytes(
 
 ///|
 /// Encode Execute + Sync for portal execution.
-fn execute_portal_bytes(portal_name : BytesView, max_rows : Int) -> Bytes raise {
+fn execute_portal_bytes(
+  portal_name : BytesView,
+  max_rows : Int32,
+) -> Bytes raise {
   let buf = Buffer()
   @frontend.execute(portal_name, max_rows, buf)
   @frontend.sync(buf)

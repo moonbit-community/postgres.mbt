@@ -2,11 +2,11 @@
 struct TestColumnSpec {
   name : Bytes
   table_oid : @proto.Oid
-  column_id : Int
+  column_id : Int32
   type_oid : @proto.Oid
-  type_size : Int
-  type_modifier : Int
-  format : Int
+  type_size : Int32
+  type_modifier : Int32
+  format : Int32
 }
 
 ///|
@@ -78,7 +78,7 @@ fn make_data_row_body(values : Array[Bytes?]) -> @backend.DataRowBody raise {
 }
 
 ///|
-fn make_copy_formats(formats : Array[Int]) -> @backend.ColumnFormats raise {
+fn make_copy_formats(formats : Array[Int32]) -> @backend.ColumnFormats raise {
   let payload = Buffer()
   payload.write_byte(0)
   payload.write_int16_be(@proto.checked_i16(formats.length()))
@@ -278,7 +278,7 @@ test "backend parsing merges stream columns and reports mismatches" {
 
 ///|
 async test "backend parsing fail_response_stream closes queue with error" {
-  let responses : @async.Queue[Int] = Queue(kind=Unbounded)
+  let responses : @async.Queue[Int32] = Queue(kind=Unbounded)
   let result = expect_error_async(() => {
     let _ : Unit = fail_response_stream(
       responses,

@@ -8,7 +8,7 @@
 /// `Transaction` keeps the connection checked out until commit or rollback.
 async fn Session::transaction(
   self : Session,
-  options? : TransactionOptions = TransactionOptions(),
+  options~ : TransactionOptions = TransactionOptions(),
 ) -> Transaction {
   let (client, connection) = self.state.begin_transaction_scope()
   errdefer self.state.finish_transaction_scope()
@@ -30,7 +30,7 @@ async fn Session::transaction(
 pub async fn[T] Session::with_transaction(
   self : Session,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions(),
+  options~ : TransactionOptions = TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer (if !transaction.state.finished.val {
@@ -289,7 +289,7 @@ pub async fn[T] Transaction::with_savepoint(
 pub async fn Transaction::query_all(
   self : Transaction,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_prepared(sql, prepared => prepared.query_all(params~))
 }
@@ -303,7 +303,7 @@ pub async fn Transaction::query_all(
 pub async fn Transaction::query_one(
   self : Transaction,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row {
   self.with_prepared(sql, prepared => prepared.query_one(params~))
 }
@@ -316,7 +316,7 @@ pub async fn Transaction::query_one(
 pub async fn Transaction::query_opt(
   self : Transaction,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
   self.with_prepared(sql, prepared => prepared.query_opt(params~))
 }
@@ -329,7 +329,7 @@ pub async fn Transaction::query_typed_all(
   self : Transaction,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.with_prepared_typed(sql, param_types, prepared => {
     prepared.query_all(params~)
@@ -341,8 +341,8 @@ pub async fn Transaction::query_typed_all(
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
-) -> Int {
+  params~ : Array[&@client.ToSql] = [],
+) -> Int32 {
   self.with_prepared(sql, prepared => prepared.execute(params~))
 }
 

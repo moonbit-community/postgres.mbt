@@ -1,6 +1,6 @@
 ///|
-fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int] raise {
-  let values : Array[Int] = []
+fn transaction_row_values(rows : Array[@client.Row]) -> Array[Int32] raise {
+  let values : Array[Int32] = []
   for row in rows {
     values.push(row.get_name("value"))
   }
@@ -25,14 +25,14 @@ async test "integration quoted savepoint identifiers and SQL text" {
     let released = tx.savepoint("MiXeD \"名字\"; work")
     released.commit()
     let injected = tx.savepoint("x; INSERT INTO pg_temp.marker VALUES (1); --")
-    let before_rollback : Int = injected
+    let before_rollback : Int32 = injected
     .query("select count(*)::int4 from marker")
     .collect()[0].get(0)
     assert_eq(before_rollback, 0)
     injected.rollback()
     let rolled_back = tx.savepoint("Rollback \"雪\"; work")
     rolled_back.rollback()
-    let after_rollback : Int = tx
+    let after_rollback : Int32 = tx
     .query("select count(*)::int4 from marker")
     .collect()[0].get(0)
     assert_eq(after_rollback, 0)
@@ -146,7 +146,7 @@ async test "integration transaction options savepoints and raw statement helpers
     tx.commit()
 
     client.check_connection()
-    let total : Int = client
+    let total : Int32 = client
       .query_one("select sum(value)::int4 as value from moon_client_tx_extra")
       .get_name("value")
     assert_eq(total, 4)

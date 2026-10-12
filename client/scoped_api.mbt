@@ -42,7 +42,7 @@ async fn[R, T] Client::with_scoped_resource(
 pub async fn[T] Client::with_stream(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.with_scoped_resource(
@@ -58,7 +58,7 @@ pub async fn[T] Client::with_typed_stream(
   self : Client,
   sql : String,
   param_types : Array[Type],
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.with_scoped_resource(
@@ -74,7 +74,7 @@ pub async fn[T] Client::with_typed_stream(
 pub async fn[T] Client::with_statement_stream(
   self : Client,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.with_scoped_resource(

@@ -3,8 +3,8 @@ async test "operation gate grants waiters in FIFO order" {
   @async.with_task_group(group => {
     let gate = OperationGate::new()
     let owner = gate.acquire()
-    let ready : @async.Queue[Int] = Queue(kind=Unbounded)
-    let granted : @async.Queue[Int] = Queue(kind=Unbounded)
+    let ready : @async.Queue[Int32] = Queue(kind=Unbounded)
+    let granted : @async.Queue[Int32] = Queue(kind=Unbounded)
 
     group.spawn_bg(() => {
       ready.put(1)
@@ -67,7 +67,7 @@ async test "pending cancellation prevents starting another protected operation" 
     let client : Client = { shared, }
     let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
     let release_start : @async.Queue[Unit] = Queue(kind=Unbounded)
-    let submitted = @ref.new(false)
+    let submitted = @ref.Ref(false)
     group.spawn_bg(no_wait=true, () => {
       let request = shared.requests.get()
       submitted.val = true

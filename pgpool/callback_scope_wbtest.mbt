@@ -5,7 +5,7 @@
 /// mode 1 simple queries, mode 2 COPY OUT, and mode 3 COPY IN.
 async fn serve_callback_scope_connection(
   socket : @socket.Tcp,
-  mode : Int,
+  mode : Int32,
   requests : Array[Byte],
   execute_started : @async.Queue[Unit],
   resume_execute : @async.Queue[Unit],
@@ -67,8 +67,8 @@ async fn serve_callback_scope_connection(
 
 ///|
 async fn with_callback_scope_pool(
-  mode : Int,
-  cache_capacity : Int,
+  mode : Int32,
+  cache_capacity : Int32,
   f : async (
     @async.TaskGroup[Unit],
     Pool,
@@ -108,7 +108,7 @@ async fn with_callback_scope_pool(
 }
 
 ///|
-fn count_callback_requests(requests : Array[Byte], tag : Byte) -> Int {
+fn count_callback_requests(requests : Array[Byte], tag : Byte) -> Int32 {
   let mut count = 0
   for request in requests {
     if request == tag {

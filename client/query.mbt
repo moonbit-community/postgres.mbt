@@ -94,7 +94,7 @@ async fn OpContext::prepare_typed(
   let bytes = prepare_bytes(name[:], sql, types)
   let responses = self.client.send_request(Messages, bytes)
   let (params, columns) = read_prepare_response(self, responses)
-  { client: self.client, name, params, columns, closed: @ref.new(false), }
+  { client: self.client, name, params, columns, closed: @ref.Ref(false), }
 }
 
 ///|
@@ -146,10 +146,10 @@ async fn OpContext::close_statement(
 pub async fn Client::query(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
-  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  let completed : @ref.Ref[RowStream?] = @ref.Ref(None)
   errdefer (if completed.val is Some(stream) {
     stream.detach()
   } else {
@@ -212,7 +212,7 @@ async fn OpContext::query(
 pub async fn Client::query_one(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> Row {
   self.query(sql, params~).one()
 }
@@ -222,7 +222,7 @@ pub async fn Client::query_one(
 pub async fn Client::query_opt(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> Row? {
   self.query(sql, params~).opt()
 }
@@ -236,10 +236,10 @@ pub async fn Client::query_typed(
   self : Client,
   sql : String,
   param_types : Array[Type],
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
-  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  let completed : @ref.Ref[RowStream?] = @ref.Ref(None)
   errdefer (if completed.val is Some(stream) {
     stream.detach()
   } else {
@@ -296,7 +296,7 @@ async fn OpContext::query_typed(
 pub async fn Client::query_statement(
   self : Client,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
   errdefer permit.release()
@@ -341,8 +341,8 @@ fn OpContext::query_statement(
 pub async fn Client::execute(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
-) -> Int {
+  params~ : Array[&ToSql] = [],
+) -> Int32 {
   self.run_operation(context => context.execute(sql, params))
 }
 
@@ -351,7 +351,7 @@ async fn OpContext::execute(
   self : OpContext,
   sql : String,
   params : Array[&ToSql],
-) -> Int {
+) -> Int32 {
   let statement = self.prepare_typed(sql, [])
   let rows = {
     errdefer @async.protect_from_cancel(() => {
@@ -376,8 +376,8 @@ async fn OpContext::execute(
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
-  params? : Array[&ToSql] = [],
-) -> Int {
+  params~ : Array[&ToSql] = [],
+) -> Int32 {
   self.run_operation(context => context.execute_raw(statement, params))
 }
 
@@ -386,7 +386,7 @@ async fn OpContext::execute_raw(
   self : OpContext,
   statement : Statement,
   params : Array[&ToSql],
-) -> Int {
+) -> Int32 {
   let stream = self.query_statement(statement, params)
   errdefer @async.protect_from_cancel(() => {
     // A decoding failure may already have started a detached drain.
@@ -446,7 +446,7 @@ async fn OpContext::bind(
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          let raw_portal = Portal::{ name, columns, closed: @ref.new(false), }
+          let raw_portal = Portal::{ name, columns, closed: @ref.Ref(false), }
           errdefer @async.protect_from_cancel(() => {
             self.close_portal(raw_portal) catch {
               ClientError::Database(_) => ()
@@ -458,7 +458,7 @@ async fn OpContext::bind(
             // Resolve column OIDs lazily here so callers still get enriched
             // type descriptors even when portals are bound later.
             columns: resolve_columns(self, columns),
-            closed: @ref.new(false),
+            closed: @ref.Ref(false),
           }
           break portal
         }
@@ -489,7 +489,7 @@ async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
 fn OpContext::query_portal(
   self : OpContext,
   portal : Portal,
-  max_rows : Int,
+  max_rows : Int32,
   permit? : OperationPermit,
 ) -> RowStream raise {
   guard !portal.closed.val else {

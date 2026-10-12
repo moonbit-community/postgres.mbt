@@ -130,7 +130,7 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
     config.connect_host(),
     port=config.port,
   )
-  let transferred = @ref.new(false)
+  let transferred = @ref.Ref(false)
   defer (if !transferred.val { conn.close() })
   if config.keepalives == Some(true) {
     conn.enable_keepalive(
@@ -188,8 +188,8 @@ async fn connect_stream(config : Config) -> ConnectionSetup {
 ///|
 /// Startup information captured before the normal request loop begins.
 priv struct StartupState {
-  process_id : Int
-  secret_key : Int
+  process_id : Int32
+  secret_key : Int32
   parameters : Map[String, String]
   transaction_status : Byte
 }

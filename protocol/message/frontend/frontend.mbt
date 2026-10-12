@@ -83,10 +83,10 @@ fn write_cstr(
 pub fn[T] bind(
   portal : BytesView,
   statement : BytesView,
-  formats : Iter[Int],
+  formats : Iter[Int32],
   values : Iter[T],
   serializer : (T, @buffer.Buffer) -> @proto.IsNull raise @proto.ProtocolError,
-  result_formats : Iter[Int],
+  result_formats : Iter[Int32],
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'B')
@@ -123,8 +123,8 @@ pub fn[T] bind(
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-CANCELREQUEST
 pub fn cancel_request(
-  process_id : Int,
-  secret_key : Int,
+  process_id : Int32,
+  secret_key : Int32,
   buf : @buffer.Buffer,
 ) -> Unit {
   try! write_body(buf, fn(b) {
@@ -166,7 +166,7 @@ pub fn close(
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-COPYDATA
 pub struct CopyData {
   buf : Bytes
-  len : Int
+  len : Int32
 }
 
 ///|
@@ -255,7 +255,7 @@ pub fn describe(
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-EXECUTE
 pub fn execute(
   portal : BytesView,
-  max_rows : Int,
+  max_rows : Int32,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_byte(b'E')

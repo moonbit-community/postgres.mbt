@@ -6,7 +6,7 @@ pub struct QuerySummary {
   /// Raw PostgreSQL command tag, for example `"INSERT 0 3"` or `"SELECT 1"`.
   command_tag : String
   /// Number of `DataRow` messages observed by the stream.
-  row_count : Int
+  row_count : Int32
   /// Whether the server suspended a portal because of a row limit.
   suspended : Bool
 } derive(Debug, Eq)
@@ -28,7 +28,7 @@ struct RowStream {
   cleanup : StreamCleanup?
   permit : OperationPermit?
   mut command_tag : String
-  mut row_count : Int
+  mut row_count : Int32
   mut suspended : Bool
   mut database_error : DatabaseError?
   mut detached : Bool

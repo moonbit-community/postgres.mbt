@@ -118,7 +118,7 @@ Rows decode by index or PostgreSQL column name:
 
 ```mbt check
 ///|
-async fn _query_example(client : @client.Client) -> Int {
+async fn _query_example(client : @client.Client) -> Int32 {
   let input = 41
   let row = client.query_one("select $1::int4 + 1 as value", params=[
     input as &ToSql,
@@ -154,7 +154,7 @@ or is cancelled, best-effort cleanup preserves that original cause.
 
 ```mbt check
 ///|
-async fn _first_value(client : @client.Client) -> Int? {
+async fn _first_value(client : @client.Client) -> Int32? {
   client.with_stream("select generate_series(1, 100) as value", stream => {
     match stream.next() {
       Some(row) => Some(row.get_name("value"))
@@ -177,11 +177,11 @@ close it on return, error, or cancellation:
 
 ```mbt check
 ///|
-async fn _prepared_example(client : @client.Client) -> Int {
+async fn _prepared_example(client : @client.Client) -> Int32 {
   client.with_prepared("select $1::int4 as value", statement => {
     let value = 7
     statement.with_stream(params=[value as &ToSql], stream => {
-      let result : Int = stream.next().unwrap().get_name("value")
+      let result : Int32 = stream.next().unwrap().get_name("value")
       result
     })
   })
@@ -209,12 +209,12 @@ resource in stream, Portal, Statement order:
 
 ```mbt check
 ///|
-async fn _portal_example(client : @client.Client) -> Int {
+async fn _portal_example(client : @client.Client) -> Int32 {
   client.with_transaction(tx => {
     tx.with_prepared("select 7::int4 as value", statement => {
       statement.with_portal(portal => {
         portal.with_stream(1, stream => {
-          let result : Int = stream.next().unwrap().get_name("value")
+          let result : Int32 = stream.next().unwrap().get_name("value")
           result
         })
       })
@@ -315,7 +315,7 @@ and waits for cleanup. A completed COPY is not undone by a later callback error.
 
 ```mbt check
 ///|
-async fn _copy_rows(client : @client.Client) -> Int {
+async fn _copy_rows(client : @client.Client) -> Int32 {
   client.with_copy_in("copy events(value) from stdin", sink => {
     sink.send(b"first\nsecond\n")
     sink.finish()

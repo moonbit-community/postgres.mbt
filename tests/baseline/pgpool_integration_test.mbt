@@ -1,13 +1,13 @@
 ///|
 /// Build pool policy in one place for the integration tests.
 fn make_pool_config(
-  max_size : Int,
-  wait_ms? : Int? = None,
-  create_ms? : Int? = None,
-  recycle_ms? : Int? = None,
-  queue_mode? : @pgpool.QueueMode = @pgpool.QueueMode::fifo(),
-  recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
-  statement_cache_capacity? : Int = 100,
+  max_size : Int32,
+  wait_ms~ : Int32? = None,
+  create_ms~ : Int32? = None,
+  recycle_ms~ : Int32? = None,
+  queue_mode~ : @pgpool.QueueMode = @pgpool.QueueMode::fifo(),
+  recycling_method~ : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
+  statement_cache_capacity~ : Int32 = 100,
 ) -> @pgpool.PoolConfig raise {
   PoolConfig(
     max_size,
@@ -50,7 +50,9 @@ async test "integration pool direct query APIs" {
       make_pool_config(2),
     )
 
-    let one : Int = pool.query_one("select 42::int4 as value").get_name("value")
+    let one : Int32 = pool
+      .query_one("select 42::int4 as value")
+      .get_name("value")
     assert_eq(one, 42)
 
     let rows = pool.query_all(
@@ -139,7 +141,7 @@ async test "integration pool with_session keeps affinity" {
       make_pool_config(1),
     )
 
-    let value : Int = pool.with_session(session => {
+    let value : Int32 = pool.with_session(session => {
       session.batch_execute(
         "create temp table moon_session_affinity(value int4)",
       )
@@ -170,8 +172,8 @@ async test "integration pool Fast retires an active transaction on return" {
       PoolConfig(1),
     )
 
-    let first_pid : Int = pool.with_session(session => {
-      let pid : Int = session
+    let first_pid : Int32 = pool.with_session(session => {
+      let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
       session.batch_execute("BEGIN")
@@ -183,8 +185,8 @@ async test "integration pool Fast retires an active transaction on return" {
     let replacement = pool.query_one(
       "select pg_backend_pid()::int4 as pid, 7::int4 as value",
     )
-    let replacement_pid : Int = replacement.get_name("pid")
-    let value : Int = replacement.get_name("value")
+    let replacement_pid : Int32 = replacement.get_name("pid")
+    let value : Int32 = replacement.get_name("value")
     assert_true(first_pid != replacement_pid)
     assert_eq(value, 7)
     assert_eq(pool.status().size, 1)
@@ -208,8 +210,8 @@ async test "integration pool Fast retires a failed transaction on return" {
       PoolConfig(1),
     )
 
-    let first_pid : Int = pool.with_session(session => {
-      let pid : Int = session
+    let first_pid : Int32 = pool.with_session(session => {
+      let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
       session.batch_execute("BEGIN")
@@ -226,8 +228,8 @@ async test "integration pool Fast retires a failed transaction on return" {
     let replacement = pool.query_one(
       "select pg_backend_pid()::int4 as pid, 8::int4 as value",
     )
-    let replacement_pid : Int = replacement.get_name("pid")
-    let value : Int = replacement.get_name("value")
+    let replacement_pid : Int32 = replacement.get_name("pid")
+    let value : Int32 = replacement.get_name("value")
     assert_true(first_pid != replacement_pid)
     assert_eq(value, 8)
     assert_eq(pool.status().size, 1)
@@ -251,8 +253,8 @@ async test "integration pool Fast reuses a rolled back idle connection" {
       PoolConfig(1),
     )
 
-    let first_pid : Int = pool.with_session(session => {
-      let pid : Int = session
+    let first_pid : Int32 = pool.with_session(session => {
+      let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
       session.batch_execute("SET application_name = 'moonbit-fast-idle'")
@@ -263,7 +265,7 @@ async test "integration pool Fast reuses a rolled back idle connection" {
     assert_eq(pool.status().size, 1)
     assert_eq(pool.status().available, 1)
 
-    let next_pid : Int = pool
+    let next_pid : Int32 = pool
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let application_name : String = pool
@@ -302,7 +304,7 @@ async test "integration pool direct operation observes wait timeout" {
 
     release.put(())
     holder.wait()
-    let value : Int = pool
+    let value : Int32 = pool
       .query_one("select 2::int4 as value")
       .get_name("value")
     assert_eq(value, 2)
@@ -323,12 +325,12 @@ async test "integration pool supplies cross-session concurrency" {
       ),
       make_pool_config(2),
     )
-    let entered : @async.Queue[Int] = Queue(kind=Unbounded)
+    let entered : @async.Queue[Int32] = Queue(kind=Unbounded)
     let release : @async.Queue[Unit] = Queue(kind=Unbounded)
 
     let first = group.spawn(no_wait=true, () => {
       pool.with_session(session => {
-        let pid : Int = session
+        let pid : Int32 = session
           .query_one("select pg_backend_pid()::int4 as pid")
           .get_name("pid")
         entered.put(pid)
@@ -338,7 +340,7 @@ async test "integration pool supplies cross-session concurrency" {
     })
     let second = group.spawn(no_wait=true, () => {
       pool.with_session(session => {
-        let pid : Int = session
+        let pid : Int32 = session
           .query_one("select pg_backend_pid()::int4 as pid")
           .get_name("pid")
         entered.put(pid)
@@ -370,8 +372,8 @@ async test "integration pooled transaction blocks outer session FIFO" {
       make_pool_config(1),
     )
 
-    let value : Int = pool.with_session(session => {
-      let waiters : @async.Queue[@async.Task[Int]] = Queue(kind=Unbounded)
+    let value : Int32 = pool.with_session(session => {
+      let waiters : @async.Queue[@async.Task[Int32]] = Queue(kind=Unbounded)
       session.with_transaction(tx => {
         tx.batch_execute(
           "create temp table moon_tx_fifo(value int4); insert into moon_tx_fifo values (9)",
@@ -417,7 +419,7 @@ async test "integration stale Session raises ScopeExpired" {
       expect_error_async(() => session.query_one("select 1::int4 as value")),
     )
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 2::int4 as value")
       .get_name("value")
     assert_eq(probe, 2)
