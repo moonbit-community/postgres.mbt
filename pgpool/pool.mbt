@@ -14,11 +14,10 @@ pub fn Connector::Connector(
 /// Build runtime options for pool construction.
 pub fn PoolOptions::PoolOptions(
   connector? : Connector,
-  post_create? : async (Operation) -> Unit,
-  pre_recycle? : async (Operation) -> Unit,
-  post_recycle? : async (Operation) -> Unit,
+  initialize_session? : async (Session) -> Unit,
+  before_acquire? : async (Session) -> Unit,
 ) -> PoolOptions {
-  { connector, post_create, pre_recycle, post_recycle, }
+  { connector, initialize_session, before_acquire, }
 }
 
 ///|
@@ -49,9 +48,11 @@ pub fn Pool::create(
     next_creation_id: Ref(0),
     targets,
     connector: options.connector.unwrap_or(default_connector()),
-    post_create: options.post_create,
-    pre_recycle: options.pre_recycle,
-    post_recycle: options.post_recycle,
+    initialize_session: options.initialize_session,
+    before_acquire: options.before_acquire,
+    events: Queue(kind=Blocking(pool_config.event_capacity)),
+    dropped_events: Ref(0L),
+    next_scope_id: Ref(0L),
     target_session_attrs: config.target_session_attrs.unwrap_or(Any),
     load_balance_hosts: config.load_balance_hosts.unwrap_or(Disable),
     pool_config: Ref(pool_config),
@@ -77,6 +78,7 @@ pub async fn PoolExecutor::run(self : PoolExecutor) -> Unit {
   }
   self.shared.started.val = true
   if self.shared.closed.val {
+    self.shared.events.close()
     self.shared.done.complete(None)
     return
   }
@@ -108,6 +110,7 @@ pub async fn PoolExecutor::run(self : PoolExecutor) -> Unit {
     finished.val = true
     raise error
   } else {
+    self.shared.events.close()
     self.shared.done.complete(None)
     finished.val = true
   }
@@ -135,8 +138,9 @@ async fn serve_creations(
       continue
     }
     let task = group.spawn(allow_failure=true, () => {
+      let failure : @ref.Ref[Error?] = Ref(None)
       defer {
-        request.result.close(error=PoolError::Closed)
+        request.result.close(error=failure.val.unwrap_or(PoolError::Closed))
         finish_creation(shared, request)
       }
       let (client, executor) = shared.connector.connect(request.target) catch {
@@ -145,6 +149,7 @@ async fn serve_creations(
           return
         }
         error => {
+          failure.val = Some(error)
           request.result.close(error~)
           return
         }
@@ -161,11 +166,13 @@ async fn serve_creations(
       }) catch {
         @client.ClientError::Protocol(_) as error => {
           client.abort()
+          failure.val = Some(error)
           request.result.close(error~)
           return
         }
         error => {
           client.abort()
+          failure.val = Some(error)
           request.result.close(error~)
           raise error
         }
@@ -286,6 +293,7 @@ fn fail_pool(shared : Shared, error : Error) -> Unit {
   shared.create_requests.close(error~, clear=true)
   shared.close_requests.close(clear=true)
   shared.shutdown.complete(Some(error))
+  shared.events.close()
   shared.done.complete(Some(error))
 }
 
@@ -294,6 +302,7 @@ fn fail_pool(shared : Shared, error : Error) -> Unit {
 ///
 /// Preconditions: the pool must not be closed. On success the internal caller
 /// receives a scoped session that must be released after its callback.
+#warnings("-unused_value")
 async fn Pool::checkout_session(self : Pool) -> Session {
   self.checkout_session_with_timeouts(self.shared.pool_config.val.timeouts)
 }
@@ -308,35 +317,55 @@ async fn Pool::checkout_session(self : Pool) -> Session {
 async fn Pool::checkout_session_with_timeouts(
   self : Pool,
   timeouts : Timeouts,
+  deadline? : Deadline,
 ) -> Session {
-  validate_pool_config({
-    max_size: self.shared.pool_config.val.max_size,
-    timeouts,
-    queue_mode: self.shared.pool_config.val.queue_mode,
-    recycling_method: self.shared.pool_config.val.recycling_method,
-    statement_cache_capacity: self.shared.pool_config.val.statement_cache_capacity,
-    async_message_capacity: self.shared.pool_config.val.async_message_capacity,
-  })
+  validate_timeout("wait_ms", timeouts.wait_ms)
+  validate_timeout("create_ms", timeouts.create_ms)
+  validate_timeout("recycle_ms", timeouts.recycle_ms)
   self.assert_open()
-  self.ready()
-  self.assert_open()
-  self.acquire_slot(timeouts.wait_ms)
+  let wait = phase_deadline(deadline, timeouts.wait_ms)
+  let reserved = Ref(false)
   let mut handoff_complete = false
-  defer (if !handoff_complete { self.restore_slot() })
-  let connection = self.checkout_client(timeouts)
+  defer (if reserved.val && !handoff_complete { self.restore_slot() })
+  // Zero wait is a poll, including executor readiness.
+  if timeouts.wait_ms == Some(0) {
+    if !self.shared.ready.done.val {
+      raise PoolError::Timeout(Wait)
+    }
+    self.ready()
+    ignore(remaining_ms(deadline, Wait))
+    self.acquire_slot(Some(0))
+    reserved.val = true
+  } else {
+    with_deadline(wait, Wait, () => {
+      self.ready()
+      self.assert_open()
+      // The enclosing deadline already covers this wait. Mark ownership in
+      // this coroutine, before the deadline task can cancel its return value.
+      self.acquire_slot(None)
+      reserved.val = true
+    })
+  }
+  let connection = self.checkout_client(timeouts, deadline?)
   handoff_complete = true
-  Session::new(self.shared, connection)
+  Session::new(self.shared, connection, deadline?)
 }
 
 ///|
-/// Borrow one pooled session for the duration of a callback.
-///
-/// The lease is released in a `defer`, so it is returned to the pool on normal
-/// completion and also when the callback raises.
-pub async fn[T] Pool::with_session(self : Pool, f : async (Session) -> T) -> T {
-  let session = self.checkout_session()
-  defer session.release()
-  f(session)
+/// Borrow a session. Business deadlines include acquisition and the callback;
+/// cleanup has a separate, shared, finite grace period.
+pub async fn[T] Pool::with_session(
+  self : Pool,
+  f : async (Session) -> T,
+  deadline? : Deadline,
+  timeouts? : Timeouts,
+) -> T {
+  let session = self.checkout_session_with_timeouts(
+    timeouts.unwrap_or(self.shared.pool_config.val.timeouts),
+    deadline?,
+  )
+  defer @async.protect_from_cancel(() => session.release())
+  with_deadline(deadline, Query, () => f(session))
 }
 
 ///|
@@ -462,6 +491,9 @@ pub fn Pool::close(self : Pool) -> Unit {
     return
   }
   self.shared.closed.val = true
+  if !self.shared.started.val {
+    self.shared.events.close()
+  }
   self.shared.async_messages.close()
   self.shared.slots.close(error=PoolError::Closed, clear=true)
   for request in self.shared.active_creations {
@@ -567,21 +599,84 @@ fn restore_available_slot(shared : Shared) -> Unit {
 async fn Pool::checkout_client(
   self : Pool,
   timeouts : Timeouts,
+  deadline? : Deadline,
 ) -> ConnectionState {
+  let attempts : Array[ConnectionAttempt] = []
   while true {
     self.assert_open()
-    if self.take_idle_client() is Some(connection) {
-      if self.try_recycle_client(connection, timeouts.recycle_ms)
+    ignore(remaining_ms(deadline, Recycle)) catch {
+      PoolError::Timeout(kind) as error => {
+        if attempts.is_empty() {
+          raise error
+        }
+        attempts.push({
+          target: "checkout",
+          phase: kind,
+          elapsed_ms: 0L,
+          cause: error,
+        })
+        raise AcquireError::AttemptsFailed(attempts)
+      }
+      error => raise error
+    }
+    let connection = if self.take_idle_client() is Some(connection) {
+      // Own the dequeued candidate before even checking the recycle budget.
+      // Checkout alone restores capacity if this check fails.
+      errdefer self.discard_client(connection)
+      let limit = phase_deadline(deadline, timeouts.recycle_ms)
+      if self.try_recycle_client(
+          connection,
+          remaining_ms(limit, Recycle),
+          attempts,
+        )
         is Some(connection) {
-        return connection
+        connection
       } else {
         continue
       }
     } else {
-      return self.create_client(timeouts.create_ms)
+      let create_deadline = phase_deadline(deadline, timeouts.create_ms)
+      let connection = self.create_client(create_deadline, attempts)
+      errdefer self.discard_client(connection)
+      self.acquire_hook(
+        connection,
+        self.shared.initialize_session,
+        create_deadline,
+        phase=Create,
+      )
+      connection
     }
+    errdefer self.discard_client(connection)
+    self.acquire_hook(connection, self.shared.before_acquire, deadline)
+    self.assert_open()
+    return connection
   }
-  abort("unreachable: checkout loop exited without returning a client")
+  abort("unreachable")
+}
+
+///|
+async fn Pool::acquire_hook(
+  self : Pool,
+  connection : ConnectionState,
+  hook : (async (Session) -> Unit)?,
+  deadline : Deadline?,
+  phase~ : TimeoutKind = Hook,
+) -> Unit {
+  let client = connection.client.val.unwrap()
+  run_with_timeout(
+    remaining_ms(deadline, phase),
+    phase,
+    on_timeout=() => client.abort(),
+    () => run_client_hook(self.shared, connection, hook, deadline?),
+  ) catch {
+    PoolError::Timeout(_) as error => {
+      if deadline is Some(deadline) && @async.now() >= deadline.at {
+        raise PoolError::Timeout(phase)
+      }
+      raise error
+    }
+    error => raise error
+  }
 }
 
 ///|
@@ -603,6 +698,7 @@ async fn Pool::try_recycle_client(
   self : Pool,
   connection : ConnectionState,
   recycle_ms : Int32?,
+  attempts : Array[ConnectionAttempt],
 ) -> ConnectionState? {
   let client = if connection.client.val is Some(client) {
     client
@@ -614,15 +710,22 @@ async fn Pool::try_recycle_client(
     self.discard_client(connection, close_client=false)
     return None
   }
-  self.run_recycle(connection, recycle_ms, () => {
-    run_client_hook(self.shared.pre_recycle, client)
-    match self.shared.pool_config.val.recycling_method {
-      Fast => ()
-      Verified => client.check_connection()
-      Clean => client.batch_execute(clean_recycle_sql)
-      Custom(sql) => client.batch_execute(sql)
-    }
-    run_client_hook(self.shared.post_recycle, client)
+  let session = Session::new(self.shared, connection)
+  defer {
+    session.state.releasing.val = true
+    session.state.released.val = true
+  }
+  self.run_recycle(connection, recycle_ms, attempts, () => {
+    session.run_operation(client => {
+      match self.shared.pool_config.val.health_check {
+        Passive => ()
+        Active => client.check_connection()
+        Custom(sql) => client.batch_execute(sql)
+      }
+      if !client.is_transaction_idle() {
+        raise PoolError::HookLeftOpenTransaction
+      }
+    })
   })
 }
 
@@ -632,6 +735,7 @@ async fn Pool::run_recycle(
   self : Pool,
   connection : ConnectionState,
   recycle_ms : Int32?,
+  attempts : Array[ConnectionAttempt],
   op : async () -> Unit,
 ) -> ConnectionState? {
   let client = if connection.client.val is Some(client) {
@@ -640,12 +744,28 @@ async fn Pool::run_recycle(
     self.discard_client(connection, close_client=false)
     return None
   }
-  // Cancellation bypasses catch. Checkout separately restores its reserved slot.
+  let started = @async.now()
+  // Checkout separately restores its reserved slot on cancellation.
   errdefer self.discard_client(connection, close_client=true)
   try
     run_with_timeout(recycle_ms, Recycle, on_timeout=() => client.abort(), op)
   catch {
-    _ => {
+    error => {
+      connection.failure.val = Some(error)
+      attempts.push({
+        target: connection.target,
+        phase: Recycle,
+        elapsed_ms: @async.now() - started,
+        cause: error,
+      })
+      emit_event(
+        self.shared,
+        HealthChecked,
+        Recycle,
+        connection_id=connection.id,
+        started~,
+        cause=error,
+      )
       self.discard_client(connection, close_client=true)
       return None
     }
@@ -655,6 +775,13 @@ async fn Pool::run_recycle(
         self.discard_client(connection, close_client=false)
         None
       } else {
+        emit_event(
+          self.shared,
+          HealthChecked,
+          Recycle,
+          connection_id=connection.id,
+          started~,
+        )
         Some(connection)
       }
   }
@@ -664,45 +791,64 @@ async fn Pool::run_recycle(
 /// Establish a new connection and await the executor's startup result.
 async fn Pool::create_client(
   self : Pool,
-  create_ms : Int32?,
+  deadline : Deadline?,
+  attempts : Array[ConnectionAttempt],
 ) -> ConnectionState {
   self.assert_open()
   let candidate : @ref.Ref[@client.Client?] = Ref(None)
-  let connection = run_with_timeout(
-    create_ms,
-    Create,
-    on_timeout=() => if candidate.val is Some(client) { client.abort() },
-    () => self.create_client_inner(candidate),
-  )
-  candidate.val = None
-  connection
-}
-
-///|
-/// Establish a new connection by trying every configured target.
-async fn Pool::create_client_inner(
-  self : Pool,
-  candidate : @ref.Ref[@client.Client?],
-) -> ConnectionState {
-  let targets = ordered_targets(self.shared)
-  let mut last_error : Error? = None
-  for target in targets {
+  errdefer (if candidate.val is Some(client) { client.abort() })
+  for target in ordered_targets(self.shared) {
+    let started = @async.now()
+    let name = "\{target.hostaddr.unwrap_or(target.host)}:\{target.port}"
     try {
-      return self.connect_target(target, candidate)
+      let (client, physical_id) = run_with_timeout(
+        remaining_ms(deadline, Create),
+        Create,
+        on_timeout=() => if candidate.val is Some(client) { client.abort() },
+        () => self.connect_target(target, candidate),
+      )
+      // Register only after the timed operation has transferred ownership.
+      self.shared.size.val += 1
+      let connection = ConnectionState::new(
+        self.shared,
+        client,
+        id=physical_id,
+        target=name,
+      )
+      emit_event(
+        self.shared,
+        ConnectionAttempt,
+        Create,
+        connection_id=connection.id,
+        target=name,
+        started~,
+      )
+      return connection
     } catch {
       @async.WaitedTaskAlreadyCancelled as error => raise error
       err => {
         candidate.val = None
-        last_error = Some(err)
-        continue
+        attempts.push({
+          target: name,
+          phase: Create,
+          elapsed_ms: @async.now() - started,
+          cause: err,
+        })
+        emit_event(
+          self.shared,
+          ConnectionAttempt,
+          Create,
+          target=name,
+          started~,
+          cause=err,
+        )
+        if err is PoolError::Timeout(_) {
+          break
+        }
       }
     }
   }
-  if last_error is Some(err) {
-    raise err
-  } else {
-    raise PoolError::Closed
-  }
+  raise AcquireError::AttemptsFailed(attempts)
 }
 
 ///|
@@ -711,18 +857,24 @@ async fn Pool::connect_target(
   self : Pool,
   target : @client.Config,
   candidate : @ref.Ref[@client.Client?],
-) -> ConnectionState {
+) -> (@client.Client, Int32) {
   let (client, physical_id) = self.schedule_connection(target)
   candidate.val = Some(client)
   errdefer client.abort()
-  client.ready()
-  if self.shared.closed.val {
-    raise PoolError::Closed
-  }
-  check_target_session_attrs(self.shared.target_session_attrs, client)
-  run_client_hook(self.shared.post_create, client)
-  self.shared.size.val += 1
-  ConnectionState::new(self.shared, client, id=physical_id)
+  // Startup/target validation can contain protected client I/O. Keep an
+  // unprotected waiter able to abort the candidate on acquisition cancellation.
+  @async.with_task_group(group => {
+    let startup = group.spawn(allow_failure=true, () => {
+      client.ready()
+      if self.shared.closed.val {
+        raise PoolError::Closed
+      }
+      check_target_session_attrs(self.shared.target_session_attrs, client)
+    })
+    errdefer client.abort()
+    startup.wait()
+  })
+  (client, physical_id)
 }
 
 ///|
@@ -749,6 +901,9 @@ async fn Pool::schedule_connection(
     if request.task.val is Some(task) {
       task.cancel()
     }
+    if (request.result.try_get() catch { _ => None }) is Some((client, _)) {
+      client.abort()
+    }
   }
   ignore(self.shared.create_requests.try_put(request))
   request.result.get()
@@ -766,34 +921,9 @@ fn Pool::discard_client(
 
 ///|
 /// Return a checked-out client to the pool or close it if it can no longer be reused.
-fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
-  if connection.client.val is Some(client) {
-    if shared.closed.val {
-      retire_connection(shared, connection, close_client=true)
-      release_capacity(shared)
-      return
-    }
-    if client.is_closed() {
-      retire_connection(shared, connection, close_client=false)
-      release_capacity(shared)
-      return
-    }
-    if !client.is_transaction_idle() {
-      retire_connection(shared, connection, close_client=true)
-      release_capacity(shared)
-      return
-    }
-    if shared.size.val > shared.pool_config.val.max_size {
-      retire_connection(shared, connection, close_client=true)
-      release_capacity(shared)
-      return
-    }
-    shared.idle.push(connection)
-    release_capacity(shared)
-  } else {
-    retire_connection(shared, connection, close_client=false)
-    release_capacity(shared)
-  }
+#warnings("-unused_value")
+async fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
+  Session::new(shared, connection).release()
 }
 
 ///|
@@ -802,6 +932,7 @@ fn ConnectionState::new(
   shared : Shared,
   client : @client.Client,
   id? : Int32,
+  target~ : String = "unknown",
 ) -> ConnectionState {
   let id = if id is Some(id) {
     id
@@ -811,6 +942,8 @@ fn ConnectionState::new(
   }
   let connection = {
     id,
+    target,
+    failure: Ref(None),
     client: Ref(Some(client)),
     statement_cache_capacity: shared.pool_config.val.statement_cache_capacity,
     statement_cache: [],
@@ -834,10 +967,20 @@ fn retire_connection(
   remove_live_connection(shared, connection.id)
   if connection.client.val is Some(client) {
     connection.client.val = None
+    emit_event(
+      shared,
+      ConnectionReplaced,
+      Cleanup,
+      connection_id=connection.id,
+      target=connection.target,
+      cause?=connection.failure.val,
+    )
     if shared.size.val > 0 {
       shared.size.val -= 1
     }
-    if close_client {
+    // Aborted clients already own transport shutdown. Graceful close would
+    // wait behind permits still held by escaped stream/COPY callbacks.
+    if close_client && !client.is_closed() {
       ignore(shared.close_requests.try_put(client)) catch {
         _ => client.abort()
       }
@@ -860,21 +1003,88 @@ fn remove_live_connection(shared : Shared, connection_id : Int32) -> Unit {
 ///|
 /// Run an optional client hook if one is installed.
 async fn run_client_hook(
-  hook : (async (Operation) -> Unit)?,
-  client : @client.Client,
+  shared : Shared,
+  connection : ConnectionState,
+  hook : (async (Session) -> Unit)?,
+  deadline? : Deadline,
+  cleanup_deadline~ : @ref.Ref[Deadline?] = Ref(None),
+  cleanup_mode~ : Bool = false,
 ) -> Unit {
   if hook is Some(hook) {
-    let connection : ConnectionState = {
-      id: 0,
-      client: Ref(Some(client)),
-      statement_cache_capacity: 0,
-      statement_cache: [],
+    let session = Session::new(
+      shared,
+      connection,
+      deadline?,
+      cleanup_deadline~,
+      cleanup_mode~,
+    )
+    let started = @async.now()
+    defer {
+      session.state.releasing.val = true
+      session.state.released.val = true
     }
-    errdefer (if !client.is_transaction_idle() { client.abort() })
-    run_cancellable_scope(connection, (operation, _) => hook(operation))
-    if !client.is_transaction_idle() {
-      client.abort()
-      raise PoolError::HookLeftOpenTransaction
+    let client = connection.client.val.unwrap()
+    errdefer client.abort()
+    let outcome = try {
+      hook(session)
+      if !client.is_transaction_idle() || session.state.active_ops.val != 0 {
+        raise PoolError::HookLeftOpenTransaction
+      }
+    } catch {
+      error => Err(error)
+    } noraise {
+      _ => Ok(())
+    }
+    match outcome {
+      Err(error) => {
+        emit_event(
+          shared,
+          HookCompleted,
+          Hook,
+          connection_id=connection.id,
+          scope_id=session.state.id,
+          started~,
+          cause=error,
+        )
+        raise error
+      }
+      Ok(_) => ()
+    }
+    emit_event(
+      shared,
+      HookCompleted,
+      Hook,
+      connection_id=connection.id,
+      scope_id=session.state.id,
+      started~,
+    )
+  }
+}
+
+///|
+async fn reset_session(state : ClientLeaseState) -> Unit {
+  let client = state.scoped_client()
+  if client.is_closed() {
+    return
+  }
+  if !client.is_transaction_idle() {
+    client.batch_execute("ROLLBACK")
+  }
+  match state.pool.pool_config.val.reset_policy {
+    PreserveSession => ()
+    Reconnect => client.abort()
+    DiscardAll => {
+      client.batch_execute("DISCARD ALL")
+      state.connection.statement_cache.clear()
+      client.clear_type_cache()
+      run_client_hook(
+        state.pool,
+        state.connection,
+        state.pool.initialize_session,
+        deadline?=state.cleanup_deadline.val,
+        cleanup_deadline=state.cleanup_deadline,
+        cleanup_mode=true,
+      )
     }
   }
 }
