@@ -9,6 +9,11 @@ import {
 // Values
 
 // Errors
+pub suberror AcquireError {
+  AttemptsFailed(Array[ConnectionAttempt])
+} derive(@debug.Debug)
+pub fn AcquireError::to_repr(Self) -> @debug.Repr
+
 pub suberror ConfigError {
   UsernameEmpty
   DbnameEmpty
@@ -20,6 +25,10 @@ pub suberror PoolError {
   ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
+  OperationInProgress
+  TransactionRecordUsed
+  CommitRolledBack
+  CommitOutcomeUnknown
   HookLeftOpenTransaction
   InvalidConfig(String)
 } derive(Eq, @debug.Debug)
@@ -48,6 +57,14 @@ pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::targets(Self) -> ArrayView[ConnectionTarget]
 pub impl @debug.Debug for Config
 
+pub struct ConnectionAttempt {
+  target : String
+  phase : TimeoutKind
+  elapsed_ms : Int64
+  cause : Error
+} derive(@debug.Debug)
+pub fn ConnectionAttempt::to_repr(Self) -> @debug.Repr
+
 pub struct ConnectionTarget {
   host : String?
   hostaddr : String?
@@ -58,42 +75,65 @@ pub fn ConnectionTarget::ConnectionTarget(host? : String, hostaddr? : String, po
 type Connector
 pub fn Connector::Connector(async (@client.Config) -> (@client.Client, @client.ClientExecutor)) -> Self
 
+type CopyInSink
+pub async fn CopyInSink::abort(Self, message? : String, deadline? : Deadline) -> Unit
+pub async fn CopyInSink::finish(Self, deadline? : Deadline) -> UInt64
+pub async fn CopyInSink::send(Self, BytesView, deadline? : Deadline) -> Unit
+
+type CopyOutStream
+pub async fn CopyOutStream::collect(Self, deadline? : Deadline) -> Array[Bytes]
+pub async fn CopyOutStream::finish(Self, deadline? : Deadline) -> Unit
+pub fn CopyOutStream::formats(Self) -> ArrayView[@client.WireFormat] raise
+pub async fn CopyOutStream::next(Self, deadline? : Deadline) -> Bytes?
+
+type Deadline
+pub fn Deadline::after_ms(Int32) -> Self raise
+
+pub(all) enum HealthCheck {
+  Passive
+  Active
+  Custom(String)
+} derive(Eq, @debug.Debug)
+pub fn HealthCheck::equal(Self, Self) -> Bool
+pub fn HealthCheck::not_equal(Self, Self) -> Bool
+pub fn HealthCheck::to_repr(Self) -> @debug.Repr
+
 pub(all) enum LoadBalanceHosts {
   Disable
   Random
 } derive(Eq, @debug.Debug)
 
-type Operation
-pub async fn Operation::batch_execute(Self, String) -> Unit
-pub async fn Operation::check_connection(Self) -> Unit
-pub async fn Operation::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
-pub async fn Operation::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Operation::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn Operation::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn Operation::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-
-type OperationCancelToken
-pub async fn OperationCancelToken::cancel(Self) -> Unit
-
 type Pool
-pub async fn Pool::batch_execute(Self, String) -> Unit
-pub async fn Pool::check_connection(Self) -> Unit
+pub async fn Pool::batch_execute(Self, String, deadline? : Deadline, timeouts? : Timeouts) -> Unit
+pub async fn Pool::check_connection(Self, deadline? : Deadline, timeouts? : Timeouts) -> Unit
 pub fn Pool::close(Self) -> Unit
 pub fn Pool::config(Self) -> PoolConfig
 pub fn Pool::create(Config, options? : PoolOptions) -> (Self, PoolExecutor) raise
 pub fn Pool::dropped_async_messages(Self) -> Int64
-pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
+pub fn Pool::dropped_events(Self) -> Int64
+pub async fn Pool::execute(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> UInt64
+pub async fn Pool::execute_typed(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> UInt64
 pub fn Pool::is_closed(Self) -> Bool
+pub async fn Pool::next_event(Self) -> PoolEvent?
 pub async fn Pool::next_message(Self) -> PoolAsyncMessage?
-pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
+pub async fn Pool::query_all(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> Array[@client.Row]
+pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> @client.Row
+pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> @client.Row?
+pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> Array[@client.Row]
+pub async fn Pool::query_typed_one(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> @client.Row
+pub async fn Pool::query_typed_opt(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline, timeouts? : Timeouts) -> @client.Row?
 pub async fn Pool::ready(Self) -> Unit
 pub fn Pool::resize(Self, Int32) -> Unit raise
 pub fn Pool::status(Self) -> Status
-pub async fn[T] Pool::with_session(Self, async (Session) -> T) -> T
-pub async fn[T] Pool::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
+pub async fn[T] Pool::with_copy_in(Self, String, async (CopyInSink) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_copy_out(Self, String, async (CopyOutStream) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_prepared(Self, String, async (PreparedStatement) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_session(Self, async (Session) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_simple_query(Self, String, async (SimpleQueryStream) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T] Pool::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
+pub async fn[T, E] Pool::with_transaction(Self, async (Transaction) -> Result[T, E], options? : TransactionOptions, deadline? : Deadline, timeouts? : Timeouts, record? : TransactionRecord) -> Result[T, E]
+pub async fn[T] Pool::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
 pub impl GenericClient for Pool
 
 pub struct PoolAsyncMessage {
@@ -108,31 +148,59 @@ pub struct PoolConfig {
   max_size : Int32
   timeouts : Timeouts
   queue_mode : QueueMode
-  recycling_method : RecyclingMethod
+  health_check : HealthCheck
+  reset_policy : ResetPolicy
+  cleanup_ms : Int32
+  event_capacity : Int32
   statement_cache_capacity : Int32
   async_message_capacity : Int32
 } derive(Eq, @debug.Debug)
-pub fn PoolConfig::PoolConfig(Int32, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int32, async_message_capacity? : Int32) -> Self raise
+pub fn PoolConfig::PoolConfig(Int32, timeouts? : Timeouts, queue_mode? : QueueMode, health_check? : HealthCheck, reset_policy? : ResetPolicy, cleanup_ms? : Int32, event_capacity? : Int32, statement_cache_capacity? : Int32, async_message_capacity? : Int32) -> Self raise
+
+pub struct PoolEvent {
+  kind : PoolEventKind
+  connection_id : Int32?
+  scope_id : Int64?
+  request_id : Int64?
+  phase : TimeoutKind
+  target : String?
+  elapsed_ms : Int64
+  cause : Error?
+  transaction_status : TransactionStatus?
+} derive(@debug.Debug)
+pub fn PoolEvent::to_repr(Self) -> @debug.Repr
+
+pub(all) enum PoolEventKind {
+  ConnectionReplaced
+  HealthChecked
+  HookCompleted
+  CancelRequested
+  CleanupCompleted
+  TransactionCompleted
+  ConnectionAttempt
+} derive(Eq, @debug.Debug)
+pub fn PoolEventKind::equal(Self, Self) -> Bool
+pub fn PoolEventKind::not_equal(Self, Self) -> Bool
+pub fn PoolEventKind::to_repr(Self) -> @debug.Repr
 
 type PoolExecutor
 pub async fn PoolExecutor::run(Self) -> Unit
 
 pub struct PoolOptions {
   connector : Connector?
-  post_create : (async (Operation) -> Unit)?
-  pre_recycle : (async (Operation) -> Unit)?
-  post_recycle : (async (Operation) -> Unit)?
+  initialize_session : (async (Session) -> Unit)?
+  before_acquire : (async (Session) -> Unit)?
 }
-pub fn PoolOptions::PoolOptions(connector? : Connector, post_create? : async (Operation) -> Unit, pre_recycle? : async (Operation) -> Unit, post_recycle? : async (Operation) -> Unit) -> Self
+pub fn PoolOptions::PoolOptions(connector? : Connector, initialize_session? : async (Session) -> Unit, before_acquire? : async (Session) -> Unit) -> Self
 
 type PreparedStatement
 pub fn PreparedStatement::columns(Self) -> ArrayView[@client.Column]
-pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql]) -> UInt64
+pub async fn PreparedStatement::execute(Self, params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
 pub fn PreparedStatement::params(Self) -> ArrayView[@client.Type]
-pub async fn PreparedStatement::query_all(Self, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn PreparedStatement::query_opt(Self, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn[T] PreparedStatement::with_stream(Self, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
+pub async fn PreparedStatement::query_all(Self, params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+pub async fn PreparedStatement::query_opt(Self, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+pub async fn[T] PreparedStatement::with_stream(Self, params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
 
 pub enum QueueMode {
   Fifo
@@ -141,35 +209,48 @@ pub enum QueueMode {
 pub fn QueueMode::fifo() -> Self
 pub fn QueueMode::lifo() -> Self
 
-pub enum RecyclingMethod {
-  Fast
-  Verified
-  Clean
-  Custom(String)
+pub(all) enum ResetPolicy {
+  DiscardAll
+  PreserveSession
+  Reconnect
 } derive(Eq, @debug.Debug)
-pub fn RecyclingMethod::clean() -> Self
-pub fn RecyclingMethod::custom(String) -> Self
-pub fn RecyclingMethod::fast() -> Self
-pub fn RecyclingMethod::verified() -> Self
+pub fn ResetPolicy::equal(Self, Self) -> Bool
+pub fn ResetPolicy::not_equal(Self, Self) -> Bool
+pub fn ResetPolicy::to_repr(Self) -> @debug.Repr
+
+type RowStream
+pub async fn RowStream::collect(Self, deadline? : Deadline) -> Array[@client.Row]
+pub fn RowStream::columns(Self) -> ArrayView[@client.Column] raise
+pub async fn RowStream::finish(Self, deadline? : Deadline) -> @client.QuerySummary
+pub async fn RowStream::next(Self, deadline? : Deadline) -> @client.Row?
+pub async fn RowStream::one(Self, deadline? : Deadline) -> @client.Row
+pub async fn RowStream::opt(Self, deadline? : Deadline) -> @client.Row?
 
 type Session
-pub async fn Session::batch_execute(Self, String) -> Unit
-pub async fn Session::check_connection(Self) -> Unit
-pub async fn Session::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
-pub async fn Session::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Session::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn Session::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn Session::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn[T] Session::run_cancellable(Self, async (Operation, OperationCancelToken) -> T) -> T
-pub async fn[T] Session::with_copy_in(Self, String, async (@client.CopyInSink) -> T) -> T
-pub async fn[T] Session::with_copy_out(Self, String, async (@client.CopyOutStream) -> T) -> T
-pub async fn[T] Session::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Session::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Session::with_simple_query(Self, String, async (@client.SimpleQueryStream) -> T) -> T
-pub async fn[T] Session::with_stream(Self, String, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
-pub async fn[T] Session::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
-pub async fn[T] Session::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
+pub async fn Session::batch_execute(Self, String, deadline? : Deadline) -> Unit
+pub async fn Session::check_connection(Self, deadline? : Deadline) -> Unit
+pub async fn Session::execute(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+pub async fn Session::execute_typed(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+pub async fn Session::query_all(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+pub async fn Session::query_one(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+pub async fn Session::query_opt(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+pub async fn Session::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+pub async fn Session::query_typed_one(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+pub async fn Session::query_typed_opt(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+pub async fn[T] Session::with_copy_in(Self, String, async (CopyInSink) -> T, deadline? : Deadline) -> T
+pub async fn[T] Session::with_copy_out(Self, String, async (CopyOutStream) -> T, deadline? : Deadline) -> T
+pub async fn[T] Session::with_prepared(Self, String, async (PreparedStatement) -> T, deadline? : Deadline) -> T
+pub async fn[T] Session::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T, deadline? : Deadline) -> T
+pub async fn[T] Session::with_simple_query(Self, String, async (SimpleQueryStream) -> T, deadline? : Deadline) -> T
+pub async fn[T] Session::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
+pub async fn[T, E] Session::with_transaction(Self, async (Transaction) -> Result[T, E], options? : TransactionOptions, deadline? : Deadline, record? : TransactionRecord) -> Result[T, E]
+pub async fn[T] Session::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
 pub impl GenericClient for Session
+
+type SimpleQueryStream
+pub async fn SimpleQueryStream::collect(Self, deadline? : Deadline) -> Array[@client.SimpleQueryMessage]
+pub async fn SimpleQueryStream::finish(Self, deadline? : Deadline) -> Unit
+pub async fn SimpleQueryStream::next(Self, deadline? : Deadline) -> @client.SimpleQueryMessage?
 
 pub struct Status {
   size : Int32
@@ -190,6 +271,9 @@ pub enum TimeoutKind {
   Wait
   Create
   Recycle
+  Hook
+  Query
+  Cleanup
 } derive(Eq, @debug.Debug)
 
 pub struct Timeouts {
@@ -200,21 +284,25 @@ pub struct Timeouts {
 pub fn Timeouts::Timeouts(wait_ms? : Int32?, create_ms? : Int32?, recycle_ms? : Int32?) -> Self
 
 type Transaction
-pub async fn Transaction::batch_execute(Self, String) -> Unit
-pub async fn Transaction::check_connection(Self) -> Unit
-pub async fn Transaction::commit(Self) -> Unit
-pub async fn Transaction::execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
-pub async fn Transaction::query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Transaction::query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-pub async fn Transaction::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-pub async fn Transaction::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-pub async fn Transaction::rollback(Self) -> Unit
-pub async fn[T] Transaction::with_prepared(Self, String, async (PreparedStatement) -> T) -> T
-pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T) -> T
-pub async fn[T] Transaction::with_savepoint(Self, String, async (Self) -> T) -> T
-pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
-pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
-pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (@client.RowStream) -> T) -> T
+pub async fn Transaction::batch_execute(Self, String, deadline? : Deadline) -> Unit
+pub async fn Transaction::check_connection(Self, deadline? : Deadline) -> Unit
+pub async fn Transaction::execute(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+pub async fn Transaction::execute_typed(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+pub async fn Transaction::query_all(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+pub async fn Transaction::query_one(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+pub async fn Transaction::query_opt(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+pub async fn Transaction::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+pub async fn Transaction::query_typed_one(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+pub async fn Transaction::query_typed_opt(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+pub async fn[T] Transaction::with_copy_in(Self, String, async (CopyInSink) -> T, deadline? : Deadline) -> T
+pub async fn[T] Transaction::with_copy_out(Self, String, async (CopyOutStream) -> T, deadline? : Deadline) -> T
+pub async fn[T] Transaction::with_prepared(Self, String, async (PreparedStatement) -> T, deadline? : Deadline) -> T
+pub async fn[T] Transaction::with_prepared_typed(Self, String, Array[@client.Type], async (PreparedStatement) -> T, deadline? : Deadline) -> T
+pub async fn[T, E] Transaction::with_savepoint(Self, String, async (Self) -> Result[T, E], deadline? : Deadline, record? : TransactionRecord) -> Result[T, E]
+pub async fn[T] Transaction::with_simple_query(Self, String, async (SimpleQueryStream) -> T, deadline? : Deadline) -> T
+pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
+pub async fn[T, E] Transaction::with_transaction(Self, async (Self) -> Result[T, E], deadline? : Deadline, record? : TransactionRecord) -> Result[T, E]
+pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
 pub impl GenericClient for Transaction
 
 pub struct TransactionOptions {
@@ -224,16 +312,35 @@ pub struct TransactionOptions {
 } derive(Eq, @debug.Debug)
 pub fn TransactionOptions::TransactionOptions(isolation_level? : @client.IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
+type TransactionRecord
+pub fn TransactionRecord::TransactionRecord() -> Self
+pub fn TransactionRecord::status(Self) -> TransactionStatus
+
+pub(all) enum TransactionStatus {
+  NotStarted
+  InProgress
+  Committed
+  RolledBack
+  SavepointReleased
+  OutcomeUnknown
+} derive(Eq, @debug.Debug)
+pub fn TransactionStatus::equal(Self, Self) -> Bool
+pub fn TransactionStatus::not_equal(Self, Self) -> Bool
+pub fn TransactionStatus::to_repr(Self) -> @debug.Repr
+
 // Type aliases
 pub using @client {type IsolationLevel}
 
 // Traits
 pub(open) trait GenericClient {
-  async fn query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[@client.Row]
-  async fn query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-  async fn query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-  async fn query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
-  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
-  async fn batch_execute(Self, String) -> Unit
-  async fn check_connection(Self) -> Unit
+  async fn query_all(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+  async fn query_one(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+  async fn query_opt(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+  async fn execute(Self, String, params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+  async fn query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> Array[@client.Row]
+  async fn query_typed_one(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row
+  async fn query_typed_opt(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
+  async fn execute_typed(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], deadline? : Deadline) -> UInt64
+  async fn batch_execute(Self, String, deadline? : Deadline) -> Unit
+  async fn check_connection(Self, deadline? : Deadline) -> Unit
 }

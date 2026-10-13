@@ -1,348 +1,162 @@
-# Postgres Pool
+# PostgreSQL connection pool
 
-Single-event-loop PostgreSQL connection pooling for MoonBit.
-
-Package path: `moonbit-community/postgres/pgpool`.
-
-The package supports `native` and classic `wasm`. WasmGC is intentionally
-excluded because pooled clients require the socket/TLS transport.
-
-Each physical `@client.Client` is single-flight. The pool supplies concurrency
-by checking out different sessions, while preserving FIFO execution within one
-callback-scoped `Session`.
-
-## Quick Start
-
-For ordinary fully consumed operations, call the pool directly:
+`Pool` owns physical connections. Start its executor once, await readiness, and
+close the pool when finished.
 
 ```mbt check
 ///|
-async fn _pool_quick_start(
-  host : String,
-  user : String,
-  database : String,
-  password : String,
-) -> Unit {
+pub async fn example(config : @pgpool.Config) -> Unit {
+  let (pool, executor) = @pgpool.Pool::create(config)
   @async.with_task_group(group => {
-    let config = @pgpool.Config::Config(
-      [@pgpool.ConnectionTarget(host~)],
-      user~,
-      dbname=database,
-      password~,
-      application_name="my-service",
-      pool=PoolConfig(4),
-    )
-    let (pool, executor) = @pgpool.Pool::create(config)
-    let task = group.spawn(no_wait=true, () => executor.run())
+    group.spawn_bg(() => executor.run())
     pool.ready()
-    let value : Int32 = pool
-      .query_one("select 1::int4 as value")
-      .get_name("value")
-    ignore(value)
-    pool.close()
-    task.wait()
+    defer pool.close()
+    let row = pool.query_one(
+      "select 42::int4 as value",
+      deadline=@pgpool.Deadline::after_ms(1000),
+    )
+    assert_eq(row.get_name("value"), 42)
   })
 }
 ```
 
-Pool-level operations automatically checkout, use, and return a connection:
+Pool, Session and Transaction implement `GenericClient`, including typed
+all/one/optional queries and execution. Pool convenience methods borrow a
+session automatically. Session and Transaction also support prepared callbacks,
+row streams, simple queries and both COPY directions.
 
-- `query_all`, `query_one`, `query_opt`, and `query_typed_all`
-- `execute` and `batch_execute`
-- `check_connection`
-- `with_transaction`
+A Session or Transaction accepts one operation at a time. Overlapping calls
+raise `OperationInProgress` immediately, including reentry through the outer
+Session inside a transaction and through the parent Transaction inside a
+savepoint. The parent becomes usable when its child ends. An escaped handle
+raises `ScopeExpired`. Use separate Pool calls for concurrent database work.
 
-There is no manual `get` / `release` / `detach_raw` API.
-
-## Session-Scoped Work
-
-Use `Pool::with_session` when several operations must use the same PostgreSQL
-session:
-
-```mbt check
-///|
-async fn _session_example(pool : @pgpool.Pool) -> Int32 {
-  pool.with_session(session => {
-    session.batch_execute("set application_name = 'pool-example'")
-    session.query_one("select 42::int4 as value").get_name("value")
-  })
-}
-```
-
-`Session` replaces the former pooled `Client` name. A session is valid only
-during its callback. Captured handles used afterwards raise
-`PoolError::ScopeExpired`.
-
-Calls submitted through one `Session` execute FIFO. A prepared-statement
-callback may use the same `Session` for other SQL or nested `with_prepared`
-calls. Transaction, streaming/COPY, and cancellable callbacks keep an exclusive
-session operation until their protocol work finishes, so use the capability
-passed to those callbacks.
-
-`Pool`, `Session`, `Transaction`, `Operation`, `PreparedStatement`, and
-`GenericClient::execute` return affected row counts as `UInt64`. COPY IN
-`finish()` and `QuerySummary.row_count` also use `UInt64`. Commands without a
-count return zero; missing, invalid, or overflowing counted command tags
-propagate `ClientError::Protocol` from the client.
+Prepared callbacks do not occupy the connection: other queries and prepared
+callbacks can compose within them. Each actual preparation or execution is
+exclusive. Stream and COPY callbacks hold the connection until their scope
+ends. Their handles are pool-owned capabilities; concurrent calls to one stream
+also raise `OperationInProgress`. COPY IN requires `finish()` to accept input;
+an unfinished sink is aborted on scope exit.
 
 ## Transactions
 
-Pool and session transaction helpers reserve one physical connection for the
-callback:
+Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests
+rollback and returns the same business error. Exceptions and task cancellation
+request rollback. Transaction handles have no public `commit` or `rollback`.
+
+Finish all child tasks before returning from a transaction or savepoint callback.
+Leaving a prepared, stream, COPY or query task active is a scope usage error:
+the pool closes the physical connection before sending COMMIT or RELEASE
+SAVEPOINT. An `Ok` return raises `OperationInProgress`; a business `Err`,
+exception, cancellation or deadline error keeps its original result. A started
+transaction records `OutcomeUnknown`, since closing the connection does not
+acknowledge rollback, and diagnostics retain `OperationInProgress`. The pool
+does not wait for escaped application tasks; later calls through their handles
+fail, and their cleanup cannot reach a new borrower's connection. Callbacks
+whose child tasks finish normally keep the usual commit and reuse behavior.
 
 ```mbt check
 ///|
-async fn _pool_transaction(pool : @pgpool.Pool) -> Unit {
-  pool.with_transaction(tx => {
-    ignore(tx.execute("update accounts set active = true"))
-    ()
-  })
-}
-```
-
-Pool transaction options use the `client` isolation enum re-exported as
-`@pgpool.IsolationLevel`. Use its `ReadUncommitted`, `ReadCommitted`,
-`RepeatableRead`, or `Serializable` constructors directly, selecting from four
-fixed SQL spellings:
-
-```mbt check
-///|
-async fn _pool_serializable_transaction(pool : @pgpool.Pool) -> Unit {
-  pool.with_transaction(
-    _tx => (),
-    options=@pgpool.TransactionOptions(
-      isolation_level=@pgpool.IsolationLevel::Serializable,
-    ),
+pub async fn transaction_example(pool : @pgpool.Pool) -> Result[Int32, String] {
+  let record = @pgpool.TransactionRecord()
+  let result = pool.with_transaction(
+    tx => {
+      tx.batch_execute("SET LOCAL statement_timeout = '1s'")
+      let value : Int32 = tx
+        .query_one("select 7::int4 as value")
+        .get_name("value")
+      if value < 0 {
+        Err("invalid value")
+      } else {
+        Ok(value)
+      }
+    },
+    record~,
   )
+  assert_eq(record.status(), @pgpool.TransactionStatus::Committed)
+  result
 }
 ```
 
-On normal callback return, the helper commits only if the transaction is still
-open; an explicit commit or rollback prevents a second completion. If the
-callback raises or is cancelled, it rolls back best-effort when the transaction
-is still open. Nested transactions use savepoints. Rollback cleanup is
-protected from cancellation, including the wait for in-flight operations. A
-captured `Transaction` is expired when its callback completes.
+`TransactionRecord` is optional, one-shot storage that can be read synchronously
+outside the cancelled task. Statuses are `NotStarted`, `InProgress`, `Committed`,
+`RolledBack`, `SavepointReleased`, and `OutcomeUnknown`. Savepoint release does
+not mean the top-level transaction committed. Reusing a record raises
+`TransactionRecordUsed`.
 
-`with_savepoint(name, ...)` quotes `name` as a case-sensitive PostgreSQL
-identifier. Spaces, double quotes, semicolons, and Unicode are supported.
-Empty names and names containing NUL raise the client's
-`InvalidSavepointName` error before SQL is sent; the parent remains usable.
+The server command tag decides completion. COMMIT returning ROLLBACK raises
+`CommitRolledBack`. A possibly sent COMMIT without a decisive response raises
+`CommitOutcomeUnknown` and retires the connection. The library does not follow
+that uncertain COMMIT with ROLLBACK. A confirmed COMMIT remains recorded even
+when the connection fails before protocol synchronization. Task cancellation
+can still be observed after a confirmed commit: inspect the record to determine
+what happened.
 
-Cancellation received while SQL is waiting for a response propagates after
-protected protocol cleanup and before automatic commit. This includes nested
-savepoints. If cancellation arrives during `BEGIN` or `SAVEPOINT`, successful
-creation is rolled back before releasing the session or parent scope. A
-`COMMIT` already sent still completes according to PostgreSQL's response.
+## Deadlines and cleanup
 
-## Streaming And COPY
+`Deadline::after_ms` uses the async runtime's clock. Optional `deadline` arguments
+cover executor readiness, capacity wait, health checks, host attempts, connection
+startup, hooks and SQL. Child scopes inherit deadlines and can only shorten
+them. There is no default SQL duration limit. `with_session` and Pool convenience
+methods accept a per-call `timeouts` record. `wait_ms` covers both executor
+readiness and capacity; zero polls without waiting. Create and recycle timeouts
+are additional phase limits, not fresh total budgets for each host.
 
-Low-level protocol handles are callback-scoped so the pool can restore the
-connection before reuse:
+Task cancellation and deadlines automatically supervise active SQL. The library
+prevents subsequent business requests, sends a PostgreSQL CancelRequest when a
+request may be active, waits for the cancellation connection to close, and
+synchronizes the original protocol before allowing reuse. CancelRequest alone
+does not confirm the SQL stopped. Already-sent SQL is never replayed.
 
-- `Session::with_stream` and `with_typed_stream` receive
-  `@client.RowStream`
-- `Session::with_simple_query` receives `@client.SimpleQueryStream`
-- `Session::with_copy_in` receives `@client.CopyInSink`
-- `Session::with_copy_out` receives `@client.CopyOutStream`
+Drain, rollback and reset share a finite cleanup budget: `cleanup_ms` defaults
+to 5000. Cleanup failures, untrusted protocol state and expired cleanup budgets
+abort and retire the connection. Cleanup also runs on normal scope exit.
+Stream and COPY method deadlines use the same supervision and cleanup budget,
+including protected I/O such as closing a temporary statement. A method timeout
+returns `Timeout(Query)` after cancellation and protocol cleanup complete, or
+after the cleanup budget expires and the connection is aborted. The method's
+gate is released only after its worker exits; the connection is available to
+another borrower only after the owning scope finishes cleanup.
+The completion bound applies to library I/O; application callbacks must
+cooperate with async cancellation. Cleanup errors are diagnostic events and do
+not replace an earlier database error, business `Err`, or callback exception.
 
-The callbacks may consume, finish, abort, or detach their handles. They remain
-cancellable while waiting for application work. On callback exit, the pool
-drains streams or aborts unfinished COPY input before recycling the connection;
-task cancellation may therefore wait for an in-flight database response.
-There are no duplicate pgpool stream, portal, or COPY wrapper types.
+## Session isolation and hooks
 
-An aborted connection's detached drain saves `ClientError::Closed`, which an
-explicit `finish()` rethrows. Expected closure does not fail other connections
-in the same task group; unexpected protocol errors still propagate.
+`HealthCheck` (`Passive`, `Active`, or `Custom(sql)`) validates connections on
+checkout. The default is `Active`. `ResetPolicy` is independent:
 
-## Prepared Statements And Cache
+- `DiscardAll` (default): synchronize protocol, roll back unfinished transactions,
+  execute `DISCARD ALL` outside a transaction, clear statement/type caches,
+  restore the application baseline, then make capacity available.
+- `PreserveSession`: synchronize and roll back unfinished transactions while
+  retaining session state, including prepared statements. Choose this explicitly
+  for persistent LISTEN or other intentional affinity across borrows.
+- `Reconnect`: retire on return, for extension state that standard SQL cannot
+  reliably reset.
 
-`Session::with_prepared` and `with_prepared_typed` provide a scoped
-`PreparedStatement`. It supports fully consumed query/execute helpers and
-`with_stream`; explicit bind, pooled portals, and manual close are not exposed.
-Inspect inferred parameter and result metadata through its read-only
-`params()` and `columns()` views. Use `to_owned()` for an editable copy.
-The callback remains cancellable and does not hold the Session operation lock.
-On exit, the scope rejects new calls, waits for calls already started, then
-closes a temporary or evicted statement. Transaction-scoped prepared callbacks
-remain exclusive to their transaction.
+`PoolOptions::initialize_session` receives a scoped Session on new connections
+and after full reset. Use it to restore application settings. `before_acquire`
+runs before every checkout. A hook error or a hook leaving an open transaction
+ends that acquisition. An initialization failure during return retires the
+connection and emits an event while preserving the business result. Temporary
+settings should use transaction-local `SET LOCAL`, as above.
 
-Ordinary query, execute, and streaming helpers use prepared statements cached
-automatically per physical connection. Configure the LRU capacity through
-`PoolConfig::PoolConfig`:
+`DISCARD ALL` clears server prepared statements, so the default cache is useful
+within a lease and is deliberately invalidated between borrowers. The idle queue
+can use FIFO or LIFO order; this is unrelated to same-connection operation
+rejection.
 
-```mbt check
-///|
-fn _pool_config() -> @pgpool.PoolConfig raise {
-  PoolConfig(
-    8,
-    statement_cache_capacity=100,
-    timeouts=Timeouts(wait_ms=Some(500)),
-    queue_mode=@pgpool.QueueMode::fifo(),
-    recycling_method=@pgpool.RecyclingMethod::verified(),
-  )
-}
-```
+## Diagnostics
 
-The default capacity is `100`. Set it to `0` to disable caching; negative
-values raise `PoolError::InvalidConfig`. Cache entries are local to one
-physical connection. Typed parameter arrays are copied when inserted, so later
-caller mutation cannot rewrite a cache key. There are no public cache-manager
-or cache-handle APIs. Clean recycling preserves prepared statements and their
-cached plans, keeping the connection-local cache reusable across checkouts.
+`next_event()` receives structured events for connection attempts/replacement,
+health checks, hooks, cancellation, cleanup and transaction completion. Events
+carry connection, scope and request identifiers where applicable, phase, target,
+elapsed time and original errors. The default buffer holds 256 events; oldest
+events are dropped on overflow and `dropped_events()` counts them. Transaction
+records remain available independently. `AcquireError::AttemptsFailed` retains
+all failed targets, health-check attempts, phases and original causes, including
+connection-stage timeouts.
 
-Invalid-statement SQLSTATE `26000` and unsupported-plan SQLSTATE `0A000`
-invalidate the affected entry and propagate the original database error. The
-pool does not retry automatically inside a transaction.
-
-## Operation-Scoped Cancellation
-
-Use `Session::run_cancellable` when cancellation must be tied to one pooled
-operation:
-
-```mbt check
-///|
-async fn _cancellable(pool : @pgpool.Pool) -> Unit {
-  @async.with_task_group(group => {
-    ignore(
-      pool.with_session(session => {
-        session.run_cancellable((op, token) => {
-          group.spawn_bg(no_wait=true, () => {
-            @async.sleep(50)
-            token.cancel()
-          })
-          let value : Int32 = op
-            .query_one("select pg_sleep(5), 1::int4 as value")
-            .get_name("value")
-          ignore(value)
-        })
-      }),
-    ) catch {
-      _ => ()
-    }
-  })
-}
-```
-
-`OperationCancelToken` is best-effort and becomes inert when its callback
-ends, preventing a stale token from cancelling work performed by a later
-borrower.
-
-The `run_cancellable` callback remains cancellable while waiting for
-application work. Before releasing its exclusive session operation, the scope
-waits for in-flight requests and any cancel packet already being sent.
-
-Queued requests keep FIFO order while waiting for a previous cancel send to
-finish. The next request is marked active only after that wait, so a delayed
-cancel cannot spill into the next request. Cancelling a waiter releases its
-place and any acquired operation lock.
-
-Ordinary task cancellation waits for required protocol cleanup and rollback;
-it does not automatically send a PostgreSQL cancellation request or retry SQL.
-Cancellation is checked again when the outermost protected operation ends.
-Explicit caller protection defers cancellation further. Use explicit `abort()`
-on a raw client when the physical connection must be stopped immediately.
-
-## Configuration
-
-`pgpool.Config` takes a non-empty array of `ConnectionTarget` records. Each
-record supplies a `host`, a `hostaddr`, or both, plus its own port (default
-`5432`). If both addresses are present, the client connects to `hostaddr` and
-uses `host` for TLS hostname verification. The order of records is the order
-of connection attempts unless host load balancing is enabled.
-
-`Config::Config` validates every address and port, the user and database names,
-and TLS settings before the pool is created. A target needs at least one
-non-empty address, and its port must be in `1..65535`. Errors identify the
-zero-based target index. The constructor copies the supplied array; `targets()`
-returns a read-only view of that snapshot. Common authentication, TLS, startup,
-`TargetSessionAttrs`, host load balancing, and `PoolConfig` options stay on the
-outer config.
-The `Debug` output for a config shows `<hidden>` in place of a configured
-password; a missing password remains `None`.
-
-`PoolConfig` controls:
-
-- `max_size`
-- checkout/create/recycle timeouts
-- FIFO or LIFO idle-connection selection
-- fast, verified, clean, or custom recycling
-- per-connection statement-cache capacity
-- shared asynchronous-message capacity (256 by default)
-
-Read the current timeout settings from `pool.config().timeouts`.
-
-The default `Fast` mode sends no cleanup SQL when an idle connection is
-checked out. On every `Session` return, the pool checks the client's latest
-`ReadyForQuery` status. A connection still in an active (`T`) or failed (`E`)
-transaction is discarded, along with its statement cache, instead of being
-offered to the next borrower. The pool does not issue an automatic `ROLLBACK`.
-Idle connections retain session state such as `SET` values and `LISTEN`
-subscriptions under `Fast`; select `Clean` when that state must be cleared.
-
-**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
-decode failures or silently store incorrect text. Keep it at UTF-8 throughout
-each pooled session's lifetime. The client currently does not reject encoding
-changes; see the [client encoding warning](../client/README.mbt.md#client-encoding).
-
-`PoolOptions` provides `post_create`, `pre_recycle`, and `post_recycle` hooks.
-Hooks receive an `Operation` that expires when the callback ends. Queries and
-commands issued through it finish before the next borrower uses the connection.
-Hooks must leave the connection transaction idle. A `post_create` hook that
-leaves a transaction open raises `PoolError::HookLeftOpenTransaction` and
-discards the connection; recycle hooks discard the connection and retry with a
-new one. Custom `Connector` remains a low-level entry that returns a raw Client.
-
-`Pool::next_message()` reads notices, notifications, and parameter changes
-from one shared bounded buffer. Each `PoolAsyncMessage` includes a unique
-physical `connection_id` and the `message`. Use one consumer. When the buffer
-fills, the oldest message is discarded and
-`Pool::dropped_async_messages()` increases. `PoolConfig::PoolConfig` accepts a
-positive `async_message_capacity`; the default is 256. After `Pool::close()`,
-buffered messages can still be read, then `next_message()` returns `None`.
-An idle listening connection delivers notifications without another checkout.
-
-Create and recycle deadlines are hard for client I/O: when either expires, the
-pool first calls `Client::abort()` on the candidate physical connection and
-then reports `PoolError::Timeout(Create)` or retires the timed-out recycle
-candidate. Custom connector code before it returns a `Client`, and hook code
-that does not perform client I/O, must still cooperate with ordinary task
-cancellation.
-
-If checkout is cancelled during recycling, including either recycle hook, the
-pool discards that connection and its statement cache and restores the reserved
-capacity slot. A later checkout can open a replacement connection.
-
-A custom `Connector` receives a `@client.Config` and returns a
-`(@client.Client, @client.ClientExecutor)` pair. The pool executor starts the
-physical executor and checkout waits for `client.ready()`.
-
-## Lifecycle And Errors
-
-`Pool::create()` does not open a socket. Spawn the single-use `PoolExecutor::run()`
-and await `pool.ready()` before use. A repeated `run()` raises
-`PoolError::ExecutorAlreadyStarted`. `Pool::close()` rejects new operations and
-closes idle connections. Active callbacks are allowed to finish; their physical
-connections close instead of returning to the idle set. Await the executor task
-to know that all connections have stopped. Pool executor cancellation or an
-unexpected pool maintenance failure closes the whole pool. An individual
-physical connection failure closes that client; the pool discards it on return
-or on its next checkout and can create a replacement.
-
-`Pool::resize()` never interrupts checked-out sessions. When shrinking cannot
-remove enough currently available capacity tokens, the pool records resize
-debt; later failed checkouts and session returns repay that debt before making
-tokens available. Expanding first cancels debt and adds only the remaining
-capacity, preventing shrink/expand races from exceeding the configured maximum.
-
-`PoolError` is limited to pool lifecycle:
-
-- `Closed`
-- `ExecutorAlreadyStarted`
-- `Timeout`
-- `ScopeExpired`
-- `InvalidConfig`
-
-Database, decoding, and row-count errors are propagated as
-`@client.ClientError`.
+Protocol references: [PostgreSQL cancellation](https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS)
+and [DISCARD ALL](https://www.postgresql.org/docs/current/sql-discard.html).

@@ -57,11 +57,11 @@ test "pool config constructors and targets" {
   guard @pgpool.QueueMode::lifo() is Lifo else {
     fail("expected lifo queue mode")
   }
-  guard @pgpool.RecyclingMethod::verified() is Verified else {
-    fail("expected verified recycling")
+  guard @pgpool.HealthCheck::Active is Active else {
+    fail("expected active health check")
   }
-  guard @pgpool.RecyclingMethod::custom("reset all") is Custom(sql) else {
-    fail("expected custom recycling")
+  guard @pgpool.HealthCheck::Custom("reset all") is Custom(sql) else {
+    fail("expected custom health check")
   }
   assert_eq(sql, "reset all")
 
@@ -69,7 +69,7 @@ test "pool config constructors and targets" {
     2,
     timeouts=Timeouts(wait_ms=Some(10), create_ms=Some(20), recycle_ms=Some(30)),
     queue_mode=@pgpool.QueueMode::lifo(),
-    recycling_method=@pgpool.RecyclingMethod::verified(),
+    health_check=@pgpool.HealthCheck::Active,
     statement_cache_capacity=7,
   )
   assert_eq(pool_config.max_size, 2)

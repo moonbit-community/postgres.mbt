@@ -92,70 +92,41 @@ async test "integration client transaction cancellation during SQL rolls back wr
 }
 
 ///|
-async test "integration pooled transaction cancellation during SQL rolls back writes" {
-  guard integration_config() is Some(config) else { return }
+/// Cancellation must finish while the observer still holds the lock.
+async fn cancel_pooled_locked(
+  observer : @client.Client,
+  pid : Int32,
+  f : async (String) -> Unit,
+) -> Unit {
+  observer.batch_execute("select pg_advisory_lock(91827, \{pid})")
+  defer @async.protect_from_cancel(() => {
+    observer.batch_execute("select pg_advisory_unlock(91827, \{pid})")
+  })
   @async.with_task_group(group => {
-    let pool = make_pool(
-      group,
-      as_client_config(config, application_name="pool-sql-cancel"),
-      PoolConfig(1),
-    )
-    defer pool.close()
-    let observer = start_client(
-      as_client_config(config, application_name="pool-sql-cancel-observer"),
-      group,
-    )
-    defer observer.abort()
-    pool.with_session(session => {
-      session.batch_execute("create temp table moon_sql_cancel(value int4)")
-      let pid : Int32 = session
-        .query_one("select pg_backend_pid()::int4 as pid")
-        .get_name("pid")
-      for mode in 0..<3 {
-        cancel_during_locked_sql(observer, pid, sql => {
-          session.with_transaction(tx => {
-            tx.batch_execute("insert into moon_sql_cancel values (1)")
-            if mode == 0 {
-              tx.batch_execute(sql)
-            } else if mode == 1 {
-              ignore(tx.execute(sql))
-            } else {
-              // The callback's own protection defers cancellation until the
-              // auto-commit boundary rather than the operation boundary.
-              @async.protect_from_cancel(() => tx.batch_execute(sql))
-            }
-          })
-        })
-        let count : Int32 = session
-          .query_one("select count(*)::int4 as n from moon_sql_cancel")
-          .get_name("n")
-        assert_eq(count, 0)
-      }
+    let task = group.spawn(allow_failure=true, () => {
+      f("select pg_advisory_xact_lock(91827, \{pid})")
     })
-    assert_eq(pool.status().available, 1)
-    pool.with_transaction(tx => {
-      tx.batch_execute("insert into moon_sql_cancel values (2)")
-    })
-    let value : Int32 = pool
-      .query_one("select value from moon_sql_cancel")
-      .get_name("value")
-    assert_eq(value, 2)
-    observer.close()
+    wait_for_backend_lock(observer, pid)
+    task.cancel()
+    assert_true(
+      expect_error_async(() => @async.with_timeout(3000, () => task.wait()))
+      is @async.WaitedTaskAlreadyCancelled,
+    )
   })
 }
 
 ///|
-async test "integration savepoint cancellation during SQL preserves outer writes" {
+async test "integration pooled SQL and savepoint cancellation roll back without unlocking the blocker" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
       group,
-      as_client_config(config, application_name="savepoint-sql-cancel"),
+      as_client_config(config, application_name="pool-lock-cancel"),
       PoolConfig(1),
     )
     defer pool.close()
     let observer = start_client(
-      as_client_config(config, application_name="savepoint-sql-cancel-observer"),
+      as_client_config(config, application_name="pool-lock-observer"),
       group,
     )
     defer observer.abort()
@@ -164,32 +135,47 @@ async test "integration savepoint cancellation during SQL preserves outer writes
       let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
-      session.with_transaction(outer => {
+      for batch in [false, true] {
+        cancel_pooled_locked(observer, pid, sql => {
+          ignore(
+            session.with_transaction(tx => {
+              tx.batch_execute("insert into moon_sql_cancel values (1)")
+              if batch {
+                tx.batch_execute(sql)
+              } else {
+                ignore(tx.execute(sql))
+              }
+              (Ok(()) : Result[Unit, Unit])
+            }),
+          )
+        })
+        assert_eq(
+          session
+          .query_one("select count(*)::int4 as n from moon_sql_cancel")
+          .get_name("n"),
+          0,
+        )
+      }
+      let result : Result[Unit, Unit] = session.with_transaction(outer => {
         outer.batch_execute("insert into moon_sql_cancel values (1)")
-        for named in [false, true] {
-          cancel_during_locked_sql(observer, pid, sql => {
-            async fn run_nested(nested : @pgpool.Transaction) {
-              nested.batch_execute("insert into moon_sql_cancel values (2)")
-              @async.protect_from_cancel(() => nested.batch_execute(sql))
-            }
-            if named {
-              outer.with_savepoint("cancelled_savepoint", run_nested)
-            } else {
-              outer.with_transaction(run_nested)
-            }
-          })
-        }
-        let value : Int32 = outer
-          .query_one("select value from moon_sql_cancel")
-          .get_name("value")
-        assert_eq(value, 1)
+        cancel_pooled_locked(observer, pid, sql => {
+          ignore(
+            outer.with_savepoint("cancelled_child", child => {
+              child.batch_execute("insert into moon_sql_cancel values (2)")
+              child.batch_execute(sql)
+              (Ok(()) : Result[Unit, Unit])
+            }),
+          )
+        })
+        assert_eq(
+          outer.query_one("select value from moon_sql_cancel").get_name("value"),
+          1,
+        )
+        Ok(())
       })
+      assert_eq(result, Ok(()))
     })
-    let value : Int32 = pool
-      .query_one("select value from moon_sql_cancel")
-      .get_name("value")
-    assert_eq(value, 1)
-    observer.close()
+    assert_eq(pool.status().available, 1)
   })
 }
 

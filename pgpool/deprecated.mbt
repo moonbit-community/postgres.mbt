@@ -1,5 +1,4 @@
-// Explicitly preserve the dot-call methods that derived traits historically
-// promoted for these public types.
+// Expose derived trait methods through dot-call syntax for these public types.
 
 ///|
 #deprecated
@@ -40,16 +39,6 @@ pub extend Timeouts with @debug.Debug::{to_repr}
 #deprecated
 #doc(hidden)
 pub extend Timeouts with Eq::{not_equal, equal}
-
-///|
-#deprecated
-#doc(hidden)
-pub extend RecyclingMethod with @debug.Debug::{to_repr}
-
-///|
-#deprecated
-#doc(hidden)
-pub extend RecyclingMethod with Eq::{not_equal, equal}
 
 ///|
 #deprecated

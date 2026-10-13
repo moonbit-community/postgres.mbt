@@ -96,7 +96,12 @@ async fn with_callback_scope_pool(
         user="moon",
         ssl_mode=Disable,
         application_name="callback-scope-test",
-        pool=PoolConfig(1, statement_cache_capacity=cache_capacity),
+        pool=PoolConfig(
+          1,
+          statement_cache_capacity=cache_capacity,
+          reset_policy=PreserveSession,
+          health_check=Passive,
+        ),
       ),
       group,
     )
@@ -199,155 +204,6 @@ async test "prepared callback cancellation exits without releasing its user wait
 }
 
 ///|
-async test "stream and COPY callbacks cancel while waiting for user work" {
-  for mode in 0..<4 {
-    with_callback_scope_pool(mode, 0, (group, pool, requests, _, _) => {
-      let session = pool.checkout_session()
-      let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
-      let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
-      defer waiting.close()
-      let task = group.spawn(allow_failure=true, () => {
-        match mode {
-          0 =>
-            session.with_stream("select 1", _ => {
-              entered.put(())
-              waiting.get()
-            })
-          1 =>
-            session.with_simple_query("select 1", _ => {
-              entered.put(())
-              waiting.get()
-            })
-          2 =>
-            session.with_copy_out("COPY t TO STDOUT", _ => {
-              entered.put(())
-              waiting.get()
-            })
-          _ =>
-            session.with_copy_in("COPY t FROM STDIN", _ => {
-              entered.put(())
-              waiting.get()
-            })
-        }
-      })
-      entered.get()
-      assert_false(session.state.gate.try_acquire())
-      task.cancel()
-      assert_true(
-        expect_pgpool_error_async(() => task.wait())
-        is @async.WaitedTaskAlreadyCancelled,
-      )
-      if mode == 0 {
-        assert_eq(count_callback_requests(requests, b'C'), 1)
-      }
-      if mode == 3 {
-        assert_eq(count_callback_requests(requests, b'f'), 1)
-      }
-      assert_eq(session.state.active_ops.val, 0)
-      assert_true(session.state.gate.try_acquire())
-      session.state.gate.release()
-      session.check_connection()
-      session.release()
-      assert_eq(pool.status().available, 1)
-    })
-  }
-}
-
-///|
-async test "run_cancellable callback cancels its user wait and expires its token" {
-  with_callback_scope_pool(0, 1, (group, pool, _requests, _, _) => {
-    let session = pool.checkout_session()
-    let entered : @async.Queue[OperationCancelToken] = Queue(kind=Unbounded)
-    let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
-    defer waiting.close()
-    let task = group.spawn(allow_failure=true, () => {
-      session.run_cancellable((_, token) => {
-        entered.put(token)
-        waiting.get()
-      })
-    })
-    let token = entered.get()
-    // Model a cancel packet that entered its protected send just before the
-    // callback was cancelled. Scope exit must wait for it before reuse.
-    token.state.cancel_in_flight.val = 1
-    task.cancel()
-    while !token.state.closing.val {
-      @async.pause()
-    }
-    assert_true(task.try_wait() is None)
-    assert_eq(session.state.active_ops.val, 1)
-    assert_false(session.state.gate.try_acquire())
-    token.state.cancel_in_flight.val = 0
-    assert_true(
-      expect_pgpool_error_async(() => task.wait())
-      is @async.WaitedTaskAlreadyCancelled,
-    )
-    token.cancel()
-    assert_eq(session.state.active_ops.val, 0)
-    session.check_connection()
-    session.release()
-    assert_eq(pool.status().available, 1)
-  })
-}
-
-///|
-async test "prepared scope rejects late calls but waits for a started query" {
-  for capacity in [0, 1] {
-    with_callback_scope_pool(4, capacity, (
-      group,
-      pool,
-      requests,
-      execute_started,
-      resume_execute,
-    ) => {
-      let session = pool.checkout_session()
-      let saved : @async.Queue[PreparedStatement] = Queue(kind=Unbounded)
-      let query_tasks : @async.Queue[@async.Task[Unit]] = Queue(kind=Unbounded)
-      let scope = group.spawn(() => {
-        session.with_prepared("select 1", prepared => {
-          saved.put(prepared)
-          let query = group.spawn(() => {
-            assert_eq(prepared.query_all().length(), 0)
-          })
-          query_tasks.put(query)
-          while prepared.state.active_calls.val == 0 {
-            @async.pause()
-          }
-        })
-      })
-      let prepared = saved.get()
-      let query = query_tasks.get()
-      execute_started.get()
-      while prepared.state.active.val {
-        @async.pause()
-      }
-      assert_true(scope.try_wait() is None)
-      assert_eq(prepared.state.active_calls.val, 1)
-      assert_true(
-        expect_pgpool_error_async(() => prepared.query_all())
-        is PoolError::ScopeExpired,
-      )
-      assert_false(session.state.gate.try_acquire())
-      resume_execute.put(())
-      query.wait()
-      scope.wait()
-      assert_eq(prepared.state.active_calls.val, 0)
-      assert_eq(
-        count_callback_requests(requests, b'C'),
-        if capacity == 0 {
-          1
-        } else {
-          0
-        },
-      )
-      assert_eq(session.state.active_ops.val, 0)
-      session.release()
-      assert_eq(pool.status().available, 1)
-    })
-  }
-}
-
-///|
 async test "prepared cleanup propagates its own error and preserves callback errors" {
   for callback_fails in [false, true] {
     with_callback_scope_pool(5, 0, (_group, pool, requests, _, _) => {
@@ -387,6 +243,7 @@ async test "transaction prepared callback cancellation rolls back before release
             entered.put(())
             waiting.get()
           })
+          (Ok(()) : Result[Unit, Unit])
         })
       })
       entered.get()

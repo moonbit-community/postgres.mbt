@@ -1,4 +1,9 @@
 ///|
+suberror PoolCallbackFailure {
+  PoolCallbackFailure
+}
+
+///|
 fn make_decl_pool(
   config : IntegrationConfig,
   group : @async.TaskGroup[Unit],
@@ -6,7 +11,7 @@ fn make_decl_pool(
   application_name~ : String,
   create_ms~ : Int32? = None,
   recycle_ms~ : Int32? = None,
-  recycling_method~ : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
+  health_check~ : @pgpool.HealthCheck = @pgpool.HealthCheck::Passive,
   statement_cache_capacity~ : Int32 = 100,
   options~ : @pgpool.PoolOptions = PoolOptions(),
 ) -> @pgpool.Pool raise {
@@ -20,7 +25,7 @@ fn make_decl_pool(
       max_size,
       create_ms~,
       recycle_ms~,
-      recycling_method~,
+      health_check~,
       statement_cache_capacity~,
     ),
   )
@@ -35,7 +40,7 @@ fn make_decl_pool(
 async test "integration pool create timeout aborts post-create client I/O" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let options = @pgpool.PoolOptions::PoolOptions(post_create=client => {
+    let options = @pgpool.PoolOptions::PoolOptions(initialize_session=client => {
       client.batch_execute("select pg_sleep(30)")
     })
     let pool = make_decl_pool(
@@ -50,8 +55,14 @@ async test "integration pool create timeout aborts post-create client I/O" {
     let error = @async.with_timeout(10000, () => {
       expect_error_async(() => pool.query_one("select 1::int4 as value"))
     })
-    guard error is @pgpool.PoolError::Timeout(Create) else {
-      fail("expected pool create timeout")
+    match error {
+      @pgpool.PoolError::Timeout(Create) => ()
+      @pgpool.AcquireError::AttemptsFailed(attempts) =>
+        assert_true(
+          attempts[attempts.length() - 1].cause
+          is @pgpool.PoolError::Timeout(Create),
+        )
+      _ => fail("expected pool create timeout, got \{error}")
     }
     assert_true(@async.now() - started < 9000L)
     assert_eq(pool.status().size, 0)
@@ -65,14 +76,13 @@ async test "integration pool create timeout aborts post-create client I/O" {
 async test "integration pool recycle timeout replaces blocked connection" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let options = @pgpool.PoolOptions::PoolOptions(pre_recycle=client => {
-      client.batch_execute("select pg_sleep(30)")
-    })
+    let options = @pgpool.PoolOptions()
     let pool = make_decl_pool(
       config,
       group,
       1,
       application_name="moonbit-postgres-pool-recycle-timeout",
+      health_check=Custom("select pg_sleep(30)"),
       recycle_ms=Some(100),
       options~,
     )
@@ -91,15 +101,14 @@ async test "integration pool recycle timeout replaces blocked connection" {
 }
 
 ///|
-/// Runtime hooks operate on ready raw clients while the custom connector
+/// Runtime hooks operate on scoped sessions while the custom connector
 /// constructs each client and executor pair.
 async test "integration pool connector and lifecycle hooks" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let connect_calls : Array[Int32] = []
-    let post_create_calls : Array[Int32] = []
-    let pre_recycle_calls : Array[Int32] = []
-    let post_recycle_calls : Array[Int32] = []
+    let initialize_calls : Array[Int32] = []
+    let before_acquire_calls : Array[Int32] = []
 
     let connector = @pgpool.Connector::Connector(target => {
       connect_calls.push(1)
@@ -107,16 +116,12 @@ async test "integration pool connector and lifecycle hooks" {
     })
     let options = @pgpool.PoolOptions::PoolOptions(
       connector~,
-      post_create=client => {
-        post_create_calls.push(1)
+      initialize_session=client => {
+        initialize_calls.push(1)
         client.check_connection()
       },
-      pre_recycle=client => {
-        pre_recycle_calls.push(1)
-        client.check_connection()
-      },
-      post_recycle=client => {
-        post_recycle_calls.push(1)
+      before_acquire=client => {
+        before_acquire_calls.push(1)
         client.check_connection()
       },
     )
@@ -125,7 +130,7 @@ async test "integration pool connector and lifecycle hooks" {
       group,
       1,
       application_name="moonbit-postgres-pool-hooks",
-      recycling_method=@pgpool.RecyclingMethod::verified(),
+      health_check=@pgpool.HealthCheck::Active,
       options~,
     )
 
@@ -138,9 +143,8 @@ async test "integration pool connector and lifecycle hooks" {
     assert_eq(first, 1)
     assert_eq(second, 2)
     assert_eq(connect_calls.length(), 1)
-    assert_eq(post_create_calls.length(), 1)
-    assert_true(pre_recycle_calls.length() >= 1)
-    assert_true(post_recycle_calls.length() >= 1)
+    assert_eq(initialize_calls.length(), 3)
+    assert_true(before_acquire_calls.length() >= 1)
 
     pool.resize(2)
     assert_eq(pool.status().max_size, 2)
@@ -151,9 +155,8 @@ async test "integration pool connector and lifecycle hooks" {
 }
 
 ///|
-/// Clean recycling resets session state while retaining prepared statements on
-/// the same backend so the connection-local cache remains reusable.
-async test "integration pool clean recycle retains statement cache" {
+/// Full reset clears session state and rebuilds the cache on the same backend.
+async test "integration pool discard resets session and rebuilds statement cache" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_decl_pool(
@@ -161,7 +164,7 @@ async test "integration pool clean recycle retains statement cache" {
       group,
       1,
       application_name="moonbit-postgres-pool-clean",
-      recycling_method=@pgpool.RecyclingMethod::clean(),
+      health_check=@pgpool.HealthCheck::Active,
     )
 
     let statement_count_sql = "select count(*)::int4 as count from pg_prepared_statements"
@@ -227,8 +230,8 @@ async test "integration pool unfinished COPY IN auto aborts" {
 }
 
 ///|
-/// Callback errors still trigger stream cleanup before capacity is returned.
-async test "integration pooled detached stream cleanup survives error" {
+/// Callback errors survive stream cleanup before capacity is returned.
+async test "integration pooled stream cleanup preserves callback error" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_decl_pool(
@@ -242,12 +245,14 @@ async test "integration pooled detached stream cleanup survives error" {
       pool.with_session(session => {
         session.with_stream("select generate_series(1, 16)::int4 as value", stream => {
           guard stream.next() is Some(_) else { fail("expected first row") }
-          stream.detach()
-          ignore(stream.next())
+          if true {
+            raise PoolCallbackFailure
+          }
+          ()
         })
       })
     })
-    guard error is @client.ClientError::Closed(_) else {
+    guard error is PoolCallbackFailure else {
       fail("expected detached stream to reject reads")
     }
 

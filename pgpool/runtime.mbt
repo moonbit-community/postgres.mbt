@@ -1,13 +1,6 @@
 // Shared runtime state and private wrappers used by the pool package.
 
 ///|
-/// SQL sequence matching `deadpool-postgres` clean recycling semantics.
-///
-/// Prepared statements and their cached plans are deliberately preserved so
-/// the connection-local statement cache remains reusable across checkouts.
-let clean_recycle_sql = "CLOSE ALL; SET SESSION AUTHORIZATION DEFAULT; RESET ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); DISCARD TEMP; DISCARD SEQUENCES;"
-
-///|
 /// Shared mutable pool state. The package runs on one event loop, so this
 /// state only needs async-safe coordination, not cross-thread primitives.
 /// An idle connection removed for recycling stays in `connections` and `size`
@@ -25,9 +18,11 @@ priv struct Shared {
   next_creation_id : @ref.Ref[Int32]
   targets : Array[@client.Config]
   connector : Connector
-  post_create : (async (Operation) -> Unit)?
-  pre_recycle : (async (Operation) -> Unit)?
-  post_recycle : (async (Operation) -> Unit)?
+  initialize_session : (async (Session) -> Unit)?
+  before_acquire : (async (Session) -> Unit)?
+  events : @async.Queue[PoolEvent]
+  dropped_events : @ref.Ref[Int64]
+  next_scope_id : @ref.Ref[Int64]
   target_session_attrs : TargetSessionAttrs
   load_balance_hosts : LoadBalanceHosts
   pool_config : @ref.Ref[PoolConfig]
@@ -95,17 +90,17 @@ struct Connector {
 pub struct PoolOptions {
   /// Custom connector used when checkout needs to open a new physical session.
   connector : Connector?
-  /// Callback-scoped hook after a new connection opens. Must leave it idle.
-  post_create : (async (Operation) -> Unit)?
-  /// Callback-scoped hook before recycling. Must leave the connection idle.
-  pre_recycle : (async (Operation) -> Unit)?
-  /// Callback-scoped hook after recycling. Must leave the connection idle.
-  post_recycle : (async (Operation) -> Unit)?
+  /// Establish the application baseline on creation and after DISCARD ALL.
+  initialize_session : (async (Session) -> Unit)?
+  /// Validate a scoped session before each acquisition. Failures end checkout.
+  before_acquire : (async (Session) -> Unit)?
 }
 
 ///|
 /// Physical PostgreSQL session plus its connection-local statement cache.
 priv struct ConnectionState {
+  target : String
+  failure : @ref.Ref[Error?]
   id : Int32
   client : @ref.Ref[@client.Client?]
   statement_cache_capacity : Int32
@@ -126,7 +121,6 @@ priv struct CachedStatementEntry {
 /// Shared statement-scope state used by scoped prepared-statement callbacks.
 priv enum PreparedStatementScope {
   ClientScope(ClientLeaseState)
-  TransactionScope(TransactionState)
 }
 
 ///|
@@ -146,9 +140,9 @@ priv enum PreparedStatementHandle {
 /// Shared mutable state for one scoped prepared statement.
 priv struct PreparedStatementState {
   scope : PreparedStatementScope
+  deadline : Deadline?
   handle : PreparedStatementHandle
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int32]
   released : @ref.Ref[Bool]
 }
 
@@ -161,6 +155,11 @@ priv struct ClientLeaseState {
   active_ops : @ref.Ref[Int32]
   releasing : @ref.Ref[Bool]
   released : @ref.Ref[Bool]
+  deadline : Deadline?
+  cleanup_deadline : @ref.Ref[Deadline?]
+  cleanup_mode : Bool
+  active_control : @ref.Ref[@client.RequestControl?]
+  id : Int64
 }
 
 ///|
@@ -202,100 +201,81 @@ pub fn PreparedStatement::columns(
 }
 
 ///|
-/// Shared high-level query surface implemented by pools, sessions, and pooled
-/// transactions.
-///
-/// Implementors provide fully materialized query helpers that are safe to use
-/// without handling raw protocol streams directly.
+/// Fully consumed query operations shared by Pool, Session and Transaction.
 pub(open) trait GenericClient {
-  /// Run one query and collect every returned row before the call completes.
-  async fn query_all(Self, String, params? : Array[&@client.ToSql]) -> Array[
-    @client.Row,
-  ]
-  /// Run one query and require exactly one row.
-  async fn query_one(Self, String, params? : Array[&@client.ToSql]) -> @client.Row
-  /// Run one query and allow zero or one rows.
-  async fn query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
-  /// Run one typed query and collect every returned row.
+  async fn query_all(
+    Self,
+    String,
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> Array[@client.Row]
+  async fn query_one(
+    Self,
+    String,
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> @client.Row
+  async fn query_opt(
+    Self,
+    String,
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> @client.Row?
+  async fn execute(
+    Self,
+    String,
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> UInt64
   async fn query_typed_all(
     Self,
     String,
     Array[@client.Type],
     params? : Array[&@client.ToSql],
+    deadline? : Deadline,
   ) -> Array[@client.Row]
-  /// Execute one command and return its affected row count as `UInt64`.
-  async fn execute(Self, String, params? : Array[&@client.ToSql]) -> UInt64
-  /// Execute one or more SQL commands that do not return rows.
-  async fn batch_execute(Self, String) -> Unit
-  /// Perform a lightweight round-trip health check.
-  async fn check_connection(Self) -> Unit
+  async fn query_typed_one(
+    Self,
+    String,
+    Array[@client.Type],
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> @client.Row
+  async fn query_typed_opt(
+    Self,
+    String,
+    Array[@client.Type],
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> @client.Row?
+  async fn execute_typed(
+    Self,
+    String,
+    Array[@client.Type],
+    params? : Array[&@client.ToSql],
+    deadline? : Deadline,
+  ) -> UInt64
+  async fn batch_execute(Self, String, deadline? : Deadline) -> Unit
+  async fn check_connection(Self, deadline? : Deadline) -> Unit
 }
 
 ///|
-/// Shared state for one cancellable pooled-operation scope.
-priv struct OperationScopeState {
-  connection : ConnectionState
-  cancel_token : @client.CancelToken
-  gate : @async.Mutex
-  active : @ref.Ref[Bool]
-  closing : @ref.Ref[Bool]
-  request_in_flight : @ref.Ref[Bool]
-  next_request_id : @ref.Ref[Int32]
-  active_request_id : @ref.Ref[Int32]
-  last_cancelled_request_id : @ref.Ref[Int32]
-  cancel_in_flight : @ref.Ref[Int32]
-}
-
-///|
-/// Exclusive cancellable request scope created by `Session::run_cancellable`.
-///
-/// Unlike plain `Client` operations, an `Operation` allows only one request at
-/// a time so the paired cancel token can target a single in-flight request.
-struct Operation {
-  state : OperationScopeState
-}
-
-///|
-/// Best-effort cancel handle paired with one `Operation` scope.
-///
-/// The token is valid only while the owning `run_cancellable` callback is still
-/// active. After that it becomes inert instead of affecting a later borrower of
-/// the same physical connection.
-struct OperationCancelToken {
-  state : OperationScopeState
-}
-
-///|
-/// Outer scope keeping this pooled transaction's connection lease alive.
-priv enum TransactionOwner {
-  ClientLease(ClientLeaseState)
-  ParentTransaction(TransactionState)
-}
-
-///|
-/// Shared state for a transaction scoped to one pooled client operation.
-priv struct TransactionState {
-  connection : ConnectionState
-  transaction : @ref.Ref[@client.Transaction?]
-  gate : @async.Mutex
-  finished : @ref.Ref[Bool]
-  owner : TransactionOwner
-  owner_released : @ref.Ref[Bool]
-}
-
-///|
-/// Callback-scoped pooled transaction.
-///
-/// This wraps a live PostgreSQL transaction or savepoint while its
-/// `with_transaction` / `with_savepoint` callback owns the pooled session.
-/// Completion expires the handle before it can be used by a later borrower.
+/// Transaction callback capability. Completion belongs to its scope helper.
 struct Transaction {
-  state : TransactionState
+  state : ClientLeaseState
+  savepoint : String?
+  record : TransactionRecord
 }
 
 ///|
-/// Create a pooled client wrapper around one checked-out client.
-fn Session::new(pool : Shared, connection : ConnectionState) -> Session {
+fn Session::new(
+  pool : Shared,
+  connection : ConnectionState,
+  deadline? : Deadline,
+  cleanup_deadline~ : @ref.Ref[Deadline?] = Ref(None),
+  cleanup_mode~ : Bool = false,
+) -> Session {
+  pool.next_scope_id.val += 1L
   {
     state: {
       pool,
@@ -304,50 +284,11 @@ fn Session::new(pool : Shared, connection : ConnectionState) -> Session {
       active_ops: Ref(0),
       releasing: Ref(false),
       released: Ref(false),
-    },
-  }
-}
-
-///|
-/// Create wrappers for one cancellable pooled-operation scope.
-fn make_pooled_operation(
-  connection : ConnectionState,
-) -> (Operation, OperationCancelToken) raise {
-  let client = if connection.client.val is Some(client) {
-    client
-  } else {
-    raise PoolError::ScopeExpired
-  }
-  let state = {
-    connection,
-    cancel_token: client.cancel_token(),
-    gate: Mutex(),
-    active: Ref(true),
-    closing: Ref(false),
-    request_in_flight: Ref(false),
-    next_request_id: Ref(0),
-    active_request_id: Ref(0),
-    last_cancelled_request_id: Ref(0),
-    cancel_in_flight: Ref(0),
-  }
-  ({ state, }, { state, })
-}
-
-///|
-/// Create a pooled transaction wrapper around one live transaction.
-fn Transaction::new(
-  connection : ConnectionState,
-  transaction : @client.Transaction,
-  owner : TransactionOwner,
-) -> Transaction {
-  {
-    state: {
-      connection,
-      transaction: Ref(Some(transaction)),
-      gate: Mutex(),
-      finished: Ref(false),
-      owner,
-      owner_released: Ref(false),
+      deadline,
+      cleanup_deadline,
+      cleanup_mode,
+      active_control: Ref(None),
+      id: pool.next_scope_id.val,
     },
   }
 }
@@ -373,16 +314,11 @@ fn PreparedStatement::new(
   scope : PreparedStatementScope,
   handle : PreparedStatementHandle,
   statement : @client.Statement,
+  deadline? : Deadline,
 ) -> PreparedStatement {
   {
     params: statement.params().to_owned(),
     columns: statement.columns().to_owned(),
-    state: {
-      scope,
-      handle,
-      active: Ref(true),
-      active_calls: Ref(0),
-      released: Ref(false),
-    },
+    state: { scope, deadline, handle, active: Ref(true), released: Ref(false), },
   }
 }
