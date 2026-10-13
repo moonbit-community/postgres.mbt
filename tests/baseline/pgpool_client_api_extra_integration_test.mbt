@@ -19,7 +19,7 @@ async test "integration pooled row stream callback restores session" {
       session.with_stream(
         "select generate_series(1, 4)::int4 as value order by value",
         stream => {
-          let _ : @client.RowStream = stream
+          let _ : @pgpool.RowStream = stream
           guard stream.next() is Some(row) else { fail("expected first row") }
           row.get_name("value")
         },
@@ -36,7 +36,7 @@ async test "integration pooled row stream callback restores session" {
 }
 
 ///|
-/// Simple-query callbacks likewise use `@client.SimpleQueryStream`.
+/// Simple-query callbacks likewise use `@pgpool.SimpleQueryStream`.
 async test "integration pooled simple query callback collects frames" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
@@ -50,7 +50,7 @@ async test "integration pooled simple query callback collects frames" {
       session.with_simple_query(
         "select 'left'::text as side; select 'right'::text as side",
         stream => {
-          let _ : @client.SimpleQueryStream = stream
+          let _ : @pgpool.SimpleQueryStream = stream
           stream.collect()
         },
       )
@@ -83,7 +83,7 @@ async test "integration pooled COPY callbacks keep connection reusable" {
     let values : Array[Int32] = pool.with_session(session => {
       session.batch_execute("create temp table moon_pool_copy(value int4)")
       let inserted = session.with_copy_in("copy moon_pool_copy from stdin", sink => {
-        let _ : @client.CopyInSink = sink
+        let _ : @pgpool.CopyInSink = sink
         sink.send(b"1\n2\n3\n"[:])
         sink.finish()
       })
@@ -92,7 +92,7 @@ async test "integration pooled COPY callbacks keep connection reusable" {
       let chunks = session.with_copy_out(
         "copy (select value from moon_pool_copy order by value) to stdout",
         stream => {
-          let _ : @client.CopyOutStream = stream
+          let _ : @pgpool.CopyOutStream = stream
           stream.collect()
         },
       )
@@ -267,42 +267,18 @@ async test "integration pool propagates client row count errors" {
 }
 
 ///|
-/// Operation and token handles expire together at the end of a cancellable
-/// callback; a stale token cannot affect a later borrower.
-async test "integration pooled cancellable handles expire by scope" {
+async test "integration pooled stream handles expire by scope" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
       group,
-      as_client_config(config, application_name="moonbit-postgres-pool-cancel"),
-      make_pool_config(1),
+      as_client_config(config, application_name="pool-stream-scope"),
+      PoolConfig(1),
     )
-    let operations : @async.Queue[@pgpool.Operation] = Queue(kind=Unbounded)
-    let tokens : @async.Queue[@pgpool.OperationCancelToken] = Queue(
-      kind=Unbounded,
-    )
-
-    let value : Int32 = pool.with_session(session => {
-      session.run_cancellable((op, token) => {
-        operations.put(op)
-        tokens.put(token)
-        op.query_one("select 11::int4 as value").get_name("value")
-      })
-    })
-    assert_eq(value, 11)
-
-    let stale_op = operations.get()
-    let stale_token = tokens.get()
-    expect_pool_scope_expired(
-      expect_error_async(() => stale_op.query_one("select 12::int4 as value")),
-    )
-    stale_token.cancel()
-
-    let probe : Int32 = pool
-      .query_one("select 13::int4 as value")
-      .get_name("value")
-    assert_eq(probe, 13)
-    pool.close()
+    defer pool.close()
+    let stream = pool.with_stream("select 11::int4 as value", stream => stream)
+    expect_pool_scope_expired(expect_error_async(() => stream.next()))
+    assert_eq(pool.query_one("select 13::int4 as value").get_name("value"), 13)
   })
 }
 
@@ -321,25 +297,30 @@ async test "integration pooled transaction options and savepoint" {
       make_pool_config(1),
     )
 
-    let value : Int32 = pool.with_transaction(
+    let value : Result[Int32, Unit] = pool.with_transaction(
       tx => {
         tx.batch_execute(
           "create temp table moon_pool_savepoint(value int4); insert into moon_pool_savepoint values (1)",
         )
-        tx.with_transaction(child => {
+        let rolled_back : Result[Unit, String] = tx.with_transaction(child => {
           ignore(child.execute("insert into moon_pool_savepoint values (2)"))
-          child.rollback()
+          Err("discard child")
         })
-        tx
-        .query_one("select sum(value)::int4 as value from moon_pool_savepoint")
-        .get_name("value")
+        assert_eq(rolled_back, Err("discard child"))
+        Ok(
+          tx
+          .query_one(
+            "select sum(value)::int4 as value from moon_pool_savepoint",
+          )
+          .get_name("value"),
+        )
       },
       options=TransactionOptions(
         isolation_level=@pgpool.IsolationLevel::Serializable,
         read_only=false,
       ),
     )
-    assert_eq(value, 1)
+    assert_eq(value, Ok(1))
     pool.close()
   })
 }
