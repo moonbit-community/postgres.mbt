@@ -74,6 +74,7 @@ fn Client::send_request(
   kind : RequestKind,
   bytes : Bytes,
   response_kind~ : @aqueue.Kind = request_response_queue_kind,
+  cleanup~ : Bool = false,
 ) -> @async.Queue[@backend.Message] raise {
   let responses = @async.Queue(kind=response_kind)
   // `shared.requests` is created as `Unbounded`, so `try_put` cannot return
@@ -81,6 +82,7 @@ fn Client::send_request(
   // which still raises and propagates out of this helper.
   ignore(
     self.shared.requests.try_put({
+      record: self.new_request_record(cleanup),
       kind,
       bytes,
       responses,
@@ -103,6 +105,7 @@ fn Client::send_request_with_copy(
   // so ignoring the `Bool` only discards an impossible "queue full" result.
   ignore(
     self.shared.requests.try_put({
+      record: self.new_request_record(false),
       kind: CopyIn,
       bytes,
       responses,

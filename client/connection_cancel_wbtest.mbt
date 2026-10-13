@@ -127,6 +127,14 @@ async test "connection write failures retain requests and preserve their error" 
       let responses : @async.Queue[@backend.Message] = Queue(kind=Blocking(8))
       let input : @async.Queue[CopyInAction] = Queue(kind=Blocking(1))
       let request : Request = {
+        record: {
+          id: 1L,
+          control: None,
+          cleanup: false,
+          sent: Ref(false),
+          complete: Ref(false),
+          tags: [],
+        },
         kind,
         bytes: sync_bytes(),
         responses,

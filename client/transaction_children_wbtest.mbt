@@ -21,6 +21,7 @@ async test "transaction drains an unfinished query before commit" {
     scoped_test_close(close)
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     assert_eq(task.wait(), "first")
     assert_true(execute.responses.try_get() is None)
@@ -205,6 +206,7 @@ async test "transaction stream scopes cover query statement and portal" {
       }
       let commit = next_request()
       assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+      commit.responses.put(copy_test_command_complete_message("COMMIT"))
       commit.responses.put(copy_test_ready_for_query_message())
       assert_eq(task.wait(), 42)
       assert_false(statement.closed.val)
@@ -249,6 +251,15 @@ async test "manual completion drains its unfinished stream before final command"
         simple_query_bytes(if commit_action { "COMMIT" } else { "ROLLBACK" }),
       )
       assert_false(tx.scope_gate.mutex.try_acquire())
+      final_request.responses.put(
+        copy_test_command_complete_message(
+          if commit_action {
+            "COMMIT"
+          } else {
+            "ROLLBACK"
+          },
+        ),
+      )
       final_request.responses.put(copy_test_ready_for_query_message())
       finish.wait()
       assert_eq(stream.finish().row_count, 1)
@@ -397,6 +408,7 @@ async test "closing a transaction while a query is being created cleans it first
     scoped_test_close(next_request())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     closer.wait()
     assert_false(delivered.val)
@@ -428,6 +440,7 @@ async test "local query creation error during close keeps connection usable" {
     scoped_test_close(next_request())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     closer.wait()
     assert_true(
@@ -470,6 +483,7 @@ async test "closing a transaction while creating a savepoint rolls it back" {
     )
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     closer.wait()
     assert_false(delivered.val)
@@ -511,6 +525,7 @@ async test "nested transaction scopes release savepoints before root commit" {
     release_named.responses.put(copy_test_ready_for_query_message(status=b'T'))
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     task.wait()
   })

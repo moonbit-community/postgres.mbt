@@ -478,3 +478,14 @@ fn CopyOutStream::raise_terminal_error_or_none(
     None
   }
 }
+
+///|
+/// Join cleanup transferred to the executor by a cancelled send/finish call.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub async fn CopyInSink::finish_scope(self : CopyInSink) -> Unit {
+  self.abort()
+  if self.abandoned_done.val is Some(done) {
+    done.wait()
+  }
+}

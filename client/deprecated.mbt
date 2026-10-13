@@ -1,5 +1,4 @@
-// Explicitly preserve the dot-call methods that derived traits historically
-// promoted for these public types.
+// Expose derived trait methods through dot-call syntax for these public types.
 
 ///|
 #deprecated

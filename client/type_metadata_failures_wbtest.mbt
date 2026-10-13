@@ -194,7 +194,9 @@ async test "recursive type error leaves transaction usable" {
     query.responses.put(copy_test_ready_for_query_message(status=b'T'))
     reuse.wait()
     let commit = group.spawn(() => tx.commit())
-    next_request().responses.put(copy_test_ready_for_query_message())
+    let completion = next_request()
+    completion.responses.put(copy_test_command_complete_message("COMMIT"))
+    completion.responses.put(copy_test_ready_for_query_message())
     commit.wait()
   })
 }

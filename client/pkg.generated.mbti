@@ -11,6 +11,9 @@ import {
 
 // Errors
 pub suberror ClientError {
+  RequestCancelled
+  CommitRolledBack
+  CommitOutcomeUnknown
   Database(DatabaseError)
   Authentication(String)
   NotReady
@@ -191,6 +194,8 @@ pub struct QuerySummary {
   row_count : UInt64
   suspended : Bool
 } derive(Eq, @debug.Debug)
+
+type RequestControl
 
 type Row derive(Eq, @debug.Debug)
 pub fn Row::columns(Self) -> ArrayView[Column]

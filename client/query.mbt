@@ -33,7 +33,7 @@ pub async fn Client::batch_execute(self : Client, sql : String) -> Unit {
 ///|
 async fn OpContext::batch_execute(self : OpContext, sql : String) -> Unit {
   let responses = self.client.send_request(Messages, simple_query_bytes(sql))
-  drain_simple_query(responses)
+  ignore(drain_simple_query(responses))
 }
 
 ///|
@@ -129,6 +129,7 @@ async fn OpContext::close_statement(
   let responses = self.client.send_request(
     Messages,
     close_bytes(b'S', statement.name[:]),
+    cleanup=true,
   )
   drain_close_response(responses)
   statement.closed.val = true
@@ -486,7 +487,11 @@ async fn OpContext::close_portal_by_name(
   self : OpContext,
   name : Bytes,
 ) -> Unit {
-  let responses = self.client.send_request(Messages, close_bytes(b'P', name[:]))
+  let responses = self.client.send_request(
+    Messages,
+    close_bytes(b'P', name[:]),
+    cleanup=true,
+  )
   drain_close_response(responses)
 }
 
@@ -520,4 +525,13 @@ fn OpContext::query_portal(
     permit,
     initial_columns=portal.columns,
   )
+}
+
+///|
+async fn OpContext::complete_transaction(
+  self : OpContext,
+  sql : String,
+) -> String {
+  let responses = self.client.send_request(Messages, simple_query_bytes(sql))
+  drain_simple_query(responses)
 }

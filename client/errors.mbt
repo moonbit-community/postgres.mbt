@@ -67,6 +67,9 @@ pub struct WrongTypeError {
 /// lifecycle issues, protocol violations, codec errors, and higher-level query
 /// shape checks such as row-count assertions.
 pub suberror ClientError {
+  RequestCancelled
+  CommitRolledBack
+  CommitOutcomeUnknown
   /// Server returned an `ErrorResponse`.
   Database(DatabaseError)
   /// Startup authentication could not be completed.

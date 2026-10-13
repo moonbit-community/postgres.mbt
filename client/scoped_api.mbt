@@ -117,14 +117,7 @@ pub async fn[T] Client::with_copy_in(
 ) -> T {
   self.with_scoped_resource(
     (context, permit) => context.copy_in(sql, permit),
-    sink => {
-      sink.abort()
-      // send/finish/abort may already have handed cleanup to the driver when
-      // the callback was cancelled. The scope still waits for that cleanup.
-      if sink.abandoned_done.val is Some(done) {
-        done.wait()
-      }
-    },
+    sink => sink.finish_scope(),
     f,
   )
 }
