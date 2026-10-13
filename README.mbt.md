@@ -20,6 +20,15 @@ time. Streams and transactions retain the session until they finish. Use
 ordinary pool methods checkout and return sessions automatically, while
 `Pool::with_session` provides callback-scoped session affinity.
 
+Pooled Session and Transaction handles reject overlapping operations immediately
+with `OperationInProgress`. Deadlines and task cancellation supervise SQL and
+bounded cleanup. The default return policy runs `DISCARD ALL` and restores the
+initialization hook before reuse. Pooled transaction callbacks return `Result`:
+`Ok` requests commit and `Err` requests rollback; a `TransactionRecord` preserves
+completion independently of task cancellation. See the
+[pool documentation](./pgpool/README.mbt.md) for scoped operations, deadlines,
+session isolation, and diagnostics.
+
 For client streams and COPY, prefer `Client::with_stream`,
 `with_typed_stream`, `with_statement_stream`, `with_simple_query`,
 `with_copy_in`, and `with_copy_out`. Create portals with
@@ -34,9 +43,8 @@ Statements belong to their creating connection; passing one to another Client
 or Transaction raises `ClientError::StatementConnectionMismatch` locally.
 `Portal` is the only public portal handle: each fetch finishes its stream,
 and the portal closes when its callback ends. A caller-owned `Statement` remains
-open for reuse, including across transactions. The former manual portal
-bind/query/close API has been removed; see the
-[pagination migration example](./client/README.mbt.md#prepared-statements-and-portals).
+open for reuse, including across transactions. See the
+[pagination example](./client/README.mbt.md#prepared-statements-and-portals).
 Async backend messages use bounded buffers on both Client and Pool.
 Transaction scopes also drain unfinished query streams before completion and
 roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
@@ -46,13 +54,13 @@ Observed row counts (`QuerySummary.row_count`) and affected row counts from
 and pool. Commands without a row count return zero. Missing, invalid, or
 overflowing counts in counted command tags raise `ClientError::Protocol`.
 
-In `0.1.0`, `Client::create(config)` returns a handle and a single-use
+`Client::create(config)` returns a handle and a single-use
 `ClientExecutor`. Spawn `executor.run()` in a task group, then await
 `client.ready()` to observe connection and authentication errors. `Pool::create`
 likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
 physical connection executors. Async database calls wait for readiness.
 
-`Client::close()` remains graceful. `Client::abort()` is the synchronous,
+`Client::close()` performs graceful shutdown. `Client::abort()` is the synchronous,
 idempotent hard-stop for deadlines and emergency teardown: it immediately marks
 the runtime closed, asks the driver to discard the physical connection, and
 fails active or queued work with `ClientError::Closed("connection aborted")`.
@@ -70,15 +78,14 @@ for the lifetime of every client and pooled session; see the
 
 ### TLS
 
-The client and pool now keep three explicit TLS modes:
+The client and pool support three explicit TLS modes:
 
 - `disable`: plaintext only
 - `verify-ca`: TLS with certificate-chain validation but without hostname/IP validation
 - `verify-full`: TLS with certificate-chain validation and hostname/IP validation
 
 `verify-full` is the default for both `client.Config::Config` and
-`pgpool.Config::Config`. The removed `prefer` and `require` aliases are not part
-of either config API.
+`pgpool.Config::Config`.
 
 `client.Config::Config` and `pgpool.Config::Config` expose TLS fields with
 libpq-equivalent semantics:
@@ -91,18 +98,14 @@ libpq-equivalent semantics:
 `moonbitlang/async/tls` as PEM root
 certificates.
 
-Migration summary:
+`verify-full` requires an explicit `host` or `hostaddr`; every pool target
+requires one even when TLS verification is disabled.
 
-- `prefer` -> `verify-full` for authenticated TLS, or `disable` for intentional plaintext
-- `require` -> `verify-full` in most deployments, or `verify-ca` when hostname validation is intentionally out of scope
-- `verify-full` requires an explicit `host` or `hostaddr`; every pool target
-  requires one even when TLS verification is disabled
-
-`pgpool` no longer parses connection URLs. Spell the pool config explicitly:
+Configure the pool with connection targets and explicit options:
 
 ```mbt check
 ///|
-fn _upgrade_examples() -> @pgpool.Config raise {
+fn _pool_config_example() -> @pgpool.Config raise {
   @pgpool.Config::Config(
     [@pgpool.ConnectionTarget(host="db.example", hostaddr="10.0.0.15")],
     user="moon",
@@ -138,7 +141,7 @@ References:
 - Run PostgreSQL integration tests: `node scripts/pg_integration_test.mjs`
 - Run PostgreSQL integration coverage tests: `node scripts/pg_integration_test.mjs --enable-coverage`
 
-MD5 password authentication is deprecated by PostgreSQL and is not supported by this client. If the server sends `AuthenticationMD5Password`, connection startup fails with a client authentication error; configure `scram-sha-256` or `password` instead.
+MD5 password authentication is not supported by this client. If the server sends `AuthenticationMD5Password`, connection startup fails with a client authentication error; configure `scram-sha-256` or `password`.
 
 The integration tests only execute when `RUN_POSTGRES_INTEGRATION=1`. The script above starts a temporary PostgreSQL cluster with `pg_virtualenv`, picks a high local port, creates a `moondb` database plus `moon_scram` and `moon_password` users, and runs the `integration*` test suite on both the native and WebAssembly backends against those two authentication modes.
 
