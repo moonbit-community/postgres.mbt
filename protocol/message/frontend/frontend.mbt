@@ -110,8 +110,7 @@ pub fn[T] bind(
 ///|
 /// Serialize a `CancelRequest` startup packet.
 ///
-/// The current implementation writes the historical 4-byte secret key used by
-/// protocol 3.0. PostgreSQL 3.2 redefines this field as variable-length.
+/// Writes the protocol 3.0 format with a 4-byte secret key.
 ///
 /// Wire order in this implementation:
 /// 1. `Int32(16)` total message length
@@ -296,11 +295,8 @@ pub fn parse(
 ///|
 /// Serialize the context-dependent `PasswordMessage` (`p`) frame.
 ///
-/// During startup this is used for cleartext password responses. Older
-/// PostgreSQL servers also used the same wire tag for deprecated MD5 password
-/// replies, though this package no longer implements MD5 authentication. The
-/// same wire tag is also reused by GSS and SASL messages, which have dedicated
-/// helpers below.
+/// During startup this is used for cleartext password responses. The same wire
+/// tag is also used by GSS and SASL messages, which have dedicated helpers below.
 ///
 /// Wire order for password authentication:
 /// 1. `String` password payload
@@ -308,7 +304,6 @@ pub fn parse(
 /// See:
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONCLEARTEXTPASSWORD
-/// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-AUTHENTICATIONMD5PASSWORD
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-PASSWORDMESSAGE
 pub fn password_message(
   password : BytesView,
