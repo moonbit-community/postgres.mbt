@@ -32,7 +32,7 @@ async fn[T] with_row_stream(
 pub async fn[T] Session::with_stream(
   self : Session,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
   self.with_prepared(sql, prepared => prepared.with_stream(params~, f))
@@ -44,7 +44,7 @@ pub async fn[T] Session::with_typed_stream(
   self : Session,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
   self.with_prepared_typed(sql, param_types, prepared => {
@@ -87,7 +87,7 @@ pub async fn[T] Session::with_copy_out(
 pub async fn[T] Transaction::with_stream(
   self : Transaction,
   sql : String,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
   self.with_prepared(sql, prepared => prepared.with_stream(params~, f))
@@ -99,7 +99,7 @@ pub async fn[T] Transaction::with_typed_stream(
   self : Transaction,
   sql : String,
   param_types : Array[@client.Type],
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
   self.with_prepared_typed(sql, param_types, prepared => {

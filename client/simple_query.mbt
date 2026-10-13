@@ -26,13 +26,13 @@ pub fn SimpleQueryRow::values(self : SimpleQueryRow) -> ArrayView[String?] {
 
 ///|
 /// Return the number of values in this row.
-pub fn SimpleQueryRow::len(self : SimpleQueryRow) -> Int {
+pub fn SimpleQueryRow::len(self : SimpleQueryRow) -> Int32 {
   self.values.length()
 }
 
 ///|
 /// Return the index of the named column, if present.
-pub fn SimpleQueryRow::index_of(self : SimpleQueryRow, name : String) -> Int? {
+pub fn SimpleQueryRow::index_of(self : SimpleQueryRow, name : String) -> Int32? {
   for index, column in self.columns {
     if column == name {
       return Some(index)
@@ -43,7 +43,7 @@ pub fn SimpleQueryRow::index_of(self : SimpleQueryRow, name : String) -> Int? {
 
 ///|
 /// Return the text value at `index`.
-pub fn SimpleQueryRow::get(self : SimpleQueryRow, index : Int) -> String? {
+pub fn SimpleQueryRow::get(self : SimpleQueryRow, index : Int32) -> String? {
   self.values[index]
 }
 

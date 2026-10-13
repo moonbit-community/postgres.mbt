@@ -192,7 +192,7 @@ fn parse_database_error(
 fn parse_error_uint(
   value : String,
   positive~ : Bool,
-) -> UInt raise @proto.ProtocolError {
+) -> UInt32 raise @proto.ProtocolError {
   guard !value.is_empty() && value.iter().all(c => c >= '0' && c <= '9') else {
     raise InvalidInput("invalid numeric error field: \{value}")
   }

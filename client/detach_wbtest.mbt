@@ -34,7 +34,7 @@ async test "queued detached drain receives closure before its worker starts" {
 ///|
 /// Share lifecycle assertions across the three public output stream types.
 fn detach_test_stream(
-  kind : Int,
+  kind : Int32,
   control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,

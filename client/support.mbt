@@ -8,7 +8,7 @@ fn OperationGate::new() -> OperationGate {
 ///|
 async fn OperationGate::acquire(self : OperationGate) -> OperationPermit {
   self.mutex.acquire()
-  { gate: self, released: @ref.new(false), }
+  { gate: self, released: Ref(false), }
 }
 
 ///|
@@ -73,7 +73,7 @@ fn Client::send_request(
   self : Client,
   kind : RequestKind,
   bytes : Bytes,
-  response_kind? : @aqueue.Kind = request_response_queue_kind,
+  response_kind~ : @aqueue.Kind = request_response_queue_kind,
 ) -> @async.Queue[@backend.Message] raise {
   let responses = @async.Queue(kind=response_kind)
   // `shared.requests` is created as `Unbounded`, so `try_put` cannot return
@@ -107,7 +107,7 @@ fn Client::send_request_with_copy(
       bytes,
       responses,
       copy_input: Some(input),
-      copy_error: Some(@ref.new(None)),
+      copy_error: Some(Ref(None)),
     }),
   )
   responses
@@ -144,7 +144,7 @@ fn spawn_detached_drain(
   let id = control.next_id.val
   control.pending.push({ id, completion, })
   let queued = control.queue.try_put(() => {
-    let settled = @ref.new(false)
+    let settled = Ref(false)
     defer (if !settled.val {
       control.finish(
         id,
@@ -228,7 +228,7 @@ fn close_runtime(shared : Shared, error? : Error) -> Unit {
 
 ///|
 /// Return the next monotonically increasing runtime-local identifier.
-fn next_id(shared : Shared) -> Int {
+fn next_id(shared : Shared) -> Int32 {
   shared.next_id.val += 1
   shared.next_id.val
 }

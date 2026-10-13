@@ -7,7 +7,7 @@ priv struct IdentityCounter {
 }
 
 ///|
-let connection_ids : IdentityCounter = { value: @ref.new(0), }
+let connection_ids : IdentityCounter = { value: Ref(0), }
 
 ///|
 fn IdentityCounter::allocate(self : IdentityCounter) -> UInt64 {

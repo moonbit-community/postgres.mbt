@@ -1,6 +1,6 @@
 ///|
 /// Observe an actual PostgreSQL lock wait instead of guessing when SQL starts.
-async fn wait_for_backend_lock(observer : @client.Client, pid : Int) -> Unit {
+async fn wait_for_backend_lock(observer : @client.Client, pid : Int32) -> Unit {
   @async.with_timeout(5000, () => {
     while true {
       let waiting : Bool = observer
@@ -22,7 +22,7 @@ async fn wait_for_backend_lock(observer : @client.Client, pid : Int) -> Unit {
 /// protected exchange to finish and verify that cancellation still propagates.
 async fn cancel_during_locked_sql(
   observer : @client.Client,
-  pid : Int,
+  pid : Int32,
   f : async (String) -> Unit,
 ) -> Unit {
   observer.batch_execute("select pg_advisory_lock(91827, \{pid})")
@@ -71,7 +71,7 @@ async test "integration client transaction cancellation during SQL rolls back wr
           }
         })
       })
-      let count : Int = client
+      let count : Int32 = client
         .query_one("select count(*)::int4 as n from moon_sql_cancel")
         .get_name("n")
       assert_eq(count, 0)
@@ -79,7 +79,7 @@ async test "integration client transaction cancellation during SQL rolls back wr
     client.with_transaction(tx => {
       tx.batch_execute("insert into moon_sql_cancel values (2)")
     })
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select value from moon_sql_cancel")
       .get_name("value")
     assert_eq(value, 2)
@@ -105,7 +105,7 @@ async test "integration pooled transaction cancellation during SQL rolls back wr
     defer observer.abort()
     pool.with_session(session => {
       session.batch_execute("create temp table moon_sql_cancel(value int4)")
-      let pid : Int = session
+      let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
       for mode in 0..<3 {
@@ -123,7 +123,7 @@ async test "integration pooled transaction cancellation during SQL rolls back wr
             }
           })
         })
-        let count : Int = session
+        let count : Int32 = session
           .query_one("select count(*)::int4 as n from moon_sql_cancel")
           .get_name("n")
         assert_eq(count, 0)
@@ -133,7 +133,7 @@ async test "integration pooled transaction cancellation during SQL rolls back wr
     pool.with_transaction(tx => {
       tx.batch_execute("insert into moon_sql_cancel values (2)")
     })
-    let value : Int = pool
+    let value : Int32 = pool
       .query_one("select value from moon_sql_cancel")
       .get_name("value")
     assert_eq(value, 2)
@@ -158,7 +158,7 @@ async test "integration savepoint cancellation during SQL preserves outer writes
     defer observer.abort()
     pool.with_session(session => {
       session.batch_execute("create temp table moon_sql_cancel(value int4)")
-      let pid : Int = session
+      let pid : Int32 = session
         .query_one("select pg_backend_pid()::int4 as pid")
         .get_name("pid")
       session.with_transaction(outer => {
@@ -176,13 +176,13 @@ async test "integration savepoint cancellation during SQL preserves outer writes
             }
           })
         }
-        let value : Int = outer
+        let value : Int32 = outer
           .query_one("select value from moon_sql_cancel")
           .get_name("value")
         assert_eq(value, 1)
       })
     })
-    let value : Int = pool
+    let value : Int32 = pool
       .query_one("select value from moon_sql_cancel")
       .get_name("value")
     assert_eq(value, 1)

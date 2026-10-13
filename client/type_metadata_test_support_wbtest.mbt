@@ -1,5 +1,5 @@
 ///|
-fn metadata_test_oid(oid : UInt) -> Bytes {
+fn metadata_test_oid(oid : UInt32) -> Bytes {
   let buf = Buffer()
   buf.write_uint_be(oid)
   buf.to_bytes()
@@ -19,7 +19,7 @@ fn metadata_test_name(request : Request) -> Bytes raise {
 async fn metadata_test_prepare(
   request : Request,
   columns : Array[Type],
-  params? : Array[UInt] = [],
+  params~ : Array[UInt32] = [],
 ) -> Unit {
   request.responses.put(parse_backend_message(b"1\x00\x00\x00\x04"))
   let payload = Buffer()
@@ -46,10 +46,10 @@ async fn metadata_test_close(request : Request, name : Bytes) -> Unit {
 async fn metadata_test_catalog(
   next_request : async () -> Request,
   sql : String,
-  oid : UInt,
+  oid : UInt32,
   columns : Array[Type],
   rows : Array[Array[Bytes?]],
-  database_error? : Bool = false,
+  database_error~ : Bool = false,
 ) -> Unit {
   let prepare = next_request()
   let name = metadata_test_name(prepare)
@@ -78,12 +78,12 @@ async fn metadata_test_catalog(
 ///|
 async fn metadata_test_shape(
   next_request : async () -> Request,
-  oid : UInt,
-  elem? : UInt = 0U,
-  base? : UInt = 0U,
-  subtype? : UInt,
-  relid? : UInt = 0U,
-  typtype? : String = "b",
+  oid : UInt32,
+  elem~ : UInt32 = 0U,
+  base~ : UInt32 = 0U,
+  subtype? : UInt32,
+  relid~ : UInt32 = 0U,
+  typtype~ : String = "b",
 ) -> Unit {
   metadata_test_catalog(
     next_request,

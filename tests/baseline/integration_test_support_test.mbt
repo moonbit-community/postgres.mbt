@@ -3,7 +3,7 @@
 /// This keeps environment parsing in one place so individual tests can focus on behavior instead of setup.
 struct IntegrationConfig {
   host : String
-  port : Int
+  port : Int32
   user : String
   password : String
   database : String
@@ -45,11 +45,11 @@ fn integration_tls_failure_expected() -> Bool {
 /// Optional fields stay overridable so each test can change only the host, TLS mode, or application name it cares about.
 fn as_client_config(
   config : IntegrationConfig,
-  host? : String = config.host,
+  host~ : String = config.host,
   hostaddr? : String,
-  ssl_mode? : @client.SslMode = Disable,
+  ssl_mode~ : @client.SslMode = Disable,
   ssl_root_cert? : String,
-  channel_binding? : @client.ChannelBinding = Disable,
+  channel_binding~ : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
   Config(
@@ -72,9 +72,9 @@ fn as_client_config(
 fn auth_client_config(
   config : IntegrationConfig,
   user : String,
-  password? : String? = Some(config.password),
-  ssl_mode? : @client.SslMode = Disable,
-  channel_binding? : @client.ChannelBinding = Disable,
+  password~ : String? = Some(config.password),
+  ssl_mode~ : @client.SslMode = Disable,
+  channel_binding~ : @client.ChannelBinding = Disable,
   application_name~ : String,
 ) -> @client.Config {
   if password is Some(password) {

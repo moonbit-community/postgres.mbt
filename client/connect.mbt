@@ -13,7 +13,7 @@ pub fn Client::create(config : Config) -> (Client, ClientExecutor) {
 /// The oldest message is discarded when the buffer is full.
 pub fn Client::create_with_async_message_capacity(
   config : Config,
-  capacity : Int,
+  capacity : Int32,
 ) -> (Client, ClientExecutor) raise {
   if capacity < 1 {
     raise ClientError::InvalidConfig("async message capacity must be positive")
@@ -24,7 +24,7 @@ pub fn Client::create_with_async_message_capacity(
 ///|
 fn Client::create_with_capacity_unchecked(
   config : Config,
-  capacity : Int,
+  capacity : Int32,
 ) -> (Client, ClientExecutor) {
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
@@ -32,27 +32,27 @@ fn Client::create_with_capacity_unchecked(
     config,
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Blocking(capacity)),
-    dropped_async_messages: @ref.new(0L),
-    async_message_handler: @ref.new(None),
+    dropped_async_messages: Ref(0L),
+    async_message_handler: Ref(None),
     connection_id: connection_ids.allocate(),
-    root_transaction_occupancy: @ref.new(0),
+    root_transaction_occupancy: Ref(0),
     control: DrainControl::new(),
     ready: Completion::new(),
     done: Completion::new(),
-    started: @ref.new(false),
-    runtime_error: @ref.new(None),
+    started: Ref(false),
+    runtime_error: Ref(None),
     parameters: Map([]),
     types,
-    process_id: @ref.new(0),
-    secret_key: @ref.new(0),
-    transaction_status: @ref.new(b'I'),
-    closed: @ref.new(false),
-    closing: @ref.new(false),
-    close_requested: @ref.new(false),
-    aborted: @ref.new(false),
+    process_id: Ref(0),
+    secret_key: Ref(0),
+    transaction_status: Ref(b'I'),
+    closed: Ref(false),
+    closing: Ref(false),
+    close_requested: Ref(false),
+    aborted: Ref(false),
     operation_gate: OperationGate::new(),
-    driver_task: @ref.new(None),
-    next_id: @ref.new(0),
+    driver_task: Ref(None),
+    next_id: Ref(0),
   }
   ({ shared, }, { shared, })
 }
@@ -165,7 +165,7 @@ async fn ClientExecutor::run_connection(
   } else {
     connect_authenticated(config)
   }
-  let transferred = @ref.new(false)
+  let transferred = Ref(false)
   defer (if !transferred.val { setup.stream.close() })
   if self.shared.closing.val {
     return
@@ -191,7 +191,7 @@ async fn connect_authenticated(
   config : Config,
 ) -> (ConnectionSetup, StartupState) {
   let setup = connect_stream(config)
-  let transferred = @ref.new(false)
+  let transferred = Ref(false)
   defer (if !transferred.val { setup.stream.close() })
   let state = startup(setup, config)
   transferred.val = true
@@ -353,7 +353,7 @@ pub fn Client::cancel_token(self : Client) -> CancelToken raise {
 
 ///|
 /// Return the backend process ID embedded in the cancellation token.
-pub fn CancelToken::process_id(self : CancelToken) -> Int {
+pub fn CancelToken::process_id(self : CancelToken) -> Int32 {
   self.process_id.val
 }
 

@@ -5,9 +5,9 @@ async fn assert_auth_ok(
   config : IntegrationConfig,
   user : String,
   password : String,
-  ssl_mode? : @client.SslMode = Disable,
-  channel_binding? : @client.ChannelBinding = Disable,
-  application_name? : String = "moonbit-postgres",
+  ssl_mode~ : @client.SslMode = Disable,
+  channel_binding~ : @client.ChannelBinding = Disable,
+  application_name~ : String = "moonbit-postgres",
 ) -> Unit {
   @async.with_task_group(group => {
     let client = start_client(
@@ -89,7 +89,7 @@ async fn connect_error(config : @client.Config) -> Error {
 /// Parameter-status updates are not the point of these tests, so they are skipped and only notice or notification messages are kept.
 async fn collect_driver_async_messages(
   client : @client.Client,
-  expected : Int,
+  expected : Int32,
 ) -> Array[@client.AsyncMessage] {
   let messages : Array[@client.AsyncMessage] = []
   while messages.length() < expected {
@@ -110,7 +110,7 @@ async fn collect_driver_async_messages(
 async fn[T] wait_for_task_or_fail(
   task : @async.Task[T],
   message : String,
-  polls? : Int = 500,
+  polls~ : Int32 = 500,
 ) -> T {
   let mut remaining = polls
   while remaining > 0 {
@@ -130,7 +130,7 @@ async fn[T] wait_for_task_or_fail(
 async fn[T] assert_task_stays_pending(
   task : @async.Task[T],
   message : String,
-  polls? : Int = 50,
+  polls~ : Int32 = 50,
 ) -> Unit {
   let mut remaining = polls
   while remaining > 0 {
@@ -147,7 +147,7 @@ async fn[T] assert_task_stays_pending(
 /// Wait until PostgreSQL has released one backend process.
 async fn wait_for_backend_session_exit(
   observer : @client.Client,
-  backend_pid : Int,
+  backend_pid : Int32,
 ) -> Unit {
   for _ in 0..<100 {
     let present : Bool = observer
@@ -181,7 +181,7 @@ async fn assert_tls_query_ok(config : @client.Config) -> Unit {
       )
       .get_name("application_name")
     assert_eq(negotiated_application_name, config.application_name)
-    let backend_pid : Int = client
+    let backend_pid : Int32 = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let using_tls : Bool = client
@@ -190,7 +190,7 @@ async fn assert_tls_query_ok(config : @client.Config) -> Unit {
       ])
       .get_name("ssl")
     assert_eq(using_tls, true)
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select 1::int4 as value")
       .get_name("value")
     assert_eq(value, 1)
@@ -369,7 +369,7 @@ async test "integration connect and typed query" {
     )
     let current_user : String = row.get_name("current_user")
     let current_database : String = row.get_name("current_database")
-    let answer : Int = row.get_name("answer")
+    let answer : Int32 = row.get_name("answer")
     let enabled : Bool = row.get_name("enabled")
     assert_eq(current_user, config.user)
     assert_eq(current_database, config.database)
@@ -670,7 +670,7 @@ async test "integration check connection" {
     )
 
     client.check_connection()
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select 1::int4 as value")
       .get_name("value")
     assert_eq(value, 1)
@@ -721,9 +721,9 @@ async test "integration prepare and parameterized execute" {
     let rows = stream.collect()
     assert_eq(rows.length(), 1)
     let row = rows[0]
-    let id : Int = row.get_name("id")
+    let id : Int32 = row.get_name("id")
     let name : String = row.get_name("name")
-    let next_id : Int = row.get_name("next_id")
+    let next_id : Int32 = row.get_name("next_id")
     assert_eq(id, 7)
     assert_eq(name, "moonbit")
     assert_eq(next_id, 8)
@@ -743,17 +743,17 @@ async test "integration raw query closes temporary prepared statements" {
       group,
     )
 
-    let before : Int = client
+    let before : Int32 = client
       .query_one("select count(*)::int4 as count from pg_prepared_statements")
       .get_name("count")
     // Repeat convenience queries with parameters to cover the path that creates and then auto-cleans temporary statements.
     for value in 0..<5 {
       let params : Array[&@client.ToSql] = [value as &@client.ToSql]
       let row = client.query_one("select $1::int4 as value", params~)
-      let observed : Int = row.get_name("value")
+      let observed : Int32 = row.get_name("value")
       assert_eq(observed, value)
     }
-    let after : Int = client
+    let after : Int32 = client
       .query_one("select count(*)::int4 as count from pg_prepared_statements")
       .get_name("count")
     assert_eq(after, before)
@@ -773,7 +773,7 @@ async test "integration row stream detach closes temporary prepared statements" 
       group,
     )
 
-    let before : Int = client
+    let before : Int32 = client
       .query_one("select count(*)::int4 as count from pg_prepared_statements")
       .get_name("count")
 
@@ -782,13 +782,13 @@ async test "integration row stream detach closes temporary prepared statements" 
       "select generate_series(1, 16)::int4 as value order by value",
     )
     guard stream.next() is Some(first_row) else { fail("expected first row") }
-    let first_value : Int = first_row.get_name("value")
+    let first_value : Int32 = first_row.get_name("value")
     assert_eq(first_value, 1)
 
     stream.detach()
 
     let task = group.spawn(no_wait=true, () => {
-      let count : Int = client
+      let count : Int32 = client
         .query_one("select count(*)::int4 as count from pg_prepared_statements")
         .get_name("count")
       count
@@ -873,7 +873,7 @@ async test "integration simple query is FIFO single-flight" {
     @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     let task = group.spawn(no_wait=true, () => {
-      let result : Int = client
+      let result : Int32 = client
         .query_one("select 9::int4 as value")
         .get_name("value")
       result
@@ -916,7 +916,7 @@ async test "integration simple query detach unblocks later requests" {
     @debug.assert_eq(try! row.get_name("value"), Some("1"))
 
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 13::int4 as value")
         .get_name("value")
       value
@@ -966,7 +966,7 @@ async test "integration simple query detach swallows trailing database error" {
 
     stream.detach()
 
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select 21::int4 as value")
       .get_name("value")
     assert_eq(value, 21)
@@ -1038,9 +1038,9 @@ async test "integration portal pagination" {
     tx.commit()
 
     assert_eq(first.length(), 2)
-    let first_id : Int = first[0].get_name("id")
+    let first_id : Int32 = first[0].get_name("id")
     let first_name : String = first[0].get_name("name")
-    let second_id : Int = first[1].get_name("id")
+    let second_id : Int32 = first[1].get_name("id")
     let second_name : String = first[1].get_name("name")
     assert_eq(first_id, 1)
     assert_eq(first_name, "alice")
@@ -1048,7 +1048,7 @@ async test "integration portal pagination" {
     assert_eq(second_name, "bob")
 
     assert_eq(second.length(), 1)
-    let third_id : Int = second[0].get_name("id")
+    let third_id : Int32 = second[0].get_name("id")
     let third_name : String = second[0].get_name("name")
     assert_eq(third_id, 3)
     assert_eq(third_name, "charlie")
@@ -1085,11 +1085,11 @@ async test "integration row stream is FIFO single-flight" {
     assert_eq(columns.length(), 1)
     assert_eq(columns[0].name, "value")
     guard stream.next() is Some(first_row) else { fail("expected first row") }
-    let first_value : Int = first_row.get_name("value")
+    let first_value : Int32 = first_row.get_name("value")
     assert_eq(first_value, 1)
 
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 5::int4 as value")
         .get_name("value")
       value
@@ -1127,7 +1127,7 @@ async test "integration row stream backpressures after bounded buffering" {
       "select generate_series(1, 16)::int4 as value order by value",
     )
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 7::int4 as value")
         .get_name("value")
       value
@@ -1165,11 +1165,11 @@ async test "integration row stream detach unblocks later requests" {
       "select generate_series(1, 16)::int4 as value order by value",
     )
     guard stream.next() is Some(first_row) else { fail("expected first row") }
-    let first_value : Int = first_row.get_name("value")
+    let first_value : Int32 = first_row.get_name("value")
     assert_eq(first_value, 1)
 
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 15::int4 as value")
         .get_name("value")
       value
@@ -1226,7 +1226,7 @@ async test "integration transaction commit" {
 
     let rows = client.query("select id, name from moon_driver_tx").collect()
     assert_eq(rows.length(), 1)
-    let id : Int = rows[0].get_name("id")
+    let id : Int32 = rows[0].get_name("id")
     let name : String = rows[0].get_name("name")
     assert_eq(id, 1)
     assert_eq(name, "alpha")
@@ -1261,7 +1261,7 @@ async test "integration transaction rollback" {
     assert_eq(inserted, 1)
     tx.rollback()
 
-    let count : Int = client
+    let count : Int32 = client
       .query_one("select count(*)::int4 as count from moon_driver_tx_rollback")
       .get_name("count")
     assert_eq(count, 0)
@@ -1348,7 +1348,7 @@ async test "integration cancel token cancels running query" {
 
     // The observer connection exists only to provide a reliable "the query is really running" sync point.
     let token = client.cancel_token()
-    let backend_pid : Int = client
+    let backend_pid : Int32 = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let task = group.spawn(() => {
@@ -1360,7 +1360,7 @@ async test "integration cancel token cancels running query" {
 
     let err = expect_database_error(task.wait())
     @debug.assert_eq(err.code, Some("57014"))
-    let value : Int = client
+    let value : Int32 = client
       .query_one("select 1::int4 as value")
       .get_name("value")
     assert_eq(value, 1)
@@ -1392,7 +1392,7 @@ async test "integration client abort interrupts running query and is idempotent"
       ),
       group,
     )
-    let backend_pid : Int = client
+    let backend_pid : Int32 = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let task = group.spawn(() => {
@@ -1447,7 +1447,7 @@ async test "integration tls client abort closes backend session" {
       ),
       group,
     )
-    let backend_pid : Int = client
+    let backend_pid : Int32 = client
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let using_tls : Bool = observer
@@ -1575,7 +1575,7 @@ async test "integration copy out is FIFO single-flight" {
     assert_true(chunk.length() > 0)
 
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 11::int4 as value")
         .get_name("value")
       value
@@ -1614,7 +1614,7 @@ async test "integration copy out detach unblocks later requests" {
     assert_true(chunk.length() > 0)
 
     let task = group.spawn(no_wait=true, () => {
-      let value : Int = client
+      let value : Int32 = client
         .query_one("select 17::int4 as value")
         .get_name("value")
       value
@@ -1666,9 +1666,9 @@ async test "integration copy in" {
       .query("select id, name from moon_driver_copy_in order by id")
       .collect()
     assert_eq(rows.length(), 2)
-    let id1 : Int = rows[0].get_name("id")
+    let id1 : Int32 = rows[0].get_name("id")
     let name1 : String = rows[0].get_name("name")
-    let id2 : Int = rows[1].get_name("id")
+    let id2 : Int32 = rows[1].get_name("id")
     let name2 : String = rows[1].get_name("name")
     assert_eq(id1, 1)
     assert_eq(name1, "jim")
@@ -1714,7 +1714,7 @@ async test "integration copy in large" {
     let copied = sink.finish()
     assert_eq(copied, 10000)
 
-    let count : Int = client
+    let count : Int32 = client
       .query_one(
         "select count(*)::int4 as count from moon_driver_copy_in_large",
       )
@@ -1744,7 +1744,7 @@ async test "integration copy in abort rolls back copy" {
     sink.send(b"1\tsteven\n")
     sink.abort()
 
-    let count : Int = client
+    let count : Int32 = client
       .query_one("select count(*)::int4 as count from moon_driver_copy_abort")
       .get_name("count")
     assert_eq(count, 0)
@@ -1861,7 +1861,7 @@ async test "integration deferred constraint" {
     )
     let err = expect_database_error(expect_error_async(() => tx.commit()))
     @debug.assert_eq(err.code, Some("23505"))
-    let count : Int = client
+    let count : Int32 = client
       .query_one(
         "select count(*)::int4 as count from moon_driver_deferred_constraint",
       )
@@ -1904,18 +1904,18 @@ async test "integration query typed without transaction" {
     assert_eq(rows.length(), 2)
 
     let first_name : String = rows[0].get_name("name")
-    let first_age : Int = rows[0].get_name("age")
+    let first_age : Int32 = rows[0].get_name("age")
     let first_literal : String = rows[0].get_name("literal")
-    let first_number : Int = rows[0].get_name("number")
+    let first_number : Int32 = rows[0].get_name("number")
     assert_eq(first_name, "bob")
     assert_eq(first_age, 30)
     assert_eq(first_literal, "literal")
     assert_eq(first_number, 5)
 
     let second_name : String = rows[1].get_name("name")
-    let second_age : Int = rows[1].get_name("age")
+    let second_age : Int32 = rows[1].get_name("age")
     let second_literal : String = rows[1].get_name("literal")
-    let second_number : Int = rows[1].get_name("number")
+    let second_number : Int32 = rows[1].get_name("number")
     assert_eq(second_name, "carol")
     assert_eq(second_age, 40)
     assert_eq(second_literal, "literal")

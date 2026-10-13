@@ -35,7 +35,7 @@ test "type descriptors include schema and full children in equality" {
 async test "recursive catalog descriptors reuse siblings and reload after cache clear" {
   with_cancellation_test_client((group, client, next_request) => {
     for _ in 0..<2 {
-      let active : Map[UInt, Unit] = Map([])
+      let active : Map[UInt32, Unit] = Map([])
       let task = group.spawn(() => {
         cached_type_recursive(client.operation_context(), 90000U, active)
       })
@@ -107,7 +107,7 @@ async test "catalog domain range and pseudo preserve schema and full child types
 async test "catalog cycles clear active nodes and never cache incomplete descriptors" {
   for mutual in [false, true] {
     with_cancellation_test_client((group, client, next_request) => {
-      let active : Map[UInt, Unit] = Map([])
+      let active : Map[UInt32, Unit] = Map([])
       for _ in 0..<2 {
         let task = group.spawn(allow_failure=true, () => {
           cached_type_recursive(client.operation_context(), 90000U, active)

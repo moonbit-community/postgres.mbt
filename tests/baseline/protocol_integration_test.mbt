@@ -14,8 +14,8 @@ struct WireDatabaseError {
 /// Besides the socket itself, it keeps the backend pid, cancel key, parameter map, and transaction status for later assertions.
 struct WireConnection {
   socket : @socket.Tcp
-  mut process_id : Int
-  mut secret_key : Int
+  mut process_id : Int32
+  mut secret_key : Int32
   parameters : Map[String, String]
   mut transaction_status : Byte
 }
@@ -103,7 +103,7 @@ async fn WireConnection::send_and_collect(
 async fn WireConnection::simple_query(
   self : WireConnection,
   sql : String,
-  flush? : Bool = false,
+  flush~ : Bool = false,
 ) -> Array[@backend.Message] {
   let sql_bytes = @proto.utf8_encode(sql)
   let buf = Buffer()
@@ -387,7 +387,7 @@ fn find_notice_response(
 /// The cancel and concurrency tests rely on this sync point so cancellation does not happen too early.
 async fn wait_for_backend_query(
   client : @client.Client,
-  backend_pid : Int,
+  backend_pid : Int32,
   sql : String,
 ) -> Unit {
   for _ in 0..<100 {
@@ -814,9 +814,9 @@ async test "integration protocol bind text formats and null row ranges" {
   let sql_bytes = @proto.utf8_encode(
     "select id, note from wire_bind_formats where id = $1::int4",
   )
-  let formats : Array[Int] = [0]
+  let formats : Array[Int32] = [0]
   let params : Array[String?] = [Some("7")]
-  let result_formats : Array[Int] = [0, 0]
+  let result_formats : Array[Int32] = [0, 0]
   let buf = Buffer()
   @frontend.parse(b"stmt_formats"[:], sql_bytes[:], [23U].iter(), buf)
   @frontend.bind(
@@ -901,9 +901,9 @@ async test "integration protocol portal suspended" {
   let sql_bytes = @proto.utf8_encode(
     "select generate_series(1, 3)::int4 as value",
   )
-  let formats : Array[Int] = []
+  let formats : Array[Int32] = []
   let params : Array[String?] = []
-  let result_formats : Array[Int] = []
+  let result_formats : Array[Int32] = []
   let buf = Buffer()
   @frontend.parse(b"stmt_portal"[:], sql_bytes[:], [].iter(), buf)
   @frontend.bind(

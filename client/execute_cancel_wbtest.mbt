@@ -39,7 +39,7 @@ async fn check_execute_cancellation(raw~ : Bool) -> Unit {
         name: b"s1",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
       let task = group.spawn(allow_failure=true, () => {
         if raw {
@@ -120,7 +120,7 @@ async test "execute_raw cancellation survives a drain error" {
       name: b"s1",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let task = group.spawn(allow_failure=true, () => {
       client.execute_raw(statement)
@@ -150,7 +150,7 @@ async test "execute_raw preserves decoding failure when cleanup sees a database 
       name: b"s1",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let task = group.spawn(allow_failure=true, () => {
       client.execute_raw(statement)

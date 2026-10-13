@@ -55,7 +55,7 @@ fn snapshot_statement_cache_param_types(
 
 ///|
 /// Move one array element to the MRU end and return it.
-fn[T] take_and_promote_index(values : Array[T], index : Int) -> T {
+fn[T] take_and_promote_index(values : Array[T], index : Int32) -> T {
   let value = values.remove(index)
   values.push(value)
   value
@@ -63,13 +63,13 @@ fn[T] take_and_promote_index(values : Array[T], index : Int) -> T {
 
 ///|
 /// Return whether inserting a new entry must evict the current LRU entry.
-fn statement_cache_needs_eviction(size : Int, capacity : Int) -> Bool {
+fn statement_cache_needs_eviction(size : Int32, capacity : Int32) -> Bool {
   capacity > 0 && size >= capacity
 }
 
 ///|
 /// Return whether an evicted statement no longer has an active lease.
-fn evicted_statement_can_close(in_use : Int, evicted : Bool) -> Bool {
+fn evicted_statement_can_close(in_use : Int32, evicted : Bool) -> Bool {
   in_use == 0 && evicted
 }
 
@@ -141,8 +141,8 @@ async fn acquire_cached_statement(
         sql,
         param_types: snapshot_statement_cache_param_types(param_types),
         statement,
-        in_use: @ref.new(1),
-        evicted: @ref.new(false),
+        in_use: Ref(1),
+        evicted: Ref(false),
       }
       connection.statement_cache.push(entry)
       { entry, }
@@ -535,7 +535,7 @@ pub async fn[T] Transaction::with_prepared_typed(
 /// Preconditions: the statement must still be active inside its callback scope.
 pub async fn PreparedStatement::query_all(
   self : PreparedStatement,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> Array[@client.Row] {
   self.state.begin_call()
   defer self.state.finish_call()
@@ -555,7 +555,7 @@ pub async fn PreparedStatement::query_all(
 /// report an unexpected result size.
 pub async fn PreparedStatement::query_one(
   self : PreparedStatement,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row {
   self.state.begin_call()
   defer self.state.finish_call()
@@ -575,7 +575,7 @@ pub async fn PreparedStatement::query_one(
 /// is returned.
 pub async fn PreparedStatement::query_opt(
   self : PreparedStatement,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> @client.Row? {
   self.state.begin_call()
   defer self.state.finish_call()
@@ -592,7 +592,7 @@ pub async fn PreparedStatement::query_opt(
 /// Execute this scoped prepared statement and return the affected row count as `UInt64`.
 pub async fn PreparedStatement::execute(
   self : PreparedStatement,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
 ) -> UInt64 {
   self.state.begin_call()
   defer self.state.finish_call()
@@ -609,7 +609,7 @@ pub async fn PreparedStatement::execute(
 /// Execute this scoped prepared statement as a callback-scoped row stream.
 pub async fn[T] PreparedStatement::with_stream(
   self : PreparedStatement,
-  params? : Array[&@client.ToSql] = [],
+  params~ : Array[&@client.ToSql] = [],
   f : async (@client.RowStream) -> T,
 ) -> T {
   self.state.begin_call()

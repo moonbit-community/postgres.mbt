@@ -140,7 +140,7 @@ async test "foreign statements reject before gate waits and cannot close same na
 ///|
 fn statement_test_complete(
   request : Request,
-  status? : Byte = b'I',
+  status~ : Byte = b'I',
 ) -> Unit raise {
   ignore(
     request.responses.try_put(copy_test_command_complete_message("SELECT 1")),

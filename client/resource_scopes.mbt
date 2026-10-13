@@ -11,7 +11,7 @@ priv struct ScopedStatementState {
   owner : ScopedStatementOwner
   statement : Statement
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
+  active_calls : @ref.Ref[Int32]
 }
 
 ///|
@@ -39,7 +39,7 @@ struct Portal {
   columns : Array[Column]
   closed : @ref.Ref[Bool]
   active : @ref.Ref[Bool]
-  active_calls : @ref.Ref[Int]
+  active_calls : @ref.Ref[Int32]
 }
 
 ///|
@@ -68,12 +68,7 @@ fn ScopedStatement::new(
   {
     params: statement.params.copy(),
     columns: statement.columns.copy(),
-    state: {
-      owner,
-      statement,
-      active: @ref.new(true),
-      active_calls: @ref.new(0),
-    },
+    state: { owner, statement, active: Ref(true), active_calls: Ref(0), },
   }
 }
 
@@ -87,9 +82,9 @@ fn Portal::new(
     transaction,
     name,
     columns,
-    closed: @ref.new(false),
-    active: @ref.new(true),
-    active_calls: @ref.new(0),
+    closed: Ref(false),
+    active: Ref(true),
+    active_calls: Ref(0),
   }
 }
 
@@ -231,7 +226,7 @@ pub async fn[T] Transaction::with_prepared_typed(
 /// Execute one statement stream and finish it before this call returns.
 pub async fn[T] ScopedStatement::with_stream(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.state.begin_call()
@@ -250,7 +245,7 @@ pub async fn[T] ScopedStatement::with_stream(
 /// Execute this prepared statement and return its affected row count as `UInt64`.
 pub async fn ScopedStatement::execute(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> UInt64 {
   self.state.begin_call()
   defer {
@@ -268,7 +263,7 @@ pub async fn ScopedStatement::execute(
 /// every callback exit. The statement remains usable within its own scope.
 pub async fn[T] ScopedStatement::with_portal(
   self : ScopedStatement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (Portal) -> T,
 ) -> T {
   self.state.begin_call()
@@ -290,7 +285,7 @@ pub async fn[T] ScopedStatement::with_portal(
 pub async fn[T] Transaction::with_portal(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (Portal) -> T,
 ) -> T {
   self.client.assert_statement_connection(statement)
@@ -323,7 +318,7 @@ pub async fn[T] Transaction::with_portal(
 /// PostgreSQL stops at a row limit.
 pub async fn[T] Portal::with_stream(
   self : Portal,
-  max_rows : Int,
+  max_rows : Int32,
   f : async (RowStream) -> T,
 ) -> T {
   self.begin_call()

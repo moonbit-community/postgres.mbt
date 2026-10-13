@@ -127,7 +127,7 @@ Rows decode by index or PostgreSQL column name:
 
 ```mbt check
 ///|
-async fn _query_example(client : @client.Client) -> Int {
+async fn _query_example(client : @client.Client) -> Int32 {
   let input = 41
   let row = client.query_one("select $1::int4 + 1 as value", params=[
     input as &ToSql,
@@ -203,7 +203,7 @@ or is cancelled, best-effort cleanup preserves that original cause.
 
 ```mbt check
 ///|
-async fn _first_value(client : @client.Client) -> Int? {
+async fn _first_value(client : @client.Client) -> Int32? {
   client.with_stream("select generate_series(1, 100) as value", stream => {
     match stream.next() {
       Some(row) => Some(row.get_name("value"))
@@ -274,11 +274,11 @@ close it on return, error, or cancellation:
 
 ```mbt check
 ///|
-async fn _prepared_example(client : @client.Client) -> Int {
+async fn _prepared_example(client : @client.Client) -> Int32 {
   client.with_prepared("select $1::int4 as value", statement => {
     let value = 7
     statement.with_stream(params=[value as &ToSql], stream => {
-      let result : Int = stream.next().unwrap().get_name("value")
+      let result : Int32 = stream.next().unwrap().get_name("value")
       result
     })
   })
@@ -312,12 +312,12 @@ order:
 
 ```mbt check
 ///|
-async fn _portal_example(client : @client.Client) -> Int {
+async fn _portal_example(client : @client.Client) -> Int32 {
   client.with_transaction(tx => {
     tx.with_prepared("select 7::int4 as value", statement => {
       statement.with_portal((portal : @client.Portal) => {
         portal.with_stream(1, stream => {
-          let result : Int = stream.next().unwrap().get_name("value")
+          let result : Int32 = stream.next().unwrap().get_name("value")
           result
         })
       })
@@ -339,12 +339,12 @@ to fetch another window:
 
 ```mbt check
 ///|
-async fn _portal_pagination(client : @client.Client) -> Array[Int] {
+async fn _portal_pagination(client : @client.Client) -> Array[Int32] {
   let statement = client.prepare("select generate_series(1, $1::int4) as value")
   defer @async.protect_from_cancel(() => statement.close())
   client.with_transaction(tx => {
     tx.with_portal(statement, params=[3 as &ToSql], portal => {
-      let values : Array[Int] = []
+      let values : Array[Int32] = []
       for ;; {
         let summary = portal.with_stream(2, stream => {
           for row in stream.collect() {

@@ -1,7 +1,7 @@
 ///|
 async fn scoped_test_prepare(
   request : Request,
-  param_types? : Array[Type] = [],
+  param_types~ : Array[Type] = [],
 ) -> Unit {
   request.responses.put(parse_backend_message(b"1\x00\x00\x00\x04"))
   let payload = Buffer()
@@ -61,7 +61,7 @@ async test "scoped row decoding error survives stream and statement cleanup erro
   with_cancellation_test_client((group, client, next_request) => {
     let task = group.spawn(allow_failure=true, () => {
       client.with_stream("select value", stream => {
-        let value : Int = stream.next().unwrap().get(0)
+        let value : Int32 = stream.next().unwrap().get(0)
         value
       })
     })
@@ -118,8 +118,8 @@ async test "scoped rows propagate cancellation at acquisition callback and clean
         let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
         let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
         defer waiting.close()
-        let delivered = @ref.new(false)
-        let exited = @ref.new(false)
+        let delivered = Ref(false)
+        let exited = Ref(false)
         async fn callback(_ : RowStream) -> Unit {
           delivered.val = true
           entered.put(())
@@ -208,7 +208,7 @@ async test "scoped statement and portal streams leave caller resources open and 
         name: b"owned_statement",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
       let transaction = if use_portal {
         let begin = group.spawn(() => client.transaction())
@@ -393,7 +393,7 @@ async test "scoped COPY IN commits only on explicit finish and aborts other call
 async test "scoped COPY startup cancellation cleans up before propagating" {
   for copy_in in [false, true] {
     with_cancellation_test_client((group, client, next_request) => {
-      let delivered = @ref.new(false)
+      let delivered = Ref(false)
       let task = group.spawn(allow_failure=true, () => {
         if copy_in {
           client.with_copy_in("COPY t FROM STDIN", _ => delivered.val = true)

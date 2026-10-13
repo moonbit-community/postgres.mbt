@@ -32,8 +32,8 @@ async fn with_operation_test_state(
 async test "queued operation requests wait for late cancel completion in FIFO order" {
   with_operation_test_state((group, state) => {
     ignore(state.begin_request())
-    let queued : @async.Queue[Int] = Queue(kind=Unbounded)
-    let granted : @async.Queue[Int] = Queue(kind=Unbounded)
+    let queued : @async.Queue[Int32] = Queue(kind=Unbounded)
+    let granted : @async.Queue[Int32] = Queue(kind=Unbounded)
     let release_request : @async.Queue[Unit] = Queue(kind=Unbounded)
     defer release_request.close()
     let waiters : Array[@async.Task[Unit]] = []
@@ -120,7 +120,7 @@ async test "pooled operation boundary propagates cancellation after protected wo
     let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
     let release_work : @async.Queue[Unit] = Queue(kind=Unbounded)
     defer release_work.close()
-    let returned = @ref.new(false)
+    let returned = Ref(false)
     let task = group.spawn(allow_failure=true, () => {
       operation.run_request(_ => {
         entered.put(())
@@ -156,7 +156,7 @@ async test "session boundaries recheck cancellation outside their outer protecti
         entered.put(())
         release_work.get()
       }
-      let returned = @ref.new(false)
+      let returned = Ref(false)
       let task = group.spawn(allow_failure=true, () => {
         if cancellable {
           session.run_cancellable((_, _) => work())

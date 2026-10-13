@@ -1,7 +1,7 @@
 ///|
 async fn serve_pool_async_test_connection(
   socket : @socket.Tcp,
-  connection_id : Int,
+  connection_id : Int32,
 ) -> Unit {
   defer socket.close()
   let startup = socket.read_exactly(4)
@@ -38,7 +38,7 @@ async test "pool messages retain newest items with source IDs after close" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
-    let next_id = @ref.new(0)
+    let next_id = Ref(0)
     group.spawn_bg(no_wait=true, () => {
       while true {
         let (socket, _) = server.accept()
@@ -93,7 +93,7 @@ async test "pool messages retain newest items with source IDs after close" {
 ///|
 async fn serve_pool_idle_disconnect_test_connection(
   socket : @socket.Tcp,
-  connection_id : Int,
+  connection_id : Int32,
   close_first : @async.Queue[Unit],
 ) -> Unit {
   defer socket.close()
@@ -117,7 +117,7 @@ async test "idle connection failure does not close the pool" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
     let close_first : @async.Queue[Unit] = Queue(kind=Unbounded)
-    let next_id = @ref.new(0)
+    let next_id = Ref(0)
     group.spawn_bg(no_wait=true, () => {
       while true {
         let (socket, _) = server.accept()
@@ -179,7 +179,7 @@ async test "pool hook handle expires and rejects a leaked transaction" {
       pool=PoolConfig(1),
     )
     @async.with_timeout(3000, () => {
-      let saved : @ref.Ref[Operation?] = @ref.new(None)
+      let saved : @ref.Ref[Operation?] = Ref(None)
       let pool = start_test_pool(
         config,
         group,

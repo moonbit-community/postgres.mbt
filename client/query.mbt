@@ -97,7 +97,7 @@ async fn OpContext::prepare_typed(
   let (params, columns) = resolve_prepared_metadata(
     self, name, param_oids, raw_columns,
   )
-  { client: self.client, name, params, columns, closed: @ref.new(false), }
+  { client: self.client, name, params, columns, closed: Ref(false), }
 }
 
 ///|
@@ -150,10 +150,10 @@ async fn OpContext::close_statement(
 pub async fn Client::query(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
-  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  let completed : @ref.Ref[RowStream?] = Ref(None)
   errdefer (if completed.val is Some(stream) {
     stream.detach()
   } else {
@@ -219,7 +219,7 @@ async fn OpContext::query(
 pub async fn Client::query_one(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> Row {
   self.query(sql, params~).one()
 }
@@ -229,7 +229,7 @@ pub async fn Client::query_one(
 pub async fn Client::query_opt(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> Row? {
   self.query(sql, params~).opt()
 }
@@ -243,10 +243,10 @@ pub async fn Client::query_typed(
   self : Client,
   sql : String,
   param_types : Array[Type],
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   let (context, permit) = self.begin_stream_operation()
-  let completed : @ref.Ref[RowStream?] = @ref.new(None)
+  let completed : @ref.Ref[RowStream?] = Ref(None)
   errdefer (if completed.val is Some(stream) {
     stream.detach()
   } else {
@@ -304,7 +304,7 @@ async fn OpContext::query_typed(
 pub async fn Client::query_statement(
   self : Client,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   self.assert_statement_connection(statement)
   let (context, permit) = self.begin_stream_operation()
@@ -353,7 +353,7 @@ fn OpContext::query_statement(
 pub async fn Client::execute(
   self : Client,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> UInt64 {
   self.run_operation(context => context.execute(sql, params))
 }
@@ -390,7 +390,7 @@ async fn OpContext::execute(
 pub async fn Client::execute_raw(
   self : Client,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> UInt64 {
   self.assert_statement_connection(statement)
   self.run_operation(context => context.execute_raw(statement, params))
@@ -504,7 +504,7 @@ async fn OpContext::close_portal(self : OpContext, portal : Portal) -> Unit {
 fn OpContext::query_portal(
   self : OpContext,
   portal : Portal,
-  max_rows : Int,
+  max_rows : Int32,
   permit? : OperationPermit,
 ) -> RowStream raise {
   guard !portal.closed.val else {
