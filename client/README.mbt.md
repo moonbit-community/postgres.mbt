@@ -51,7 +51,7 @@ discarded physical transport as cancellation unwinds.
 
 `Client::is_closed()` reports whether the runtime can still be used, not whether
 every teardown callback has already completed. It therefore returns `true`
-immediately after `abort()`; `close()` remains the API to await graceful
+immediately after `abort()`; `close()` waits for graceful
 PostgreSQL shutdown and completed transport cleanup.
 
 `Client::is_transaction_idle()` returns `true` only after successful startup,
@@ -121,7 +121,7 @@ count return zero. Counted tags (`INSERT oid rows` and
 `DELETE/UPDATE/MERGE/SELECT/MOVE/FETCH/COPY rows`) require decimal digits within
 the `UInt64` range; missing, invalid, or overflowing counts raise
 `ClientError::Protocol` after the execution stream has been drained. Portal
-`max_rows` remains an `Int` protocol limit.
+`max_rows` is an `Int` protocol limit.
 
 Rows decode by index or PostgreSQL column name:
 
@@ -191,10 +191,9 @@ the same way.
 `Statement` and `ScopedStatement` expose `params()` and `columns()` metadata
 views; `Portal` exposes `columns()`. Type descriptors expose their
 classification through `type_.kind`; enum labels and composite fields are
-read-only views. The raw `Bytes` returned by `Row::get_raw()` is unchanged.
+read-only views. `Row::get_raw()` returns the raw value as `Bytes?`.
 
-`query_typed` supplies PostgreSQL parameter types explicitly. The former
-`query_typed_raw` compatibility alias has been removed.
+`query_typed` supplies PostgreSQL parameter types explicitly.
 
 Each scope returns the callback's result. Row, simple-query, and COPY OUT scopes
 call `finish()` under cancellation protection after the callback exits. A
@@ -223,9 +222,8 @@ Execute request is submitted.
 
 `Type` carries `oid`, `name`, `schema : String?`, and `kind`. Built-ins have
 `Some("pg_catalog")`; catalog-resolved types retain their actual schema.
-`Type::unknown(oid, name=...)` keeps its existing constructor and has `None`
-for its unresolved schema. Codecs can distinguish identically named types
-in different schemas:
+`Type::unknown(oid, name=...)` has `None` for its unresolved schema. Codecs can
+distinguish identically named types in different schemas:
 
 ```mbt check
 ///|
@@ -234,12 +232,11 @@ fn _accept_status(type_ : @client.Type) -> Bool {
 }
 ```
 
-`Kind::Array(element)`, `Domain(base)`, and `Range(subtype)` now carry complete
+`Kind::Array(element)`, `Domain(base)`, and `Range(subtype)` carry complete
 `Type` descriptors. Composite fields expose `field.type_`, including nested
-metadata. To migrate code that used their OID payloads, read `element.oid`,
-`base.oid`, or `subtype.oid`; replace `field.type_oid` with `field.type_.oid`.
-Descriptor fields remain read-only. `Eq` compares the entire structure,
-including schema and child descriptors.
+metadata. Read `element.oid`, `base.oid`, `subtype.oid`, or `field.type_.oid`
+for the corresponding OID. Descriptor fields are read-only. `Eq` compares the
+entire structure, including schema and child descriptors.
 
 The generic `Array[T]` codec uses `Kind::Array` metadata, so implementing only
 `ToSql` and `FromSql` for a custom enum also enables `Array[Enum]` and
@@ -251,7 +248,7 @@ scalar codec's `format` method. Decoders receive the full element descriptor
 and `Binary`; the payload's element OID must match that descriptor. Built-in
 string arrays include `ltree[]`, `lquery[]`, and `ltxtquery[]`: their scalar
 codecs add and remove the version byte for each non-NULL element. Ordinary
-strings and JSON/JSONB retain their existing array handling.
+strings and JSON/JSONB also support arrays.
 
 Catalog metadata is resolved recursively and cached per connection.
 `clear_type_cache()` forces custom types to be resolved again. A cycle raises
@@ -262,7 +259,7 @@ operation leaves the connection and transaction usable. If metadata resolution
 fails after preparation, the driver closes the undelivered statement before
 returning the error; a failed Close aborts the connection and preserves the
 original metadata error. Missing types and recoverable catalog database errors
-retain the existing `Unknown` fallback.
+use an `Unknown` descriptor as a fallback.
 
 Domains are not automatically unwrapped by codecs. Generic composite/range
 codecs, a public type registry, and multidimensional arrays are not provided.
@@ -326,13 +323,10 @@ async fn _portal_example(client : @client.Client) -> Int32 {
 }
 ```
 
-`Portal` owns both its server resource and callback scope. The former scoped
-handle has been renamed to `Portal` without a compatibility alias. Portal
-creation and cleanup use `with_portal`; `Transaction::bind`, `query_portal`,
-`with_portal_stream`, and `close_portal` remain package-internal helpers.
-Replace a manual bind/query/close sequence with one `with_portal`
-callback and successive `portal.with_stream` calls. Each fetch finishes only
-its current stream, so the same portal can resume at the next window. Unread
+`Portal` owns both its server resource and callback scope. Create and clean up
+the portal with one `with_portal` callback, and fetch successive windows with
+`portal.with_stream`. Each fetch finishes only its current stream, so the same
+portal can resume at the next window. Unread
 rows in that window are discarded before the next call. Use `max_rows=0` to
 fetch all remaining rows, or inspect `QuerySummary.suspended` to decide whether
 to fetch another window:
@@ -364,7 +358,7 @@ async fn _portal_pagination(client : @client.Client) -> Array[Int32] {
 `Portal::execute()` consumes the portal to completion and returns the
 affected row count. `Transaction::with_portal` leaves its ordinary `Statement`
 open; the caller can reuse it after the portal scope or transaction ends and
-closes it separately. The pool's prepared-statement cache is unchanged.
+closes it separately.
 
 Both scoped handles reject new database operations with `ClientError::Closed`
 after their callback ends, wait for calls already started, then close their resource.
@@ -400,9 +394,7 @@ async fn _transaction_example(client : @client.Client) -> Unit {
 
 Set an isolation level directly with `@client.IsolationLevel::ReadUncommitted`,
 `ReadCommitted`, `RepeatableRead`, or `Serializable`. `TransactionOptions`
-accepts an enum value instead of an SQL string. The former `read_uncommitted()`,
-`read_committed()`, `repeatable_read()`, and `serializable()` factory methods have
-been removed; use the corresponding enum constructors:
+accepts the enum value through its `isolation_level` option:
 
 ```mbt check
 ///|
@@ -617,8 +609,7 @@ they are not byte offsets or MoonBit UTF-16 indices. `line` is an optional
 `UInt`. Malformed decimal values, overflow, zero positions, and invalid UTF-8
 raise `ProtocolError::InvalidInput` in the shared parser.
 
-Previously `severity` could be overwritten by `V` depending on field order.
-It now preserves only `S`; use `severity_nonlocalized` for stable severity
+`severity` stores `S`; use `severity_nonlocalized` for stable severity
 matching. `Debug` and `Eq` include every field. Query, transaction, COPY, and
 pool operations preserve the same structured fields.
 
@@ -637,3 +628,10 @@ fn _is_email_conflict(error : Error) -> Bool {
 
 The field meanings follow the
 [PostgreSQL error and notice protocol](https://www.postgresql.org/docs/current/protocol-error-fields.html).
+
+`CancelToken::cancel()` waits for the server to close the separate cancellation
+connection. This does not confirm the original SQL stopped; callers must also
+finish the original response. The connection pool performs both waits under a
+finite cleanup budget. Raw `Transaction::commit()` distinguishes a server
+ROLLBACK tag (`ClientError::CommitRolledBack`) from a missing completion response
+(`ClientError::CommitOutcomeUnknown`).

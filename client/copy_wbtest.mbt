@@ -166,6 +166,9 @@ fn copy_test_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-copy-wbtest",
     ),
+    driver_request: Ref(None),
+    request_control: Ref(None),
+    next_request_id: Ref(0L),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
     dropped_async_messages: Ref(0L),
@@ -614,7 +617,7 @@ async test "response helpers drain simple query and close sequences" {
   simple_responses.put(copy_test_data_row_message(Some(b"ok")))
   simple_responses.put(copy_test_command_complete_message("SELECT 1"))
   simple_responses.put(copy_test_ready_for_query_message())
-  drain_simple_query(simple_responses)
+  assert_eq(drain_simple_query(simple_responses), "SELECT 1")
 
   let close_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   close_responses.put(copy_test_close_complete_message())

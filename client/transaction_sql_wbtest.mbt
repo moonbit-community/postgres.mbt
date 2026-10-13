@@ -23,6 +23,7 @@ async test "transaction isolation levels use fixed BEGIN SQL" {
       let commit = group.spawn(() => transaction.commit())
       let complete = next_request()
       assert_eq(complete.bytes, simple_query_bytes("COMMIT"))
+      complete.responses.put(copy_test_command_complete_message("COMMIT"))
       complete.responses.put(copy_test_ready_for_query_message())
       commit.wait()
     }
@@ -71,6 +72,7 @@ async test "named savepoints quote identifiers for commit and rollback" {
     let finish = group.spawn(() => transaction.commit())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     finish.wait()
   })
@@ -96,6 +98,7 @@ async test "invalid savepoint names leave parent transaction usable" {
     let finish = group.spawn(() => transaction.commit())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     finish.wait()
   })
