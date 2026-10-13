@@ -9,7 +9,7 @@ async test "portal scope waits for started calls and rejects expired operations"
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let delivered : @async.Queue[Portal] = Queue(kind=Unbounded)
     let leave_scope : @async.Queue[Unit] = Queue(kind=Unbounded)
@@ -93,12 +93,12 @@ async test "portal scope preserves cancellation during bind fetch callback and C
         name: b"existing",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
       let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
       let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
       defer waiting.close()
-      let delivered = @ref.new(false)
+      let delivered = Ref(false)
       let task = group.spawn(allow_failure=true, () => {
         transaction.with_portal(statement, portal => {
           delivered.val = true
@@ -187,9 +187,9 @@ async test "portal bind closes its server resource when column type resolution f
             format: Binary,
           },
         ],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
-      let delivered = @ref.new(false)
+      let delivered = Ref(false)
       let task = group.spawn(allow_failure=true, () => {
         transaction.with_portal(statement, _ => delivered.val = true)
       })

@@ -17,7 +17,7 @@ pub(all) suberror ProtocolError {
 ///
 /// OIDs are transmitted on the wire as 32-bit unsigned integers and appear in
 /// messages such as `ParameterDescription` and `RowDescription`.
-pub type Oid = UInt
+pub type Oid = UInt32
 
 ///|
 /// A PostgreSQL Log Sequence Number (LSN).

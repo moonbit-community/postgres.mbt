@@ -343,7 +343,7 @@ pub fn Type::uuid_array() -> Type {
 /// Unknown descriptors let the client carry OID information through error
 /// messages and metadata paths even when it has not yet queried PostgreSQL's
 /// system catalogs for richer shape information.
-pub fn Type::unknown(oid : @proto.Oid, name? : String = "unknown") -> Type {
+pub fn Type::unknown(oid : @proto.Oid, name~ : String = "unknown") -> Type {
   { oid, name, schema: None, kind: Unknown, }
 }
 

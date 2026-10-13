@@ -35,7 +35,7 @@ async test "prepare query and typed query close undelivered statements on metada
 async test "failed Close after metadata resolution aborts and preserves original error" {
   for lost_close in [false, true] {
     @async.with_task_group(group => {
-      let shared = copy_test_shared(@ref.new(Some(group)))
+      let shared = copy_test_shared(Ref(Some(group)))
       let client : Client = { shared, }
       @async.with_timeout(2000, () => {
         let task = group.spawn(allow_failure=true, () => {
@@ -101,7 +101,7 @@ async test "interrupted catalog preparation propagates and closes outer statemen
 ///|
 async test "cancelled catalog resolution removes active marks and can retry" {
   with_cancellation_test_client((group, client, next_request) => {
-    let active : Map[UInt, Unit] = Map([])
+    let active : Map[UInt32, Unit] = Map([])
     let task = group.spawn(allow_failure=true, () => {
       cached_type_recursive(client.operation_context(), 90000U, active)
     })

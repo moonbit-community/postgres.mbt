@@ -2,13 +2,13 @@
 fn make_decl_pool(
   config : IntegrationConfig,
   group : @async.TaskGroup[Unit],
-  max_size : Int,
+  max_size : Int32,
   application_name~ : String,
-  create_ms? : Int? = None,
-  recycle_ms? : Int? = None,
-  recycling_method? : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
-  statement_cache_capacity? : Int = 100,
-  options? : @pgpool.PoolOptions = PoolOptions(),
+  create_ms~ : Int32? = None,
+  recycle_ms~ : Int32? = None,
+  recycling_method~ : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
+  statement_cache_capacity~ : Int32 = 100,
+  options~ : @pgpool.PoolOptions = PoolOptions(),
 ) -> @pgpool.Pool raise {
   let declarative = @pgpool.Config::Config(
     [@pgpool.ConnectionTarget(host=config.host, port=config.port)],
@@ -76,11 +76,11 @@ async test "integration pool recycle timeout replaces blocked connection" {
       recycle_ms=Some(100),
       options~,
     )
-    let first_pid : Int = pool
+    let first_pid : Int32 = pool
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let started = @async.now()
-    let second_pid : Int = @async.with_timeout(10000, () => {
+    let second_pid : Int32 = @async.with_timeout(10000, () => {
       pool.query_one("select pg_backend_pid()::int4 as pid").get_name("pid")
     })
     assert_true(@async.now() - started < 9000L)
@@ -96,10 +96,10 @@ async test "integration pool recycle timeout replaces blocked connection" {
 async test "integration pool connector and lifecycle hooks" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let connect_calls : Array[Int] = []
-    let post_create_calls : Array[Int] = []
-    let pre_recycle_calls : Array[Int] = []
-    let post_recycle_calls : Array[Int] = []
+    let connect_calls : Array[Int32] = []
+    let post_create_calls : Array[Int32] = []
+    let pre_recycle_calls : Array[Int32] = []
+    let post_recycle_calls : Array[Int32] = []
 
     let connector = @pgpool.Connector::Connector(target => {
       connect_calls.push(1)
@@ -129,10 +129,10 @@ async test "integration pool connector and lifecycle hooks" {
       options~,
     )
 
-    let first : Int = pool
+    let first : Int32 = pool
       .query_one("select 1::int4 as value")
       .get_name("value")
-    let second : Int = pool
+    let second : Int32 = pool
       .query_one("select 2::int4 as value")
       .get_name("value")
     assert_eq(first, 1)
@@ -165,21 +165,22 @@ async test "integration pool clean recycle retains statement cache" {
     )
 
     let statement_count_sql = "select count(*)::int4 as count from pg_prepared_statements"
-    let (before_pid, before_statement_count) : (Int, Int) = pool.with_session(session => {
-      session.batch_execute("set search_path to pg_catalog")
-      let pid : Int = session
-        .query_one("select pg_backend_pid()::int4 as pid")
-        .get_name("pid")
-      let statement_count : Int = session
-        .query_one(statement_count_sql)
-        .get_name("count")
-      (pid, statement_count)
-    })
-    let (after_pid, after_statement_count, path) : (Int, Int, String) = pool.with_session(session => {
-        let pid : Int = session
+    let (before_pid, before_statement_count) : (Int32, Int32) = pool.with_session(session => {
+        session.batch_execute("set search_path to pg_catalog")
+        let pid : Int32 = session
           .query_one("select pg_backend_pid()::int4 as pid")
           .get_name("pid")
-        let statement_count : Int = session
+        let statement_count : Int32 = session
+          .query_one(statement_count_sql)
+          .get_name("count")
+        (pid, statement_count)
+      },
+    )
+    let (after_pid, after_statement_count, path) : (Int32, Int32, String) = pool.with_session(session => {
+        let pid : Int32 = session
+          .query_one("select pg_backend_pid()::int4 as pid")
+          .get_name("pid")
+        let statement_count : Int32 = session
           .query_one(statement_count_sql)
           .get_name("count")
         let path : String = session
@@ -208,7 +209,7 @@ async test "integration pool unfinished COPY IN auto aborts" {
       application_name="moonbit-postgres-pool-copy-abort",
     )
 
-    let count : Int = pool.with_session(session => {
+    let count : Int32 = pool.with_session(session => {
       session.batch_execute("create temp table moon_copy_abort(value int4)")
       session.with_copy_in("copy moon_copy_abort from stdin", _sink => ())
       session
@@ -217,7 +218,7 @@ async test "integration pool unfinished COPY IN auto aborts" {
     })
     assert_eq(count, 0)
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 3::int4 as value")
       .get_name("value")
     assert_eq(probe, 3)
@@ -250,7 +251,7 @@ async test "integration pooled detached stream cleanup survives error" {
       fail("expected detached stream to reject reads")
     }
 
-    let probe : Int = pool
+    let probe : Int32 = pool
       .query_one("select 4::int4 as value")
       .get_name("value")
     assert_eq(probe, 4)

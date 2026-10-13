@@ -22,7 +22,7 @@ async test "client async messages discard oldest without blocking producer" {
 ///|
 async test "client prepared scope drains stream then closes statement and expires" {
   with_cancellation_test_client((group, client, next_request) => {
-    let saved : @ref.Ref[ScopedStatement?] = @ref.new(None)
+    let saved : @ref.Ref[ScopedStatement?] = Ref(None)
     let task = group.spawn(() => {
       client.with_prepared("select value", scoped => {
         saved.val = Some(scoped)
@@ -60,7 +60,7 @@ async test "client prepared scope drains stream then closes statement and expire
 ///|
 async test "prepared scope keeps callback error and aborts on Close failure" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
     let task : @async.Task[Unit] = group.spawn(allow_failure=true, () => {
       client.with_prepared("select value", _ => {
@@ -143,7 +143,7 @@ async test "transaction scopes drain stream before closing portal and statement"
         copy_test_ready_for_query_message(status=b'T'),
       )
       let transaction = begin.wait()
-      let saved : @ref.Ref[Portal?] = @ref.new(None)
+      let saved : @ref.Ref[Portal?] = Ref(None)
       let stream_exited : @async.Queue[Unit] = Queue(kind=Unbounded)
       let task = group.spawn(allow_failure=true, () => {
         transaction.with_prepared("select value", statement => {
@@ -260,7 +260,7 @@ async test "bind cancellation closes an undelivered portal" {
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let task = group.spawn(allow_failure=true, () => transaction.bind(statement))
     let bind = next_request()
@@ -292,7 +292,7 @@ async test "portal scope preserves cancellation and closes before transaction ro
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
     let waiting : @async.Queue[Unit] = Queue(kind=Unbounded)
@@ -326,7 +326,7 @@ async test "portal scope preserves cancellation and closes before transaction ro
 async test "portal Close failure aborts connection and preserves callback errors" {
   for callback_error in [false, true] {
     @async.with_task_group(group => {
-      let shared = copy_test_shared(@ref.new(Some(group)))
+      let shared = copy_test_shared(Ref(Some(group)))
       let client : Client = { shared, }
       let begin = group.spawn(() => client.transaction())
       shared.requests.get().responses.put(
@@ -338,7 +338,7 @@ async test "portal Close failure aborts connection and preserves callback errors
         name: b"existing",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
       let task = group.spawn(allow_failure=true, () => {
         transaction.with_portal(statement, _ => {
@@ -373,7 +373,7 @@ async test "portal Close failure aborts connection and preserves callback errors
 ///|
 async test "statement close rejects root transaction waiting for client permit" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
     let owner = shared.operation_gate.acquire()
     let started : @async.Queue[Unit] = Queue(kind=Unbounded)
@@ -388,7 +388,7 @@ async test "statement close rejects root transaction waiting for client permit" 
       name: b"existing",
       params: [],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     assert_eq(shared.root_transaction_occupancy.val, 1)
     assert_true(

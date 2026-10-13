@@ -13,7 +13,7 @@
 /// drained.
 pub async fn Client::copy_out(self : Client, sql : String) -> CopyOutStream {
   let (_context, permit) = self.begin_stream_operation()
-  let completed : @ref.Ref[CopyOutStream?] = @ref.new(None)
+  let completed : @ref.Ref[CopyOutStream?] = Ref(None)
   errdefer (if completed.val is Some(stream) {
     stream.detach()
   } else {
@@ -52,7 +52,7 @@ async fn OpContext::copy_in(
     errdefer permit.release()
     client.send_request_with_copy(simple_query_bytes(sql), input)
   }
-  let terminal = @ref.new(false)
+  let terminal = Ref(false)
   errdefer (if terminal.val {
     permit.release()
   } else {
@@ -68,8 +68,8 @@ async fn OpContext::copy_in(
           control: client.shared.control,
           input,
           responses,
-          finished: @ref.new(false),
-          abandoned_done: @ref.new(None),
+          finished: Ref(false),
+          abandoned_done: Ref(None),
           permit,
         }
       ErrorResponse(body) => {
@@ -185,7 +185,7 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> UInt64 {
 /// still propagate to the caller.
 pub async fn CopyInSink::abort(
   self : CopyInSink,
-  message? : String = "COPY aborted",
+  message~ : String = "COPY aborted",
 ) -> Unit {
   guard !self.finished.val else { return }
   self.finished.val = true
@@ -257,7 +257,7 @@ fn start_abandoned_copy_in(
 /// Payload of PostgreSQL `NotificationResponse`.
 pub struct Notification {
   /// Backend process ID that sent the notification.
-  process_id : Int
+  process_id : Int32
   /// Channel name from `LISTEN` / `NOTIFY`.
   channel : String
   /// Optional payload string attached to the notification.

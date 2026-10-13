@@ -4,7 +4,7 @@
 async test "integration pool custom connector supports target failover" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    let attempts : Array[Int] = []
+    let attempts : Array[Int32] = []
     let connector = @pgpool.Connector::Connector(target => {
       if attempts.length() == 0 {
         attempts.push(1)
@@ -46,7 +46,7 @@ async test "integration pool custom connector supports target failover" {
     )
     group.spawn_bg(allow_failure=true, () => executor.run())
 
-    let value : Int = pool
+    let value : Int32 = pool
       .query_one("select 29::int4 as value")
       .get_name("value")
     assert_eq(value, 29)

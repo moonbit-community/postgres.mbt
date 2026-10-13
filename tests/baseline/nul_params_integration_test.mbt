@@ -65,7 +65,7 @@ async test "integration NUL encoding errors do not execute or abort the transact
                 "PostgreSQL text-format parameters must not contain NUL (0x00)"
               },
             )
-            let count : Int = tx.with_stream(
+            let count : Int32 = tx.with_stream(
               "select count(*)::int4 from nul_parameter_values",
               stream => stream.next().unwrap().get(0),
             )

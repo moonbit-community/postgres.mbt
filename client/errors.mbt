@@ -30,9 +30,9 @@ pub struct DatabaseError {
   /// Constraint (or index) name associated with the error, if supplied.
   constraint : String?
   /// One-based character index into the query submitted by the client.
-  position : UInt?
+  position : UInt32?
   /// One-based character index into `internal_query`.
-  internal_position : UInt?
+  internal_position : UInt32?
   /// Failed internally generated command, for example from PL/pgSQL.
   internal_query : String?
   /// Error context, including procedural call stacks, possibly multiline.
@@ -40,7 +40,7 @@ pub struct DatabaseError {
   /// PostgreSQL source file reporting the error.
   file : String?
   /// Line number in the PostgreSQL source file reporting the error.
-  line : UInt?
+  line : UInt32?
   /// PostgreSQL source routine reporting the error.
   routine : String?
 } derive(Debug, Eq)

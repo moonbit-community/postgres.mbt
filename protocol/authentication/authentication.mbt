@@ -93,34 +93,34 @@ fn is_prohibited_output(ch : Char) -> Bool {
 }
 
 ///|
-fn is_private_use(cp : Int) -> Bool {
+fn is_private_use(cp : Int32) -> Bool {
   (cp >= 0xE000 && cp <= 0xF8FF) ||
   (cp >= 0xF0000 && cp <= 0xFFFFD) ||
   (cp >= 0x100000 && cp <= 0x10FFFD)
 }
 
 ///|
-fn is_surrogate(cp : Int) -> Bool {
+fn is_surrogate(cp : Int32) -> Bool {
   cp >= 0xD800 && cp <= 0xDFFF
 }
 
 ///|
-fn is_noncharacter(cp : Int) -> Bool {
+fn is_noncharacter(cp : Int32) -> Bool {
   (cp >= 0xFDD0 && cp <= 0xFDEF) || (cp <= 0x10FFFF && (cp & 0xFFFE) == 0xFFFE)
 }
 
 ///|
-fn is_inappropriate_for_plain_text(cp : Int) -> Bool {
+fn is_inappropriate_for_plain_text(cp : Int32) -> Bool {
   cp >= 0xFFF9 && cp <= 0xFFFD
 }
 
 ///|
-fn is_inappropriate_for_canonical_representation(cp : Int) -> Bool {
+fn is_inappropriate_for_canonical_representation(cp : Int32) -> Bool {
   cp >= 0x2FF0 && cp <= 0x2FFB
 }
 
 ///|
-fn is_change_display_properties(cp : Int) -> Bool {
+fn is_change_display_properties(cp : Int32) -> Bool {
   cp == 0x0340 ||
   cp == 0x0341 ||
   cp == 0x200E ||
@@ -130,7 +130,7 @@ fn is_change_display_properties(cp : Int) -> Bool {
 }
 
 ///|
-fn is_tagging(cp : Int) -> Bool {
+fn is_tagging(cp : Int32) -> Bool {
   cp == 0xE0001 || (cp >= 0xE0020 && cp <= 0xE007F)
 }
 
@@ -142,7 +142,7 @@ fn is_tagging(cp : Int) -> Bool {
 pub fn hi(
   str : BytesView,
   salt : BytesView,
-  iterations : Int,
+  iterations : Int32,
 ) -> Bytes raise @proto.ProtocolError {
   if iterations <= 0 {
     raise InvalidInput("iteration count must be positive")
@@ -505,7 +505,7 @@ fn starts_with(haystack : BytesView, needle : BytesView) -> Bool {
 /// for SCRAM: `server-first-message` and `server-final-message`.
 priv struct Parser {
   buf : BytesView
-  mut idx : Int
+  mut idx : Int32
 }
 
 ///|
@@ -575,7 +575,7 @@ fn Parser::salt(self : Parser) -> BytesView raise @proto.ProtocolError {
 }
 
 ///|
-fn Parser::posit_number(self : Parser) -> Int raise @proto.ProtocolError {
+fn Parser::posit_number(self : Parser) -> Int32 raise @proto.ProtocolError {
   let digits = self.take_while(fn(b) { b >= b'0' && b <= b'9' })
   if digits.length() == 0 {
     raise InvalidInput("expected number")
@@ -588,7 +588,7 @@ fn Parser::posit_number(self : Parser) -> Int raise @proto.ProtocolError {
 }
 
 ///|
-fn Parser::iteration_count(self : Parser) -> Int raise @proto.ProtocolError {
+fn Parser::iteration_count(self : Parser) -> Int32 raise @proto.ProtocolError {
   self.eat(b'i')
   self.eat(b'=')
   self.posit_number()
@@ -641,7 +641,7 @@ fn Parser::server_final_message(
 priv struct ServerFirstMessage {
   nonce : Bytes
   salt : Bytes
-  iteration_count : Int
+  iteration_count : Int32
 }
 
 ///|

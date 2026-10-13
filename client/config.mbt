@@ -65,7 +65,7 @@ pub struct Config {
   /// Optional concrete address used for the TCP socket connection.
   hostaddr : String?
   /// TCP port for the PostgreSQL server.
-  port : Int
+  port : Int32
   /// Login role used during startup authentication.
   user : String
   /// Database selected in the startup packet.
@@ -89,11 +89,11 @@ pub struct Config {
   /// Optional PostgreSQL `options` startup parameter.
   options : String?
   /// Optional end-to-end connection timeout in milliseconds.
-  connect_timeout_ms : Int?
+  connect_timeout_ms : Int32?
   /// Whether TCP keepalive should be enabled on the socket.
   keepalives : Bool?
   /// Idle time in seconds before the first TCP keepalive probe.
-  keepalives_idle_s : Int?
+  keepalives_idle_s : Int32?
 } derive(Eq)
 
 ///|
@@ -131,18 +131,18 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
 pub fn Config::Config(
   host : String,
   hostaddr? : String,
-  port? : Int = 5432,
+  port~ : Int32 = 5432,
   user~ : String,
-  database? : String = user,
+  database~ : String = user,
   password? : String,
-  ssl_mode? : SslMode = VerifyFull,
+  ssl_mode~ : SslMode = VerifyFull,
   ssl_root_cert? : String,
-  channel_binding? : ChannelBinding = Disable,
+  channel_binding~ : ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
-  connect_timeout_ms? : Int,
+  connect_timeout_ms? : Int32,
   keepalives? : Bool,
-  keepalives_idle_s? : Int,
+  keepalives_idle_s? : Int32,
 ) -> Config {
   {
     host,
@@ -171,7 +171,7 @@ pub fn Config::Config(
 pub fn Config::new_internal(
   host : String,
   hostaddr : String?,
-  port : Int,
+  port : Int32,
   user : String,
   database : String,
   password : String?,
@@ -180,9 +180,9 @@ pub fn Config::new_internal(
   channel_binding : ChannelBinding,
   application_name : String,
   options : String?,
-  connect_timeout_ms : Int?,
+  connect_timeout_ms : Int32?,
   keepalives : Bool?,
-  keepalives_idle_s : Int?,
+  keepalives_idle_s : Int32?,
 ) -> Config {
   {
     host,

@@ -11,9 +11,9 @@ struct NulTestParam {
 ///|
 fn nul_test_param(
   payload : Bytes,
-  format? : WireFormat = Text,
-  is_null? : @proto.IsNull = No,
-  accepts? : Bool = true,
+  format~ : WireFormat = Text,
+  is_null~ : @proto.IsNull = No,
+  accepts~ : Bool = true,
   error? : String,
 ) -> NulTestParam {
   { payload, format_: format, is_null, accepts_: accepts, error, events: [], }

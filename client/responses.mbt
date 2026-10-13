@@ -6,8 +6,8 @@ fn RowStream::new(
   control : DrainControl,
   responses : @async.Queue[@backend.Message],
   permit : OperationPermit?,
-  initial_columns? : Array[Column] = [],
-  cleanup? : StreamCleanup? = None,
+  initial_columns~ : Array[Column] = [],
+  cleanup~ : StreamCleanup? = None,
 ) -> RowStream {
   {
     control,

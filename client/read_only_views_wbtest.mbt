@@ -9,7 +9,7 @@ test "row views cannot change decoding metadata or values" {
   assert_eq(row.columns().length(), 1)
   assert_eq(row.values().length(), 1)
   assert_eq(row.columns()[0].name, "value")
-  let value : Int = row.get(0)
+  let value : Int32 = row.get(0)
   assert_eq(value, 42)
 }
 
@@ -68,7 +68,7 @@ async test "statement parameter views preserve count checks" {
       name: b"view_statement",
       params: [Type::int4()],
       columns: [],
-      closed: @ref.new(false),
+      closed: Ref(false),
     }
     let params = statement.params().to_owned()
     params.clear()

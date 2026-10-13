@@ -131,7 +131,7 @@ async test "connection write failures retain requests and preserve their error" 
         bytes: sync_bytes(),
         responses,
         copy_input: Some(input),
-        copy_error: Some(@ref.new(None)),
+        copy_error: Some(Ref(None)),
       }
       assert_true(client.shared.requests.try_put(request))
       let queued = client.send_request(Messages, sync_bytes())

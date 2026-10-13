@@ -29,7 +29,7 @@ pub fn PoolOptions::PoolOptions(
 /// during checkout.
 pub fn Pool::create(
   config : Config,
-  options? : PoolOptions = PoolOptions(),
+  options~ : PoolOptions = PoolOptions(),
 ) -> (Pool, PoolExecutor) raise {
   let pool_config = config.get_pool_config()
   let targets = config.get_connection_targets()
@@ -41,12 +41,12 @@ pub fn Pool::create(
     ready: Completion::new(),
     done: Completion::new(),
     shutdown: Completion::new(),
-    started: @ref.new(false),
+    started: Ref(false),
     create_requests: Queue(kind=Unbounded),
     close_requests: Queue(kind=Unbounded),
-    pending_creations: @ref.new(0),
+    pending_creations: Ref(0),
     active_creations: [],
-    next_creation_id: @ref.new(0),
+    next_creation_id: Ref(0),
     targets,
     connector: options.connector.unwrap_or(default_connector()),
     post_create: options.post_create,
@@ -54,17 +54,17 @@ pub fn Pool::create(
     post_recycle: options.post_recycle,
     target_session_attrs: config.target_session_attrs.unwrap_or(Any),
     load_balance_hosts: config.load_balance_hosts.unwrap_or(Disable),
-    pool_config: @ref.new(pool_config),
+    pool_config: Ref(pool_config),
     slots,
-    resize_debt: @ref.new(0),
+    resize_debt: Ref(0),
     idle: [],
     connections: [],
-    next_connection_id: @ref.new(0),
+    next_connection_id: Ref(0),
     async_messages: Queue(kind=Blocking(pool_config.async_message_capacity)),
-    dropped_async_messages: @ref.new(0L),
-    size: @ref.new(0),
-    waiting: @ref.new(0),
-    closed: @ref.new(false),
+    dropped_async_messages: Ref(0L),
+    size: Ref(0),
+    waiting: Ref(0),
+    closed: Ref(false),
   }
   ({ shared, }, { shared, })
 }
@@ -80,7 +80,7 @@ pub async fn PoolExecutor::run(self : PoolExecutor) -> Unit {
     self.shared.done.complete(None)
     return
   }
-  let finished = @ref.new(false)
+  let finished = Ref(false)
   let mut failure : Error? = None
   defer (if !finished.val {
     fail_pool(self.shared, failure.unwrap_or(PoolError::Closed))
@@ -409,7 +409,7 @@ fn push_pool_async_message(shared : Shared, message : PoolAsyncMessage) -> Unit 
 /// connections remain. Checked-out clients are not interrupted; when they are
 /// later released above the new limit, they are closed instead of returning to
 /// the idle queue. Calling this after `close()` is a no-op.
-pub fn Pool::resize(self : Pool, max_size : Int) -> Unit raise {
+pub fn Pool::resize(self : Pool, max_size : Int32) -> Unit raise {
   if self.shared.closed.val {
     return
   }
@@ -490,7 +490,7 @@ fn Pool::assert_open(self : Pool) -> Unit raise {
 
 ///|
 /// Acquire one checkout slot, waiting if necessary.
-async fn Pool::acquire_slot(self : Pool, wait_ms : Int?) -> Unit {
+async fn Pool::acquire_slot(self : Pool, wait_ms : Int32?) -> Unit {
   let immediate = self.shared.slots.try_get() catch {
     PoolError::Closed => raise PoolError::Closed
     err => raise err
@@ -602,7 +602,7 @@ fn Pool::take_idle_client(self : Pool) -> ConnectionState? {
 async fn Pool::try_recycle_client(
   self : Pool,
   connection : ConnectionState,
-  recycle_ms : Int?,
+  recycle_ms : Int32?,
 ) -> ConnectionState? {
   let client = if connection.client.val is Some(client) {
     client
@@ -631,7 +631,7 @@ async fn Pool::try_recycle_client(
 async fn Pool::run_recycle(
   self : Pool,
   connection : ConnectionState,
-  recycle_ms : Int?,
+  recycle_ms : Int32?,
   op : async () -> Unit,
 ) -> ConnectionState? {
   let client = if connection.client.val is Some(client) {
@@ -662,9 +662,12 @@ async fn Pool::run_recycle(
 
 ///|
 /// Establish a new connection and await the executor's startup result.
-async fn Pool::create_client(self : Pool, create_ms : Int?) -> ConnectionState {
+async fn Pool::create_client(
+  self : Pool,
+  create_ms : Int32?,
+) -> ConnectionState {
   self.assert_open()
-  let candidate : @ref.Ref[@client.Client?] = @ref.new(None)
+  let candidate : @ref.Ref[@client.Client?] = Ref(None)
   let connection = run_with_timeout(
     create_ms,
     Create,
@@ -727,7 +730,7 @@ async fn Pool::connect_target(
 async fn Pool::schedule_connection(
   self : Pool,
   target : @client.Config,
-) -> (@client.Client, Int) {
+) -> (@client.Client, Int32) {
   self.assert_open()
   self.shared.next_creation_id.val += 1
   self.shared.next_connection_id.val += 1
@@ -736,8 +739,8 @@ async fn Pool::schedule_connection(
     physical_id: self.shared.next_connection_id.val,
     target,
     result: Queue(kind=Unbounded),
-    cancelled: @ref.new(false),
-    task: @ref.new(None),
+    cancelled: Ref(false),
+    task: Ref(None),
   }
   self.shared.pending_creations.val += 1
   self.shared.active_creations.push(request)
@@ -756,7 +759,7 @@ async fn Pool::schedule_connection(
 fn Pool::discard_client(
   self : Pool,
   connection : ConnectionState,
-  close_client? : Bool = true,
+  close_client~ : Bool = true,
 ) -> Unit {
   retire_connection(self.shared, connection, close_client~)
 }
@@ -798,7 +801,7 @@ fn return_client(shared : Shared, connection : ConnectionState) -> Unit {
 fn ConnectionState::new(
   shared : Shared,
   client : @client.Client,
-  id? : Int,
+  id? : Int32,
 ) -> ConnectionState {
   let id = if id is Some(id) {
     id
@@ -808,7 +811,7 @@ fn ConnectionState::new(
   }
   let connection = {
     id,
-    client: @ref.new(Some(client)),
+    client: Ref(Some(client)),
     statement_cache_capacity: shared.pool_config.val.statement_cache_capacity,
     statement_cache: [],
   }
@@ -821,7 +824,7 @@ fn ConnectionState::new(
 fn retire_connection(
   shared : Shared,
   connection : ConnectionState,
-  close_client? : Bool = true,
+  close_client~ : Bool = true,
 ) -> Unit {
   while connection.statement_cache.length() > 0 {
     ignore(
@@ -845,7 +848,7 @@ fn retire_connection(
 
 ///|
 /// Drop one retired connection from the pool's live-connection index.
-fn remove_live_connection(shared : Shared, connection_id : Int) -> Unit {
+fn remove_live_connection(shared : Shared, connection_id : Int32) -> Unit {
   for i in 0..<shared.connections.length() {
     if shared.connections[i].id == connection_id {
       ignore(shared.connections.remove(i))
@@ -863,7 +866,7 @@ async fn run_client_hook(
   if hook is Some(hook) {
     let connection : ConnectionState = {
       id: 0,
-      client: @ref.new(Some(client)),
+      client: Ref(Some(client)),
       statement_cache_capacity: 0,
       statement_cache: [],
     }
@@ -929,13 +932,13 @@ fn make_shuffle_seed(shared : Shared) -> Bytes {
 ///|
 /// Apply an optional timeout and run synchronous invalidation before failing.
 async fn[T] run_with_timeout(
-  timeout_ms : Int?,
+  timeout_ms : Int32?,
   kind : TimeoutKind,
   on_timeout? : () -> Unit,
   op : async () -> T,
 ) -> T {
   if timeout_ms is Some(timeout_ms) {
-    let timed_out = @ref.new(false)
+    let timed_out = Ref(false)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => {
         @async.sleep(timeout_ms)

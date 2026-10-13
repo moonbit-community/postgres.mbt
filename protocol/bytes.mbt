@@ -6,7 +6,7 @@
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 /// Convert a count to the signed 16-bit representation used by many protocol
 /// fields, such as parameter counts and format-code counts.
-pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
+pub fn i16_from_usize(len : Int32) -> Int16 raise ProtocolError {
   if len < 0 || len > 0x7fff {
     raise Overflow("value too large to transmit")
   }
@@ -19,7 +19,7 @@ pub fn i16_from_usize(len : Int) -> Int16 raise ProtocolError {
 ///
 /// Whether the resulting value includes the length word itself depends on the
 /// surrounding message format.
-pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
+pub fn i32_from_usize(len : Int32) -> Int32 raise ProtocolError {
   if len < 0 || len > 0x7fff_ffff {
     raise Overflow("value too large to transmit")
   }
@@ -29,7 +29,7 @@ pub fn i32_from_usize(len : Int) -> Int raise ProtocolError {
 ///|
 /// Ensure a value fits in the signed 32-bit range accepted by wire `Int32`
 /// fields.
-pub fn checked_i32(value : Int) -> Int raise ProtocolError {
+pub fn checked_i32(value : Int32) -> Int32 raise ProtocolError {
   if value < -0x8000_0000 || value > 0x7fff_ffff {
     raise Overflow("value out of range for i32")
   }
@@ -39,7 +39,7 @@ pub fn checked_i32(value : Int) -> Int raise ProtocolError {
 ///|
 /// Ensure a value fits in the signed 16-bit range accepted by wire `Int16`
 /// fields.
-pub fn checked_i16(value : Int) -> Int16 raise ProtocolError {
+pub fn checked_i16(value : Int32) -> Int16 raise ProtocolError {
   if value < -0x8000 || value > 0x7fff {
     raise Overflow("value out of range for i16")
   }
@@ -48,14 +48,14 @@ pub fn checked_i16(value : Int) -> Int16 raise ProtocolError {
 
 ///|
 /// Convert signed i32 (stored in Int) to u32 bits in UInt.
-pub fn u32_from_i32(value : Int) -> UInt raise ProtocolError {
+pub fn u32_from_i32(value : Int32) -> UInt32 raise ProtocolError {
   let _ = checked_i32(value)
   value.reinterpret_as_uint()
 }
 
 ///|
 /// Convert u32 bits to signed i32 (stored in Int).
-pub fn i32_from_u32(value : UInt) -> Int {
+pub fn i32_from_u32(value : UInt32) -> Int32 {
   value.reinterpret_as_int()
 }
 
@@ -66,7 +66,7 @@ pub fn i32_from_u32(value : UInt) -> Int {
 /// protocol `String` type (a NUL-terminated byte sequence).
 pub struct ByteReader {
   buf : BytesView
-  mut idx : Int
+  mut idx : Int32
 }
 
 ///|
@@ -77,7 +77,7 @@ pub fn ByteReader::new(buf : BytesView) -> ByteReader {
 
 ///|
 /// Return the number of unread bytes.
-pub fn ByteReader::remaining(self : ByteReader) -> Int {
+pub fn ByteReader::remaining(self : ByteReader) -> Int32 {
   self.buf.length() - self.idx
 }
 
@@ -90,7 +90,7 @@ pub fn ByteReader::is_empty(self : ByteReader) -> Bool {
 ///|
 /// Ensure that at least `n` unread bytes remain before reading a fixed-width
 /// field.
-fn ByteReader::ensure(self : ByteReader, n : Int) -> Unit raise ProtocolError {
+fn ByteReader::ensure(self : ByteReader, n : Int32) -> Unit raise ProtocolError {
   if self.remaining() < n {
     raise UnexpectedEof("unexpected EOF")
   }
@@ -117,7 +117,7 @@ pub fn ByteReader::read_u16_be(self : ByteReader) -> UInt16 raise ProtocolError 
 
 ///|
 /// Read the next big-endian signed 16-bit integer.
-pub fn ByteReader::read_i16_be(self : ByteReader) -> Int raise ProtocolError {
+pub fn ByteReader::read_i16_be(self : ByteReader) -> Int32 raise ProtocolError {
   let u = self.read_u16_be()
   let v = Int16::reinterpret_from_uint16(u)
   v.to_int()
@@ -125,7 +125,7 @@ pub fn ByteReader::read_i16_be(self : ByteReader) -> Int raise ProtocolError {
 
 ///|
 /// Read the next big-endian unsigned 32-bit integer.
-pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt raise ProtocolError {
+pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt32 raise ProtocolError {
   self.ensure(4)
   let b0 = self.buf[self.idx].to_uint()
   let b1 = self.buf[self.idx + 1].to_uint()
@@ -137,7 +137,7 @@ pub fn ByteReader::read_u32_be(self : ByteReader) -> UInt raise ProtocolError {
 
 ///|
 /// Read the next big-endian signed 32-bit integer.
-pub fn ByteReader::read_i32_be(self : ByteReader) -> Int raise ProtocolError {
+pub fn ByteReader::read_i32_be(self : ByteReader) -> Int32 raise ProtocolError {
   let u = self.read_u32_be()
   i32_from_u32(u)
 }
@@ -191,7 +191,7 @@ pub fn ByteReader::read_f64_be(self : ByteReader) -> Double raise ProtocolError 
 /// field.
 pub fn ByteReader::read_bytes(
   self : ByteReader,
-  len : Int,
+  len : Int32,
 ) -> BytesView raise ProtocolError {
   if len < 0 {
     raise InvalidInput("invalid length")
@@ -216,7 +216,7 @@ pub fn ByteReader::read_all(self : ByteReader) -> BytesView {
 
 ///|
 /// Find the next NUL terminator used by a protocol `String`.
-fn find_null(buf : BytesView, start : Int) -> Int raise ProtocolError {
+fn find_null(buf : BytesView, start : Int32) -> Int32 raise ProtocolError {
   let mut i = start
   while i < buf.length() {
     if buf[i] == 0 {

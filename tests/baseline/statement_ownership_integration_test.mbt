@@ -69,9 +69,9 @@ async test "integration statements reject foreign connections and retain manual 
           expect_error_async(() => tx.close_statement(first_statement))
           is @client.ClientError::StatementConnectionMismatch,
         )
-        let value : Int = tx.query_statement(second_statement).one().get(0)
+        let value : Int32 = tx.query_statement(second_statement).one().get(0)
         assert_eq(value, 22)
-        let value : Int = tx.with_portal(second_statement, portal => {
+        let value : Int32 = tx.with_portal(second_statement, portal => {
           portal.with_stream(0, stream => stream.one().get(0))
         })
         assert_eq(value, 22)
@@ -79,13 +79,13 @@ async test "integration statements reject foreign connections and retain manual 
       // Manual statements keep their capabilities across transaction scopes.
       for _ in 0..<2 {
         first.with_transaction(tx => {
-          let value : Int = tx.query_statement(first_statement).one().get(0)
+          let value : Int32 = tx.query_statement(first_statement).one().get(0)
           assert_eq(value, 11)
           assert_eq(tx.execute_raw(first_statement), 1)
         })
       }
       let copy = first
-      let value : Int = copy.with_statement_stream(first_statement, stream => {
+      let value : Int32 = copy.with_statement_stream(first_statement, stream => {
         stream.one().get(0)
       })
       assert_eq(value, 11)

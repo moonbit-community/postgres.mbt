@@ -15,7 +15,7 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
   // The reader must survive the transition between idle time and a request.
   // Cancelling an in-progress frame read there would lose protocol alignment.
   let incoming : @async.Queue[@backend.Message] = Queue(kind=Blocking(1))
-  let reading_request = @ref.new(false)
+  let reading_request = Ref(false)
   fn cleanup(error : Error?) {
     if cleaned_up {
       return
@@ -190,7 +190,7 @@ async fn Driver::drain_copy_in_request(
 ) -> Unit {
   let copy_input = request.copy_input.unwrap()
   let copy_error = request.copy_error.unwrap()
-  let writer_stopped = @ref.new(false)
+  let writer_stopped = Ref(false)
   let mut writer : @async.Task[Unit]? = None
   while true {
     let message = incoming.get()

@@ -72,11 +72,11 @@ pub fn TransactionOptions::TransactionOptions(
 /// unbounded. Negative values are rejected by `PoolConfig::PoolConfig` or checkout.
 pub struct Timeouts {
   /// Maximum wait for a checkout slot before raising `PoolError::Timeout(Wait)`.
-  wait_ms : Int?
+  wait_ms : Int32?
   /// Maximum wait for opening a new physical connection.
-  create_ms : Int?
+  create_ms : Int32?
   /// Maximum wait for checkout-time recycling of an idle connection.
-  recycle_ms : Int?
+  recycle_ms : Int32?
 } derive(Eq, Debug)
 
 ///|
@@ -85,9 +85,9 @@ pub struct Timeouts {
 /// This constructor stores the values as-is and does not validate them yet.
 /// `None` disables the corresponding timeout.
 pub fn Timeouts::Timeouts(
-  wait_ms? : Int? = None,
-  create_ms? : Int? = None,
-  recycle_ms? : Int? = None,
+  wait_ms~ : Int32? = None,
+  create_ms~ : Int32? = None,
+  recycle_ms~ : Int32? = None,
 ) -> Timeouts {
   { wait_ms, create_ms, recycle_ms, }
 }
@@ -147,7 +147,7 @@ pub fn RecyclingMethod::custom(sql : String) -> RecyclingMethod {
 /// Capacity and checkout policy for one pool instance.
 pub struct PoolConfig {
   /// Maximum number of live physical PostgreSQL sessions owned by the pool.
-  max_size : Int
+  max_size : Int32
   /// Default timeout policy used by automatic checkout.
   timeouts : Timeouts
   /// Strategy used when selecting from the idle connection list.
@@ -157,9 +157,9 @@ pub struct PoolConfig {
   /// Maximum prepared statements cached on each physical connection.
   ///
   /// `0` disables caching.
-  statement_cache_capacity : Int
+  statement_cache_capacity : Int32
   /// Maximum asynchronous messages retained across physical connections.
-  async_message_capacity : Int
+  async_message_capacity : Int32
 } derive(Eq, Debug)
 
 ///|
@@ -168,12 +168,12 @@ pub struct PoolConfig {
 /// `max_size` and `async_message_capacity` must be positive. Each configured
 /// timeout must be non-negative when present. On success this has no side effects.
 pub fn PoolConfig::PoolConfig(
-  max_size : Int,
-  timeouts? : Timeouts = Timeouts(),
-  queue_mode? : QueueMode = Fifo,
-  recycling_method? : RecyclingMethod = Fast,
-  statement_cache_capacity? : Int = 100,
-  async_message_capacity? : Int = 256,
+  max_size : Int32,
+  timeouts~ : Timeouts = Timeouts(),
+  queue_mode~ : QueueMode = Fifo,
+  recycling_method~ : RecyclingMethod = Fast,
+  statement_cache_capacity~ : Int32 = 100,
+  async_message_capacity~ : Int32 = 256,
 ) -> PoolConfig raise {
   validate_pool_config({
     max_size,
@@ -247,7 +247,7 @@ pub struct ConnectionTarget {
   /// Concrete address used for the TCP connection when present.
   hostaddr : String?
   /// TCP port for this endpoint.
-  port : Int
+  port : Int32
 } derive(Eq, Debug)
 
 ///|
@@ -255,7 +255,7 @@ pub struct ConnectionTarget {
 pub fn ConnectionTarget::ConnectionTarget(
   host? : String,
   hostaddr? : String,
-  port? : Int = 5432,
+  port~ : Int32 = 5432,
 ) -> ConnectionTarget {
   { host, hostaddr, port, }
 }
@@ -277,9 +277,9 @@ pub struct Config {
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
   priv targets : Array[ConnectionTarget]
-  connect_timeout_ms : Int?
+  connect_timeout_ms : Int32?
   keepalives : Bool?
-  keepalives_idle_s : Int?
+  keepalives_idle_s : Int32?
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
@@ -326,18 +326,18 @@ pub fn Config::targets(self : Config) -> ArrayView[ConnectionTarget] {
 pub fn Config::Config(
   targets : Array[ConnectionTarget],
   user~ : String,
-  dbname? : String = user,
+  dbname~ : String = user,
   password? : String,
-  ssl_mode? : @client.SslMode = VerifyFull,
+  ssl_mode~ : @client.SslMode = VerifyFull,
   ssl_root_cert? : String,
-  channel_binding? : @client.ChannelBinding = Disable,
+  channel_binding~ : @client.ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
-  connect_timeout_ms? : Int,
+  connect_timeout_ms? : Int32,
   keepalives? : Bool,
-  keepalives_idle_s? : Int,
-  target_session_attrs? : TargetSessionAttrs = Any,
-  load_balance_hosts? : LoadBalanceHosts = Disable,
+  keepalives_idle_s? : Int32,
+  target_session_attrs~ : TargetSessionAttrs = Any,
+  load_balance_hosts~ : LoadBalanceHosts = Disable,
   pool~ : PoolConfig,
 ) -> Config raise {
   validate_connection_targets(targets)
@@ -371,13 +371,13 @@ pub fn Config::Config(
 /// Point-in-time snapshot of one pool's runtime state.
 pub struct Status {
   /// Number of currently live physical connections, both idle and checked out.
-  size : Int
+  size : Int32
   /// Number of idle connections immediately available for reuse.
-  available : Int
+  available : Int32
   /// Number of tasks currently waiting for pool capacity.
-  waiting : Int
+  waiting : Int32
   /// Current configured connection limit for the pool.
-  max_size : Int
+  max_size : Int32
   /// Whether `Pool::close()` has started and new checkouts are rejected.
   closed : Bool
 } derive(Eq, Debug)
@@ -419,7 +419,7 @@ fn validate_pool_config(config : PoolConfig) -> Unit raise {
 
 ///|
 /// Validate that an optional timeout is non-negative.
-fn validate_timeout(name : String, timeout_ms : Int?) -> Unit raise {
+fn validate_timeout(name : String, timeout_ms : Int32?) -> Unit raise {
   if timeout_ms is Some(timeout_ms) {
     if timeout_ms < 0 {
       raise PoolError::InvalidConfig("pool \{name} must be non-negative")

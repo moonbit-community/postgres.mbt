@@ -139,7 +139,7 @@ priv struct Shared {
   async_messages : @async.Queue[AsyncMessage]
   dropped_async_messages : @ref.Ref[Int64]
   async_message_handler : @ref.Ref[((AsyncMessage) -> Unit)?]
-  root_transaction_occupancy : @ref.Ref[Int]
+  root_transaction_occupancy : @ref.Ref[Int32]
   control : DrainControl
   ready : Completion
   done : Completion
@@ -147,8 +147,8 @@ priv struct Shared {
   runtime_error : @ref.Ref[Error?]
   parameters : Map[String, String]
   types : Map[@proto.Oid, Type]
-  process_id : @ref.Ref[Int]
-  secret_key : @ref.Ref[Int]
+  process_id : @ref.Ref[Int32]
+  secret_key : @ref.Ref[Int32]
   transaction_status : @ref.Ref[Byte]
   closed : @ref.Ref[Bool]
   closing : @ref.Ref[Bool]
@@ -156,7 +156,7 @@ priv struct Shared {
   aborted : @ref.Ref[Bool]
   operation_gate : OperationGate
   driver_task : @ref.Ref[@async.Task[Unit]?]
-  next_id : @ref.Ref[Int]
+  next_id : @ref.Ref[Int32]
 }
 
 ///|
@@ -231,8 +231,8 @@ pub fn Statement::columns(self : Statement) -> ArrayView[Column] {
 /// startup rather than a direct handle to the existing socket.
 struct CancelToken {
   config : Config
-  process_id : @ref.Ref[Int]
-  secret_key : @ref.Ref[Int]
+  process_id : @ref.Ref[Int32]
+  secret_key : @ref.Ref[Int32]
   closed : @ref.Ref[Bool]
 }
 
@@ -260,7 +260,7 @@ struct Transaction {
   context : OpContext
   scope_gate : OperationGate
   child : @ref.Ref[TransactionChild?]
-  scoped_resources : @ref.Ref[Int]
+  scoped_resources : @ref.Ref[Int32]
   closing : @ref.Ref[Completion?]
   root_permit : OperationPermit?
   parent_permit : OperationPermit?

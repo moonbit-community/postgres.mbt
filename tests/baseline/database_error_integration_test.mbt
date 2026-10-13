@@ -87,7 +87,7 @@ async test "integration database error distinguishes constraints and not null co
     )
     @debug.assert_eq(copy_error.constraint, Some("error_email_unique"))
     @debug.assert_eq(copy_error.table, Some("error_objects"))
-    let count : Int = client
+    let count : Int32 = client
       .query_one("select count(*)::int4 as count from error_objects")
       .get_name("count")
     assert_eq(count, 1)
@@ -121,7 +121,7 @@ async test "integration database error query position counts Unicode characters"
       @debug.assert_eq(err.position, Some(13U))
       @debug.assert_eq(err.internal_position, None)
     }
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 42::int4 as value")
       .get_name("value")
     assert_eq(probe, 42)
@@ -165,7 +165,7 @@ async test "integration database error preserves internal query and context" {
       err.where_ is Some(context) && context.contains("error_internal"),
     )
     assert_database_error_source(err)
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 43::int4 as value")
       .get_name("value")
     assert_eq(probe, 43)
@@ -206,7 +206,7 @@ async test "integration database notice preserves object fields and multiline te
     @debug.assert_eq(notice.hint, Some("try\nagain"))
     assert_true(notice.where_ is Some(_))
     assert_database_error_source(notice)
-    let probe : Int = client
+    let probe : Int32 = client
       .query_one("select 44::int4 as value")
       .get_name("value")
     assert_eq(probe, 44)
@@ -223,7 +223,7 @@ async test "integration pool passes structured database errors and reuses connec
       as_client_config(config, application_name="moonbit-postgres-error-pool"),
       make_pool_config(1),
     )
-    let before : Int = pool
+    let before : Int32 = pool
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     let err = expect_database_error(
@@ -248,7 +248,7 @@ async test "integration pool passes structured database errors and reuses connec
     @debug.assert_eq(err.severity_nonlocalized, Some("ERROR"))
     assert_true(err.where_ is Some(_))
     assert_database_error_source(err)
-    let after : Int = pool
+    let after : Int32 = pool
       .query_one("select pg_backend_pid()::int4 as pid")
       .get_name("pid")
     assert_eq(after, before)

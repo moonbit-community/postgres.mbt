@@ -74,7 +74,7 @@ pub fn text_from_sql(buf : BytesView) -> Bytes raise @proto.ProtocolError {
 ///|
 /// Serialize a "char" value.
 pub fn char_to_sql(
-  v : Int,
+  v : Int32,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   if v < -128 || v > 127 {
@@ -86,7 +86,7 @@ pub fn char_to_sql(
 
 ///|
 /// Deserialize a "char" value.
-pub fn char_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
+pub fn char_from_sql(buf : BytesView) -> Int32 raise @proto.ProtocolError {
   if buf.length() != 1 {
     raise InvalidInput("invalid buffer size")
   }
@@ -101,7 +101,7 @@ pub fn char_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
 ///|
 /// Serialize an INT2 value.
 pub fn int2_to_sql(
-  v : Int,
+  v : Int32,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_int16_be(@proto.checked_i16(v))
@@ -109,7 +109,7 @@ pub fn int2_to_sql(
 
 ///|
 /// Deserialize an INT2 value.
-pub fn int2_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
+pub fn int2_from_sql(buf : BytesView) -> Int32 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i16_be()
   if !r.is_empty() {
@@ -121,7 +121,7 @@ pub fn int2_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
 ///|
 /// Serialize an INT4 value.
 pub fn int4_to_sql(
-  v : Int,
+  v : Int32,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_int_be(@proto.checked_i32(v))
@@ -129,7 +129,7 @@ pub fn int4_to_sql(
 
 ///|
 /// Deserialize an INT4 value.
-pub fn int4_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
+pub fn int4_from_sql(buf : BytesView) -> Int32 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
   if !r.is_empty() {
@@ -272,7 +272,7 @@ pub fn hstore_from_sql(
 ///|
 /// Iterator over HSTORE entries.
 pub struct HstoreEntries {
-  mut remaining : Int
+  mut remaining : Int32
   mut buf : BytesView
 }
 
@@ -318,7 +318,7 @@ pub fn HstoreEntries::next(
 ///|
 /// Serialize a VARBIT or BIT value.
 pub fn varbit_to_sql(
-  len : Int,
+  len : Int32,
   v : Iter[Byte],
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
@@ -347,7 +347,7 @@ pub fn varbit_from_sql(buf : BytesView) -> Varbit raise @proto.ProtocolError {
 ///|
 /// A VARBIT value.
 pub struct Varbit {
-  len : Int
+  len : Int32
   bytes : BytesView
 }
 
@@ -377,7 +377,7 @@ pub fn timestamp_from_sql(buf : BytesView) -> Int64 raise @proto.ProtocolError {
 ///|
 /// Serialize a DATE value (days since 2000-01-01).
 pub fn date_to_sql(
-  v : Int,
+  v : Int32,
   buf : @buffer.Buffer,
 ) -> Unit raise @proto.ProtocolError {
   buf.write_int_be(@proto.checked_i32(v))
@@ -385,7 +385,7 @@ pub fn date_to_sql(
 
 ///|
 /// Deserialize a DATE value.
-pub fn date_from_sql(buf : BytesView) -> Int raise @proto.ProtocolError {
+pub fn date_from_sql(buf : BytesView) -> Int32 raise @proto.ProtocolError {
   let r = @proto.ByteReader::new(buf)
   let v = r.read_i32_be()
   if !r.is_empty() {
@@ -543,10 +543,10 @@ pub fn array_from_sql(buf : BytesView) -> PgArray raise @proto.ProtocolError {
 ///|
 /// A Postgres array.
 pub struct PgArray {
-  dimensions : Int
+  dimensions : Int32
   has_nulls : Bool
   element_type : @proto.Oid
-  elements : Int
+  elements : Int32
   buf : Bytes
 }
 
@@ -589,20 +589,20 @@ pub fn ArrayDimensions::next(
 ///|
 /// Dimension info.
 pub struct ArrayDimension {
-  len : Int
-  lower_bound : Int
+  len : Int32
+  lower_bound : Int32
 } derive(Debug, Eq)
 
 ///|
 /// Construct an array dimension descriptor.
-pub fn ArrayDimension::new(len : Int, lower_bound : Int) -> ArrayDimension {
+pub fn ArrayDimension::new(len : Int32, lower_bound : Int32) -> ArrayDimension {
   { len, lower_bound, }
 }
 
 ///|
 /// Iterator over array values.
 pub struct ArrayValues {
-  mut remaining : Int
+  mut remaining : Int32
   mut buf : BytesView
 }
 
@@ -859,7 +859,7 @@ pub fn path_from_sql(buf : BytesView) -> Path raise @proto.ProtocolError {
 /// A Postgres path.
 pub struct Path {
   closed : Bool
-  points : Int
+  points : Int32
   buf : BytesView
 }
 
@@ -872,7 +872,7 @@ pub fn Path::points(self : Path) -> PathPoints {
 ///|
 /// Iterator over path points.
 pub struct PathPoints {
-  mut remaining : Int
+  mut remaining : Int32
   mut buf : BytesView
 }
 

@@ -96,7 +96,7 @@ async test "execute and execute_raw release resources after row count parse erro
         name: b"caller",
         params: [],
         columns: [],
-        closed: @ref.new(false),
+        closed: Ref(false),
       }
       let tags = [
         "UPDATE 2147483648", "UPDATE 9223372036854775808", "UPDATE 18446744073709551615",
@@ -178,7 +178,7 @@ async test "execute and execute_raw release resources after row count parse erro
 ///|
 async test "COPY finish parses counts after ready and never drains twice" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
     let tags = [
       "COPY 2147483648", "COPY 9223372036854775808", "COPY 18446744073709551615",

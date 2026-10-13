@@ -46,13 +46,13 @@ pub fn TransactionOptions::TransactionOptions(
 /// `BEGIN` options.
 pub async fn Client::transaction(
   self : Client,
-  options? : TransactionOptions = TransactionOptions(),
+  options~ : TransactionOptions = TransactionOptions(),
 ) -> Transaction {
   self.shared.root_transaction_occupancy.val += 1
-  let registered = @ref.new(true)
+  let registered = Ref(true)
   defer (if registered.val { self.shared.root_transaction_occupancy.val -= 1 })
   let (context, permit) = self.begin_stream_operation()
-  let started = @ref.new(false)
+  let started = Ref(false)
   errdefer {
     defer permit.release()
     if started.val && !self.shared.closed.val {
@@ -102,13 +102,13 @@ async fn OpContext::begin_transaction(
     client: self.client,
     context: self,
     scope_gate: OperationGate::new(),
-    child: @ref.new(None),
-    scoped_resources: @ref.new(0),
-    closing: @ref.new(None),
+    child: Ref(None),
+    scoped_resources: Ref(0),
+    closing: Ref(None),
     root_permit: Some(permit),
     parent_permit: None,
     savepoint: None,
-    finished: @ref.new(false),
+    finished: Ref(false),
   }
 }
 
@@ -123,7 +123,7 @@ async fn OpContext::begin_transaction(
 pub async fn[T] Client::with_transaction(
   self : Client,
   f : async (Transaction) -> T,
-  options? : TransactionOptions = TransactionOptions(),
+  options~ : TransactionOptions = TransactionOptions(),
 ) -> T {
   let transaction = self.transaction(options~)
   errdefer @async.protect_from_cancel(() => {
@@ -216,7 +216,7 @@ pub async fn[T] Transaction::with_savepoint(
 pub async fn Transaction::query(
   self : Transaction,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   self.start_stream(permit => self.context.query(sql, params, permit~))
 }
@@ -227,7 +227,7 @@ pub async fn Transaction::query(
 pub async fn[T] Transaction::with_stream(
   self : Transaction,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   with_transaction_stream(() => self.query(sql, params~), f)
@@ -238,7 +238,7 @@ pub async fn[T] Transaction::with_stream(
 pub async fn Transaction::execute(
   self : Transaction,
   sql : String,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> UInt64 {
   self.run_scope_operation(context => context.execute(sql, params))
 }
@@ -314,8 +314,8 @@ async fn Transaction::begin_savepoint(
 ) -> Transaction {
   let name = quote_savepoint_name(name)
   let (parent_permit, pending) = self.begin_child_creation()
-  let created = @ref.new(false)
-  let creation_error : @ref.Ref[Error?] = @ref.new(None)
+  let created = Ref(false)
+  let creation_error : @ref.Ref[Error?] = Ref(None)
   errdefer {
     defer {
       self.clear_creating_child(pending, creation_error.val)
@@ -342,13 +342,13 @@ async fn Transaction::begin_savepoint(
       client: self.client,
       context: self.context,
       scope_gate: OperationGate::new(),
-      child: @ref.new(None),
-      scoped_resources: @ref.new(0),
-      closing: @ref.new(None),
+      child: Ref(None),
+      scoped_resources: Ref(0),
+      closing: Ref(None),
       root_permit: None,
       parent_permit: Some(parent_permit),
       savepoint: Some(name),
-      finished: @ref.new(false),
+      finished: Ref(false),
     }
   }) catch {
     ClientError::Database(_) as error => {
@@ -394,7 +394,7 @@ fn quote_savepoint_name(name : String) -> String raise {
 pub async fn Transaction::query_statement(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> RowStream {
   self.client.assert_statement_connection(statement)
   self.start_stream(permit => {
@@ -408,7 +408,7 @@ pub async fn Transaction::query_statement(
 pub async fn[T] Transaction::with_statement_stream(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
   f : async (RowStream) -> T,
 ) -> T {
   self.client.assert_statement_connection(statement)
@@ -420,7 +420,7 @@ pub async fn[T] Transaction::with_statement_stream(
 pub async fn Transaction::execute_raw(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> UInt64 {
   self.client.assert_statement_connection(statement)
   self.run_scope_operation(context => context.execute_raw(statement, params))
@@ -432,7 +432,7 @@ pub async fn Transaction::execute_raw(
 async fn Transaction::bind(
   self : Transaction,
   statement : Statement,
-  params? : Array[&ToSql] = [],
+  params~ : Array[&ToSql] = [],
 ) -> Portal {
   self.client.assert_statement_connection(statement)
   let permit = self.scope_gate.acquire()
@@ -462,7 +462,7 @@ async fn Transaction::bind(
 async fn Transaction::query_portal(
   self : Transaction,
   portal : Portal,
-  max_rows : Int,
+  max_rows : Int32,
 ) -> RowStream {
   self.start_stream(permit => {
     self.context.query_portal(portal, max_rows, permit~)
@@ -475,7 +475,7 @@ async fn Transaction::query_portal(
 async fn[T] Transaction::with_portal_stream(
   self : Transaction,
   portal : Portal,
-  max_rows : Int,
+  max_rows : Int32,
   f : async (RowStream) -> T,
 ) -> T {
   with_transaction_stream(() => self.query_portal(portal, max_rows), f)
@@ -567,8 +567,8 @@ async fn Transaction::start_stream(
   build : async (OperationPermit) -> RowStream,
 ) -> RowStream {
   let (permit, pending) = self.begin_child_creation()
-  let completed : @ref.Ref[RowStream?] = @ref.new(None)
-  let creation_error : @ref.Ref[Error?] = @ref.new(None)
+  let completed : @ref.Ref[RowStream?] = Ref(None)
+  let creation_error : @ref.Ref[Error?] = Ref(None)
   errdefer {
     self.clear_creating_child(pending, creation_error.val)
     if completed.val is Some(stream) {
@@ -684,8 +684,8 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
     }
     closing.complete(None)
   }
-  let unfinished_child = @ref.new(false)
-  let cleanup_error : @ref.Ref[Error?] = @ref.new(None)
+  let unfinished_child = Ref(false)
+  let cleanup_error : @ref.Ref[Error?] = Ref(None)
   @async.protect_from_cancel(() => {
     unfinished_child.val = self.cleanup_child() catch {
       ClientError::Database(_) as error => {
@@ -737,7 +737,7 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
     check_pending_cancellation()
   }
   defer check_pending_cancellation()
-  let submitted = @ref.new(false)
+  let submitted = Ref(false)
   errdefer (if submitted.val {
     // Completion drains through ReadyForQuery before reporting SQL errors.
     self.finished.val = true

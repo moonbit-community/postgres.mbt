@@ -20,7 +20,7 @@ fn copy_test_parse_backend_message(packet : Bytes) -> @backend.Message raise {
 
 ///|
 fn copy_test_ready_for_query_message(
-  status? : Byte = b'I',
+  status~ : Byte = b'I',
 ) -> @backend.Message raise {
   let payload = Buffer()
   payload.write_byte(status)
@@ -32,7 +32,7 @@ fn copy_test_ready_for_query_message(
 ///|
 fn copy_test_copy_response_message(
   tag : Byte,
-  formats : Array[Int],
+  formats : Array[Int32],
 ) -> @backend.Message raise {
   let payload = Buffer()
   payload.write_byte(0)
@@ -45,14 +45,14 @@ fn copy_test_copy_response_message(
 
 ///|
 fn copy_test_copy_in_response_message(
-  formats : Array[Int],
+  formats : Array[Int32],
 ) -> @backend.Message raise {
   copy_test_copy_response_message(@backend.COPY_IN_RESPONSE_TAG, formats)
 }
 
 ///|
 fn copy_test_copy_out_response_message(
-  formats : Array[Int],
+  formats : Array[Int32],
 ) -> @backend.Message raise {
   copy_test_copy_response_message(@backend.COPY_OUT_RESPONSE_TAG, formats)
 }
@@ -168,34 +168,34 @@ fn copy_test_shared(
     ),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
-    dropped_async_messages: @ref.new(0L),
-    async_message_handler: @ref.new(None),
+    dropped_async_messages: Ref(0L),
+    async_message_handler: Ref(None),
     connection_id: connection_ids.allocate(),
-    root_transaction_occupancy: @ref.new(0),
+    root_transaction_occupancy: Ref(0),
     control,
     ready,
     done: Completion::new(),
-    started: @ref.new(true),
-    runtime_error: @ref.new(None),
+    started: Ref(true),
+    runtime_error: Ref(None),
     parameters: {},
     types,
-    process_id: @ref.new(11),
-    secret_key: @ref.new(22),
-    transaction_status: @ref.new(b'I'),
-    closed: @ref.new(false),
-    closing: @ref.new(false),
-    close_requested: @ref.new(false),
-    aborted: @ref.new(false),
+    process_id: Ref(11),
+    secret_key: Ref(22),
+    transaction_status: Ref(b'I'),
+    closed: Ref(false),
+    closing: Ref(false),
+    close_requested: Ref(false),
+    aborted: Ref(false),
     operation_gate: OperationGate::new(),
-    driver_task: @ref.new(None),
-    next_id: @ref.new(0),
+    driver_task: Ref(None),
+    next_id: Ref(0),
   }
 }
 
 ///|
 async test "client copy in streams input and returns affected rows" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(Ref(None))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -264,7 +264,7 @@ async test "copy in input is bounded and abandoned COPY eventually queues Fail" 
 ///|
 async test "copy in send drains an early database error before releasing permit" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -299,7 +299,7 @@ async test "copy in send drains an early database error before releasing permit"
 ///|
 async test "client copy in surfaces startup errors and missing startup response" {
   @async.with_task_group(group => {
-    let error_shared = copy_test_shared(@ref.new(None))
+    let error_shared = copy_test_shared(Ref(None))
     let error_client : Client = { shared: error_shared, }
 
     group.spawn_bg(() => {
@@ -318,7 +318,7 @@ async test "client copy in surfaces startup errors and missing startup response"
   })
 
   @async.with_task_group(group => {
-    let missing_shared = copy_test_shared(@ref.new(None))
+    let missing_shared = copy_test_shared(Ref(None))
     let missing_client : Client = { shared: missing_shared, }
 
     group.spawn_bg(() => {
@@ -339,7 +339,7 @@ async test "client copy in surfaces startup errors and missing startup response"
 ///|
 async test "copy in abort is best effort and idempotent" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(Ref(None))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -373,7 +373,7 @@ async test "copy in abort is best effort and idempotent" {
 ///|
 async test "copy in startup cancellation aborts and releases its permit" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
     let request_started : @async.Queue[Unit] = Queue(kind=Unbounded)
     let release_response : @async.Queue[Unit] = Queue(kind=Unbounded)
@@ -410,7 +410,7 @@ async test "copy in startup cancellation aborts and releases its permit" {
 ///|
 async test "client copy out collects chunks and remembers wire formats" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(Ref(None))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -434,7 +434,7 @@ async test "client copy out collects chunks and remembers wire formats" {
 ///|
 async test "client copy out detach drains in background and terminal errors surface" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -457,7 +457,7 @@ async test "client copy out detach drains in background and terminal errors surf
   })
 
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(Ref(None))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {
@@ -479,7 +479,7 @@ async test "client copy out detach drains in background and terminal errors surf
 ///|
 async test "client copy helpers reject unexpected messages and finish empty streams" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(None))
+    let shared = copy_test_shared(Ref(None))
     let client : Client = { shared, }
 
     group.spawn_bg(() => {

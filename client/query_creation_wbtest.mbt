@@ -155,7 +155,7 @@ async test "typed parameter count mismatch does not create a statement" {
 ///|
 async test "failed temporary Close without ReadyForQuery aborts connection" {
   @async.with_task_group(group => {
-    let shared = copy_test_shared(@ref.new(Some(group)))
+    let shared = copy_test_shared(Ref(Some(group)))
     let client : Client = { shared, }
     let task = group.spawn(allow_failure=true, () => {
       client.query("select $1::int4", params=[true as &ToSql])
