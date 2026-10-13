@@ -244,6 +244,7 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
       let responses = cleanup.context.client.send_request(
         Messages,
         cleanup.bytes,
+        cleanup=true,
       )
       drain_close_response(responses)
     }

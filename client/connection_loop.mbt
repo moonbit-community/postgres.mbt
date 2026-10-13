@@ -60,6 +60,16 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
     while true {
       let request = self.shared.requests.get()
       active = Some(request)
+      if request.record.control is Some(control) && control.cancelled.val {
+        if !request.record.cleanup {
+          self.close_request(request, Some(ClientError::RequestCancelled))
+          active = None
+          continue
+        }
+        control.fence.wait()
+      }
+      self.shared.driver_request.val = Some(request.record)
+      request.record.sent.val = true
       match request.kind {
         Terminate => {
           self.stream.write(request.bytes)
@@ -104,6 +114,13 @@ async fn Driver::receive_messages(
             raise ClientError::UnexpectedMessage(
               "backend response without an active request",
             )
+        }
+      }
+      if self.shared.driver_request.val is Some(record) {
+        match message {
+          CommandComplete(body) => record.tags.push(body.tag_str())
+          ReadyForQuery(_) => record.complete.val = true
+          _ => ()
         }
       }
       if message is ReadyForQuery(_) {
@@ -169,6 +186,7 @@ async fn Driver::forward_message_to_request(
 ) -> Unit {
   match message {
     ReadyForQuery(body) => {
+      request.record.complete.val = true
       self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
@@ -215,6 +233,7 @@ async fn Driver::drain_copy_in_request(
         }
       }
       ReadyForQuery(body) => {
+        request.record.complete.val = true
         if writer is Some(writer) {
           writer.wait()
         }
