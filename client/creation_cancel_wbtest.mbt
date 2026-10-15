@@ -132,6 +132,7 @@ async test "cancelled SAVEPOINT restores the parent scope before releasing owner
     let complete = group.spawn(() => outer.commit())
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     complete.wait()
   })
@@ -147,6 +148,7 @@ async test "cancellation after COMMIT submission still completes the transaction
     let commit = next_request()
     assert_eq(commit.bytes, simple_query_bytes("COMMIT"))
     task.cancel()
+    commit.responses.put(copy_test_command_complete_message("COMMIT"))
     commit.responses.put(copy_test_ready_for_query_message())
     assert_true(
       expect_error_async(() => task.wait()) is @async.WaitedTaskAlreadyCancelled,

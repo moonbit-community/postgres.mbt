@@ -40,8 +40,8 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
     let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
     let hook_gate : @async.Queue[Unit] = Queue(kind=Unbounded)
     defer hook_gate.close()
-    let mut suspend_hook = true
-    async fn hook(_operation : Operation) {
+    let mut suspend_hook = false
+    async fn hook(_operation : Session) {
       if suspend_hook {
         suspend_hook = false
         entered.put(())
@@ -49,9 +49,9 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       }
     }
     let options = if post {
-      PoolOptions::PoolOptions(post_recycle=hook)
+      PoolOptions::PoolOptions(initialize_session=hook)
     } else {
-      PoolOptions(pre_recycle=hook)
+      PoolOptions(before_acquire=hook)
     }
     let pool = start_test_pool(
       Config(
@@ -59,7 +59,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
         user="moon",
         ssl_mode=Disable,
         application_name="recycle-cancel-test",
-        pool=PoolConfig(1, recycling_method=Verified),
+        pool=PoolConfig(1, health_check=Active, reset_policy=PreserveSession),
       ),
       group,
       options~,
@@ -82,6 +82,11 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       assert_eq(pool.status().size, 1)
       assert_eq(pool.status().available, 1)
 
+      if post {
+        ignore(pool.shared.idle.remove(0))
+        pool.discard_client(retired)
+      }
+      suspend_hook = true
       let checkout = group.spawn(allow_failure=true, () => {
         pool.checkout_session()
       })
@@ -124,11 +129,52 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
 }
 
 ///|
-async test "pool cancellation in pre_recycle retires connection and restores capacity" {
+async test "pool cancellation in before_acquire retires connection and restores capacity" {
   check_recycle_cancellation(post=false)
 }
 
 ///|
-async test "pool cancellation in post_recycle retires connection and restores capacity" {
+async test "pool cancellation in initialize_session retires connection and restores capacity" {
   check_recycle_cancellation(post=true)
+}
+
+///|
+async test "zero recycle budget retires the dequeued client and restores exactly one slot" {
+  with_control_pool(Normal, (_, pool, _) => {
+    let first = pool.checkout_session()
+    first.with_prepared("select 0", _ => ())
+    let retired = first.state.connection
+    first.release()
+    assert_eq(retired.statement_cache.length(), 1)
+    assert_eq(pool.status().available, 1)
+    assert_true(
+      expect_pgpool_error_async(() => {
+        pool.with_session(_ => (), timeouts=Timeouts(recycle_ms=Some(0)))
+      })
+      is PoolError::Timeout(Recycle),
+    )
+    assert_eq(pool.status().size, 0)
+    assert_eq(pool.status().available, 0)
+    assert_eq(pool.shared.connections.length(), 0)
+    assert_true(retired.client.val is None)
+    assert_eq(retired.statement_cache.length(), 0)
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
+    assert_true(pool.shared.slots.try_put(()))
+    let replacement = pool.checkout_session()
+    defer replacement.release()
+    assert_true(replacement.state.connection.id != retired.id)
+    assert_eq(pool.status().size, 1)
+    assert_true(
+      expect_pgpool_error_async(() => {
+        pool.with_session(_ => (), timeouts=Timeouts(wait_ms=Some(0)))
+      })
+      is PoolError::Timeout(Wait),
+    )
+    assert_eq(pool.status().size, pool.status().max_size)
+    replacement.release()
+    pool.close()
+    pool.shared.done.wait()
+    assert_eq(pool.status().size, 0)
+  })
 }

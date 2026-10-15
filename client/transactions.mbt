@@ -747,7 +747,18 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
     submitted.val = true
     try {
       match (command, self.savepoint) {
-        ("commit", None) => self.context.batch_execute("COMMIT")
+        ("commit", None) => {
+          let tag = self.context.complete_transaction("COMMIT") catch {
+            ClientError::Database(_) as error => raise error
+            _ => raise ClientError::CommitOutcomeUnknown
+          }
+          if tag == "ROLLBACK" {
+            raise ClientError::CommitRolledBack
+          }
+          if tag != "COMMIT" {
+            raise ClientError::CommitOutcomeUnknown
+          }
+        }
         ("commit", Some(name)) =>
           self.context.batch_execute("RELEASE SAVEPOINT \{name}")
         ("rollback", None) => self.context.batch_execute("ROLLBACK")
@@ -758,7 +769,8 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
         _ => abort("invalid transaction action")
       }
     } catch {
-      ClientError::Database(_) as error => raise error
+      ClientError::Database(_) | ClientError::CommitRolledBack as error =>
+        raise error
       error => {
         self.client.abort()
         raise error

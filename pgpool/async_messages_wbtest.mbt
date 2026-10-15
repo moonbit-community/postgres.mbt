@@ -56,7 +56,12 @@ async test "pool messages retain newest items with source IDs after close" {
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-async-wbtest",
-        pool=PoolConfig(2, async_message_capacity=2),
+        pool=PoolConfig(
+          2,
+          async_message_capacity=2,
+          reset_policy=PreserveSession,
+          health_check=Passive,
+        ),
       ),
       group,
     )
@@ -137,7 +142,7 @@ async test "idle connection failure does not close the pool" {
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-idle-disconnect-wbtest",
-        pool=PoolConfig(1),
+        pool=PoolConfig(1, reset_policy=PreserveSession, health_check=Passive),
       ),
       group,
     )
@@ -176,14 +181,14 @@ async test "pool hook handle expires and rejects a leaked transaction" {
       dbname="moondb",
       ssl_mode=Disable,
       application_name="pool-hook-wbtest",
-      pool=PoolConfig(1),
+      pool=PoolConfig(1, reset_policy=PreserveSession, health_check=Passive),
     )
     @async.with_timeout(3000, () => {
-      let saved : @ref.Ref[Operation?] = Ref(None)
+      let saved : @ref.Ref[Session?] = Ref(None)
       let pool = start_test_pool(
         config,
         group,
-        options=PoolOptions(post_create=operation => {
+        options=PoolOptions(initialize_session=operation => {
           saved.val = Some(operation)
           operation.check_connection()
         }),
@@ -198,7 +203,7 @@ async test "pool hook handle expires and rejects a leaked transaction" {
       let leaking = start_test_pool(
         config,
         group,
-        options=PoolOptions(post_create=operation => {
+        options=PoolOptions(initialize_session=operation => {
           operation.batch_execute("BEGIN")
         }),
       )
@@ -232,19 +237,24 @@ async test "recycle hook transaction discards the old connection" {
         dbname="moondb",
         ssl_mode=Disable,
         application_name="pool-recycle-hook-wbtest",
-        pool=PoolConfig(1),
+        pool=PoolConfig(1, reset_policy=PreserveSession, health_check=Passive),
       ),
       group,
-      options=PoolOptions(pre_recycle=operation => {
+      options=PoolOptions(before_acquire=operation => {
         operation.batch_execute("BEGIN")
       }),
     )
     @async.with_timeout(3000, () => {
-      pool.with_session(session => session.check_connection())
-      assert_eq(pool.shared.connections[0].id, 1)
-      pool.with_session(session => session.check_connection())
-      assert_eq(pool.shared.connections[0].id, 2)
-      assert_eq(pool.status().size, 1)
+      assert_true(
+        expect_pgpool_error_async(() => {
+          pool.with_session(session => session.check_connection())
+        })
+        is PoolError::HookLeftOpenTransaction,
+      )
+      assert_eq(pool.status().size, 0)
+      assert_eq(pool.status().available, 0)
+      assert_true(pool.shared.slots.try_get() is Some(_))
+      assert_true(pool.shared.slots.try_get() is None)
       pool.close()
     })
   })
