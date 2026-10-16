@@ -150,6 +150,14 @@ Row, simple-query, and COPY OUT streams own the operation permit.
 Cleanup is idempotent. A consumer cancellation must not leak the permit or
 allow the next operation to start before PostgreSQL reaches a safe boundary.
 
+Output streams expose an internal `finish_scope` for pgpool. It joins protocol
+completion and detached drains, returns the query's `DatabaseError`, and raises
+transport, protocol or resource-cleanup failures. Public `next` and `finish`
+still raise query SQL errors. `StreamCleanup` records a one-shot `Completion`
+for temporary Close, including its failure; a query summary only proves the
+execution reached ReadyForQuery, not that Close succeeded. Later finishers join
+that completion even if the drain executor tolerated the database exception.
+
 Both normal reads and detached drains accumulate observed `DataRow` counts as
 `UInt64` and expose them through `QuerySummary.row_count`. Affected row counts
 are parsed separately from counted command tags using decimal `UInt64` parsing;

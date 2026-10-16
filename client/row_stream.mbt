@@ -51,14 +51,18 @@ pub fn RowStream::columns(self : RowStream) -> ArrayView[Column] {
 /// returns `None`.
 pub async fn RowStream::next(self : RowStream) -> Row? {
   errdefer self.abandon_after_error()
-  self.next_inner()
+  match self.next_inner() {
+    Some(row) => Some(row)
+    None => self.raise_terminal_error_or_none()
+  }
 }
 
 ///|
 async fn RowStream::next_inner(self : RowStream) -> Row? {
   self.assert_attached()
   if self.summary is Some(_) {
-    return self.raise_terminal_error_or_none()
+    @async.protect_from_cancel(() => self.run_cleanup())
+    return None
   }
   for res = self.responses.get() {
     match res {
@@ -106,7 +110,7 @@ async fn RowStream::next_inner(self : RowStream) -> Row? {
         // fully relinquished ownership of the connection timeline.
         defer self.release_permit()
         @async.protect_from_cancel(() => self.run_cleanup())
-        return self.raise_terminal_error_or_none()
+        return None
       }
       _ =>
         fail_response_stream(
@@ -175,8 +179,24 @@ pub async fn RowStream::opt(self : RowStream) -> Row? {
 /// to observe the terminal `ReadyForQuery`, release backpressure, and execute
 /// deferred cleanup such as closing temporary statements.
 /// After detach, this waits for the drain and reports any saved connection
-/// closure or database error. If no background task could start, it drains here.
+/// closure, database error, or temporary-statement Close failure. Repeated
+/// calls preserve that Close result. If no background task could start, it
+/// drains here.
 pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
+  if self.finish_scope() is Some(error) {
+    raise ClientError::Database(error)
+  }
+  self.summary.unwrap()
+}
+
+///|
+/// Finish protocol and deferred cleanup, returning only the query's SQL error.
+/// Transport, protocol and Close failures still raise, including on repeated
+/// calls after ReadyForQuery or a background drain.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub async fn RowStream::finish_scope(self : RowStream) -> DatabaseError? {
+  errdefer self.abandon_after_error()
   if self.detached {
     if self.detached_done is Some(done) {
       done.wait()
@@ -184,16 +204,15 @@ pub async fn RowStream::finish(self : RowStream) -> QuerySummary {
       defer self.release_permit()
       self.drain_discard()
     }
-    ignore(self.raise_terminal_error_or_none())
-    return self.summary.unwrap()
-  }
-  for row = self.next() {
-    if row is Some(_) {
-      continue self.next()
-    } else {
-      break self.summary.unwrap()
+    // The drain executor tolerates database errors, including a failed Close.
+    // Join Close separately so that failure cannot be mistaken for query SQL.
+    @async.protect_from_cancel(() => self.run_cleanup())
+  } else {
+    while self.next_inner() is Some(_) {
+      ()
     }
   }
+  self.database_error
 }
 
 ///|
@@ -237,16 +256,30 @@ fn RowStream::abandon_after_error(self : RowStream) -> Unit {
 /// driver never interrupts the active request while rows are still in flight.
 async fn RowStream::run_cleanup(self : RowStream) -> Unit {
   if self.cleanup is Some(cleanup) {
-    if !cleanup.done {
-      cleanup.done = true
+    if cleanup.completion is Some(done) {
+      done.wait()
+    } else {
+      let done = Completion::new()
+      cleanup.completion = Some(done)
+      defer done.complete(
+        Some(ClientError::Closed("stream cleanup interrupted")),
+      )
       // Deferred cleanup is modeled as another request inside the same
       // logical-operation permit.
-      let responses = cleanup.context.client.send_request(
-        Messages,
-        cleanup.bytes,
-        cleanup=true,
-      )
-      drain_close_response(responses)
+      let error = try {
+        let responses = cleanup.context.client.send_request(
+          Messages,
+          cleanup.bytes,
+          cleanup=true,
+        )
+        drain_close_response(responses)
+      } catch {
+        error => Some(error)
+      } noraise {
+        _ => None
+      }
+      done.complete(error)
+      done.wait()
     }
   }
 }
@@ -259,7 +292,7 @@ async fn RowStream::run_cleanup(self : RowStream) -> Unit {
 /// errors. It intentionally skips `DataRow` decoding and row allocation.
 async fn RowStream::drain_discard(self : RowStream) -> Unit {
   if self.summary is Some(_) {
-    ()
+    @async.protect_from_cancel(() => self.run_cleanup())
   } else {
     for res = self.responses.get() {
       match res {
@@ -298,11 +331,7 @@ async fn RowStream::drain_discard(self : RowStream) -> Unit {
           // leak on the server after the caller stops waiting.
           defer self.release_permit()
           @async.protect_from_cancel(() => self.run_cleanup())
-          if self.database_error is Some(err) {
-            raise ClientError::Database(err)
-          } else {
-            return
-          }
+          return
         }
         _ =>
           fail_response_stream(

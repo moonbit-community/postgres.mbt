@@ -188,7 +188,9 @@ struct ClientExecutor {
 priv struct StreamCleanup {
   context : OpContext
   bytes : Bytes
-  mut done : Bool
+  /// A started Close is not necessarily a successful Close. Keep its result
+  /// so all later finishers join it and observe the same cleanup failure.
+  mut completion : Completion?
 }
 
 ///|

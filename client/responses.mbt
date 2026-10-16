@@ -47,7 +47,7 @@ fn SimpleQueryStream::new(
 ///|
 /// Build the deferred cleanup object for a temporary prepared statement.
 fn StreamCleanup::new(context : OpContext, name : Bytes) -> StreamCleanup raise {
-  { context, bytes: close_bytes(b'S', name[:]), done: false, }
+  { context, bytes: close_bytes(b'S', name[:]), completion: None, }
 }
 
 ///|

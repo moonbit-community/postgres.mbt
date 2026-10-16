@@ -46,6 +46,14 @@ pub struct DatabaseError {
 } derive(Debug, Eq)
 
 ///|
+/// Restore a query error after a pool scope has completed protected cleanup.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub fn DatabaseError::into_client_error(self : DatabaseError) -> ClientError {
+  ClientError::Database(self)
+}
+
+///|
 /// Describes an early type mismatch detected by the driver.
 ///
 /// The client validates encoder and decoder compatibility before invoking the
