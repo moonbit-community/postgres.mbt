@@ -98,7 +98,10 @@ pub async fn SimpleQueryStream::next(
   self : SimpleQueryStream,
 ) -> SimpleQueryMessage? {
   errdefer self.abandon_after_error()
-  self.next_inner()
+  match self.next_inner() {
+    Some(message) => Some(message)
+    None => self.raise_terminal_error_or_none()
+  }
 }
 
 ///|
@@ -107,7 +110,7 @@ async fn SimpleQueryStream::next_inner(
 ) -> SimpleQueryMessage? {
   self.assert_attached()
   if self.finished {
-    return self.raise_terminal_error_or_none()
+    return None
   }
   for response = self.responses.get() {
     match response {
@@ -138,7 +141,7 @@ async fn SimpleQueryStream::next_inner(
         // The simple-query batch is complete only after the final ready frame.
         self.finished = true
         self.release_permit()
-        return self.raise_terminal_error_or_none()
+        return None
       }
       _ =>
         fail_response_stream(
@@ -170,6 +173,20 @@ pub async fn SimpleQueryStream::collect(
 /// After detach, wait for the drain and report its connection closure or database
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
+  if self.finish_scope() is Some(error) {
+    raise ClientError::Database(error)
+  }
+}
+
+///|
+/// Join protocol completion and background cleanup. Only query SQL errors are
+/// returned; transport and protocol failures still raise.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub async fn SimpleQueryStream::finish_scope(
+  self : SimpleQueryStream,
+) -> DatabaseError? {
+  errdefer self.abandon_after_error()
   if self.detached {
     if self.detached_done is Some(done) {
       done.wait()
@@ -177,16 +194,12 @@ pub async fn SimpleQueryStream::finish(self : SimpleQueryStream) -> Unit {
       defer self.release_permit()
       self.drain_discard()
     }
-    ignore(self.raise_terminal_error_or_none())
-    return
-  }
-  for msg = self.next() {
-    if msg is Some(_) {
-      continue self.next()
-    } else {
-      break ()
+  } else {
+    while self.next_inner() is Some(_) {
+      ()
     }
   }
+  self.database_error
 }
 
 ///|
@@ -226,11 +239,7 @@ fn SimpleQueryStream::abandon_after_error(self : SimpleQueryStream) -> Unit {
 /// Drain the remaining protocol frames without constructing row values.
 async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
   if self.finished {
-    if self.database_error is Some(err) {
-      raise ClientError::Database(err)
-    } else {
-      return
-    }
+    return
   }
   for response = self.responses.get() {
     match response {
@@ -247,11 +256,7 @@ async fn SimpleQueryStream::drain_discard(self : SimpleQueryStream) -> Unit {
       ReadyForQuery(_) => {
         self.finished = true
         self.release_permit()
-        if self.database_error is Some(err) {
-          raise ClientError::Database(err)
-        } else {
-          return
-        }
+        return
       }
       _ =>
         fail_response_stream(

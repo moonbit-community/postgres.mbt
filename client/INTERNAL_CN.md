@@ -122,6 +122,12 @@ COPY IN 是协议中的例外，需要双向协调。其生产者队列最多容
 清理是幂等的。消费者取消时，既不能泄漏许可，也不能让下一个操作在 PostgreSQL
 到达安全边界之前开始。
 
+输出流向 pgpool 提供内部 `finish_scope`：等待协议完成及分离排空，将查询本身的
+`DatabaseError` 作为返回值，传输、协议和资源清理失败仍抛出。公开 `next` 和
+`finish` 仍抛出 SQL 错误。`StreamCleanup` 用一次性 `Completion` 保存临时语句
+Close 的最终结果，包括失败；查询 summary 只能证明执行到达 ReadyForQuery，
+不能证明 Close 成功。后续收尾必须等待并复用该结果，即使后台排空容忍了数据库异常。
+
 正常读取和分离排空都以 `UInt64` 累加观察到的 DataRow 数量，并通过
 `QuerySummary.row_count` 返回。受影响行数另从带计数的命令标签按十进制解析为
 `UInt64`：无计数命令返回零，非法或超限计数抛出 `ClientError::Protocol`。

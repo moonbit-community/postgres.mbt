@@ -218,6 +218,11 @@ encoding validation fails after preparation, the temporary statement is closed
 under the same operation permit before the original error is returned; no
 Execute request is submitted.
 
+Stream SQL errors are reported after `ReadyForQuery` and deferred cleanup.
+After `detach()`, `finish()` waits for the background drain and reports the same
+query or cleanup failure. Temporary-statement Close results are retained across
+repeated calls to `finish()`, including failed Close attempts.
+
 ## Type Descriptors And Custom Arrays
 
 `Type` carries `oid`, `name`, `schema : String?`, and `kind`. Built-ins have
