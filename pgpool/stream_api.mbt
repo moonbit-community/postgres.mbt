@@ -32,10 +32,12 @@ async fn[T] StreamScope::run(
 }
 
 ///|
+/// A returned SQL error means synchronization and resource cleanup succeeded.
+/// Raised cleanup failures still retire the connection through owner.cleanup.
 async fn[R, T] resource_scope(
   owner : ClientLeaseState,
   acquire : async () -> R,
-  finish : async (R) -> Unit,
+  finish : async (R) -> @client.DatabaseError?,
   f : async (R, StreamScope) -> T,
 ) -> T {
   let raw = @async.protect_from_cancel(acquire)
@@ -51,11 +53,23 @@ async fn[R, T] resource_scope(
       finish(raw)
     })
   }
-  errdefer (cleanup() catch { _ => () })
-  check_pending_cancellation()
-  let result = f(raw, scope)
-  check_pending_cancellation()
-  cleanup()
+  let result = {
+    errdefer (ignore(cleanup()) catch { _ => () })
+    check_pending_cancellation()
+    let result = f(raw, scope)
+    check_pending_cancellation()
+    result
+  }
+  let database_error = {
+    defer check_pending_cancellation()
+    cleanup()
+  }
+  // SQL failure after successful protocol cleanup does not retire the socket.
+  // Raise after cleanup and outside the callback's errdefer. The same budget
+  // remains available to outer rollback without repeating completed cleanup.
+  if database_error is Some(error) {
+    raise error.into_client_error()
+  }
   if !owner.cleanup_mode {
     owner.cleanup_deadline.val = None
   }
@@ -227,7 +241,7 @@ pub async fn[T] Session::with_stream(
       resource_scope(
         self.state,
         () => client.query(sql, params~),
-        raw => ignore(raw.finish()),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -265,7 +279,7 @@ pub async fn[T] Session::with_typed_stream(
       resource_scope(
         self.state,
         () => client.query_typed(sql, param_types, params~),
-        raw => ignore(raw.finish()),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -302,7 +316,7 @@ pub async fn[T] Session::with_simple_query(
       resource_scope(
         self.state,
         () => client.simple_query(sql),
-        raw => raw.finish(),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -337,7 +351,10 @@ pub async fn[T] Session::with_copy_in(
       resource_scope(
         self.state,
         () => client.copy_in(sql),
-        raw => raw.finish_scope(),
+        raw => {
+          raw.finish_scope()
+          None
+        },
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -372,7 +389,7 @@ pub async fn[T] Session::with_copy_out(
       resource_scope(
         self.state,
         () => client.copy_out(sql),
-        raw => raw.finish(),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -408,7 +425,7 @@ pub async fn[T] Transaction::with_stream(
       resource_scope(
         self.state,
         () => client.query(sql, params~),
-        raw => ignore(raw.finish()),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -430,7 +447,7 @@ pub async fn[T] Transaction::with_typed_stream(
       resource_scope(
         self.state,
         () => client.query_typed(sql, param_types, params~),
-        raw => ignore(raw.finish()),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -450,7 +467,7 @@ pub async fn[T] Transaction::with_simple_query(
       resource_scope(
         self.state,
         () => client.simple_query(sql),
-        raw => raw.finish(),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -470,7 +487,10 @@ pub async fn[T] Transaction::with_copy_in(
       resource_scope(
         self.state,
         () => client.copy_in(sql),
-        raw => raw.finish_scope(),
+        raw => {
+          raw.finish_scope()
+          None
+        },
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -490,7 +510,7 @@ pub async fn[T] Transaction::with_copy_out(
       resource_scope(
         self.state,
         () => client.copy_out(sql),
-        raw => raw.finish(),
+        raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
       )
     },
@@ -499,6 +519,8 @@ pub async fn[T] Transaction::with_copy_out(
 }
 
 ///|
+/// Stream one prepared execution. SQLSTATE 26000 and 0A000 invalidate the
+/// cached handle even when first observed during cleanup; SQL is not retried.
 pub async fn[T] PreparedStatement::with_stream(
   self : PreparedStatement,
   params~ : Array[&@client.ToSql] = [],
@@ -514,8 +536,33 @@ pub async fn[T] PreparedStatement::with_stream(
     client => {
       resource_scope(
         state,
-        () => client.query_statement(self.state.raw_statement(), params~),
-        raw => ignore(raw.finish()),
+        () => {
+          let outcome = try
+            client.query_statement(self.state.raw_statement(), params~)
+          catch {
+            error => Err(error)
+          } noraise {
+            stream => Ok(stream)
+          }
+          match outcome {
+            Ok(stream) => stream
+            Err(error) => {
+              invalidate_handle(state, self.state.handle, error)
+              raise error
+            }
+          }
+        },
+        raw => {
+          let database_error = raw.finish_scope()
+          if database_error is Some(error) {
+            invalidate_handle(
+              state,
+              self.state.handle,
+              error.into_client_error(),
+            )
+          }
+          database_error
+        },
         (raw, scope) => f({ raw, scope, }),
       )
     },
