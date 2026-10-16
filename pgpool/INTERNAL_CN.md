@@ -16,7 +16,9 @@ Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用�
 输出流作用域在有时限的清理中调用客户端内部 `finish_scope`，再在清理边界之外
 抛出其返回的查询 SQL 错误。同步或资源清理实际失败才淘汰连接，回调异常仍优先。
 prepared 流在创建和收尾阶段处理 26000/0A000 缓存失效，即使回调异常遮蔽了
-SQL 错误也会失效；不重试执行。
+SQL 错误也会失效；不重试执行。prepared 作用域在回调前后检查取消，并在正常
+释放外用 defer 再检查一次，覆盖受保护释放成功和失败两条路径。异常退出仍保留
+原回调错误。
 
 Deadline 使用 `@async.now()` 的毫秒计时基准，子范围只能缩短。等待 executor
 和容量共用 wait 预算；所有 host 共用 create 预算。健康检查失败允许换连接，
@@ -61,6 +63,11 @@ stream/COPY 可能仍持有底层 permit，等待该 permit 会阻塞关闭任�
 归还顺序：协议同步 → 清理遗留事务 → 单独执行 DISCARD ALL → 清空 statement/type
 cache → initialize_session → 空闲队列。PreserveSession 保留状态但仍同步协议和回滚；
 Reconnect 直接淘汰。归还清理失败以 PoolEvent 保留原始原因，不覆盖业务结果。
+`with_session` 仅在回调范围内注册受保护的 errdefer，异常或取消退出保留原始原因。
+回调正常完成时单独受保护地归还，并用 defer 在保护之外检查挂起的取消，即使归还
+失败也会检查。因此在 reset 或初始化 hook 期间收到的取消，会在调用方继续执行前
+传播，Pool 便捷方法和事务入口也遵守此规则。每条路径只归还一次，已确认的事务记录
+保持原状态。
 事件缓冲区溢出丢弃最旧条目并计数，不能影响事务完成记录。
 
 确定性协议测试见 request_control_wbtest.mbt；受保护 Close 和方法 deadline
@@ -69,6 +76,8 @@ recycle_cancel_wbtest.mbt。transaction_scope_wbtest.mbt 覆盖各事务入口�
 逃逸 prepared 回调及阻塞 SQL、缓存和重置策略、诊断、父锁、容量及正常复用。
 真实数据库状态隔离、事务意图、stream/COPY 取消及逃逸 prepared/COPY 回调对新
 借用者阻塞查询的隔离测试见 tests/baseline/pgpool_redesign_integration_test.mbt。
-stream_error_wbtest.mbt 区分 SQL、同步和 Close 失败。
-tests/baseline/pgpool_stream_error_integration_test.mbt 验证
+stream_error_wbtest.mbt 区分 SQL、同步和 Close 失败；prepared_cancel_wbtest.mbt
+覆盖释放期间取消。tests/baseline/pgpool_stream_error_integration_test.mbt 验证
 真实 PostgreSQL 后端复用、保存点回滚和 prepared 缓存失效。
+release_cancel_wbtest.mbt 覆盖 reset 和初始化期间的归还取消、回调异常优先级、
+容量恢复、连接复用，以及各 Pool 入口下已确认的事务完成记录。

@@ -297,8 +297,15 @@ async fn[T] prepared_scope(
     deadline?,
   )
   errdefer (prepared.release_internal() catch { _ => () })
+  check_pending_cancellation()
   let result = with_deadline(deadline, Query, () => f(prepared))
-  prepared.release_internal()
+  check_pending_cancellation()
+  // Observe cancellation received during protected release on both success
+  // and failure. Unwinding a callback error still preserves its original cause.
+  {
+    defer check_pending_cancellation()
+    prepared.release_internal()
+  }
   if !state.cleanup_mode {
     state.cleanup_deadline.val = None
   }
@@ -336,6 +343,8 @@ async fn[T] PreparedStatement::run(
 
 ///|
 /// Prepare a scoped handle. The callback itself does not occupy the connection.
+/// Release uses the shared cleanup budget. Cancellation received during release
+/// propagates before returning to user code, even if release fails.
 pub async fn[T] Session::with_prepared(
   self : Session,
   sql : String,
