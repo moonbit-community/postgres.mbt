@@ -24,7 +24,10 @@ cleanup and raise its returned query SQL error outside that cleanup boundary.
 Only a raised synchronization or resource-cleanup failure retires the client;
 callback errors keep priority. Prepared streams invalidate cache entries for
 26000/0A000 during acquisition and finalization, including errors masked by a
-callback exception. No execution is retried.
+callback exception. No execution is retried. Prepared scopes check cancellation
+before and after callbacks and defer a final check around normal release, so
+cancellation during protected release wins over either success or release
+failure. Error unwinding preserves the original callback exception.
 
 `Deadline` is absolute in `@async.now()` milliseconds. The minimum inherited
 instant flows through checkout and child scopes; phase limits can shorten it.
@@ -94,8 +97,15 @@ DISCARD ALL, statement/type cache invalidation, initialize_session, then idle
 publication. PreserveSession skips discard and initialization but still requires
 protocol synchronization and transaction cleanup. Reconnect retires the socket.
 Return cleanup is best effort with respect to the user's result, with original
-failures retained in bounded PoolEvents. Event overflow drops oldest entries
-and increments a counter; it never changes transaction records.
+failures retained in bounded PoolEvents. `with_session` registers protected
+error cleanup only around the callback, preserving its original exception or
+cancellation. Normal callback completion releases separately, with a deferred
+cancellation check outside protection even if release fails. Cancellation
+received during reset or initialization therefore propagates before caller code
+resumes, including through Pool convenience and transaction helpers. Each path
+releases once; an already confirmed transaction record keeps its status.
+Event overflow drops oldest entries and increments a counter; it never changes
+transaction records.
 
 Protocol tests in `request_control_wbtest.mbt` cover timing barriers, hung
 cancellation sockets, ignored cancellation, lost commit responses, completion
@@ -103,7 +113,10 @@ tags, nested cleanup budgets and capacity accounting. Protected Close and method
 deadline regressions live in `stream_deadline_wbtest.mbt`; immediate recycle
 expiry and retirement accounting live in `recycle_cancel_wbtest.mbt`.
 `stream_error_wbtest.mbt` covers SQL failures versus synchronization and Close
-failures.
+failures; `prepared_cancel_wbtest.mbt` covers cancellation during release.
+`release_cancel_wbtest.mbt` covers session-return cancellation during reset and
+initialization, callback exception priority, capacity restoration, reuse and
+confirmed transaction records across Pool entry points.
 `tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
 savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL

@@ -14,6 +14,7 @@ priv enum BackendFault {
   HoldRollback
   HoldClose
   HoldCloseCancel
+  HoldCloseError
   StreamError
   StreamErrorNoReady
   StreamErrorDisconnect
@@ -83,7 +84,7 @@ async fn serve_control_backend(
     probe.cancel_started.put(())
     match fault {
       HoldCancel | HoldCloseCancel => probe.release_cancel.get()
-      IgnoreCancel | HoldClose | StreamErrorNoReady => ()
+      IgnoreCancel | HoldClose | HoldCloseError | StreamErrorNoReady => ()
       _ => probe.release_query.put(())
     }
     return
@@ -120,10 +121,10 @@ async fn serve_control_backend(
         }
       b'C' => {
         probe.close_started.put(())
-        if fault is (HoldClose | HoldCloseCancel) {
+        if fault is (HoldClose | HoldCloseCancel | HoldCloseError) {
           probe.release_close.get()
         }
-        if fault is StreamCloseError {
+        if fault is (HoldCloseError | StreamCloseError) {
           send_control_error(socket, "Close failed", code="XX000")
         } else {
           socket.write(b"3\x00\x00\x00\x04")

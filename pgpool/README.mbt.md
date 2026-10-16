@@ -136,6 +136,13 @@ another borrower only after the owning scope finishes cleanup.
 The completion bound applies to library I/O; application callbacks must
 cooperate with async cancellation. Cleanup errors are diagnostic events and do
 not replace an earlier database error, business `Err`, or callback exception.
+If cancellation arrives during a prepared handle's protected release or session
+return (including `DISCARD ALL` and initialization), the scope finishes bounded
+cleanup and propagates cancellation before user code can resume, whether
+cleanup succeeds or fails. This applies to `with_session`, Pool convenience
+methods and Pool transaction helpers when their callbacks complete normally.
+An existing callback exception keeps its original priority. A transaction
+already confirmed as `Committed` retains that status in its `TransactionRecord`.
 
 ## Session isolation and hooks
 
