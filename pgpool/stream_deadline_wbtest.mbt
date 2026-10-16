@@ -48,6 +48,14 @@ async test "stream method deadlines abort hung temporary Close within the cleanu
                 assert_true(stream.scope.gate.try_acquire())
                 stream.scope.gate.release()
                 assert_true(session.state.scoped_client().is_closed())
+                // ReadyForQuery preceded Close. Its saved summary must not
+                // turn the failed Close into success on a later finish.
+                for _ in 0..<2 {
+                  assert_true(
+                    expect_pgpool_error_async(() => stream.raw.finish())
+                    is @client.ClientError::Closed(_),
+                  )
+                }
                 raise error
               })
             })

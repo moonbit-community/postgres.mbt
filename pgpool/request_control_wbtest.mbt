@@ -14,17 +14,43 @@ priv enum BackendFault {
   HoldRollback
   HoldClose
   HoldCloseCancel
+  StreamError
+  StreamErrorNoReady
+  StreamErrorDisconnect
+  StreamCloseError
 }
 
 ///|
 priv struct ProtocolProbe {
   sql : Array[String]
+  requests : Array[Byte]
   query_started : @async.Queue[Unit]
   cancel_started : @async.Queue[Unit]
   release_query : @async.Queue[Unit]
   release_cancel : @async.Queue[Unit]
   close_started : @async.Queue[Unit]
   release_close : @async.Queue[Unit]
+}
+
+///|
+async fn send_control_error(
+  socket : @socket.Tcp,
+  message : String,
+  code~ : String = "22012",
+) -> Unit {
+  let payload = @buffer.Buffer()
+  payload.write_byte(b'C')
+  payload.write_bytes(@proto.utf8_encode(code))
+  payload.write_byte(0)
+  payload.write_byte(b'M')
+  payload.write_bytes(@proto.utf8_encode(message))
+  payload.write_byte(0)
+  payload.write_byte(0)
+  let packet = @buffer.Buffer()
+  packet.write_byte(b'E')
+  packet.write_int_be(payload.length() + 4)
+  packet.write_bytes(payload.to_bytes())
+  socket.write(packet.to_bytes())
 }
 
 ///|
@@ -57,7 +83,7 @@ async fn serve_control_backend(
     probe.cancel_started.put(())
     match fault {
       HoldCancel | HoldCloseCancel => probe.release_cancel.get()
-      IgnoreCancel | HoldClose => ()
+      IgnoreCancel | HoldClose | StreamErrorNoReady => ()
       _ => probe.release_query.put(())
     }
     return
@@ -66,28 +92,66 @@ async fn serve_control_backend(
     b"R\x00\x00\x00\x08\x00\x00\x00\x00K\x00\x00\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x02Z\x00\x00\x00\x05I",
   )
   let mut status = b'I'
+  let mut stream_failed = false
   while true {
     guard socket.read_some(max_len=1) is Some(tag) else { return }
     let header = socket.read_exactly(4)
     let size = @proto.ByteReader::new(header[:]).read_i32_be()
     let bytes = socket.read_exactly(size - 4)
+    probe.requests.push(tag[0])
     match tag[0] {
       b'X' => return
       b'P' => socket.write(b"1\x00\x00\x00\x04")
       b'D' => socket.write(b"t\x00\x00\x00\x06\x00\x00n\x00\x00\x00\x04")
       b'B' => socket.write(b"2\x00\x00\x00\x04")
-      b'E' => socket.write(b"C\x00\x00\x00\x0dSELECT 0\x00")
+      b'E' =>
+        if fault
+          is (StreamError
+          | StreamErrorNoReady
+          | StreamErrorDisconnect
+          | StreamCloseError) {
+          stream_failed = true
+          send_control_error(socket, "stream failed")
+          if fault is StreamErrorDisconnect {
+            return
+          }
+        } else {
+          socket.write(b"C\x00\x00\x00\x0dSELECT 0\x00")
+        }
       b'C' => {
         probe.close_started.put(())
         if fault is (HoldClose | HoldCloseCancel) {
           probe.release_close.get()
         }
-        socket.write(b"3\x00\x00\x00\x04")
+        if fault is StreamCloseError {
+          send_control_error(socket, "Close failed", code="XX000")
+        } else {
+          socket.write(b"3\x00\x00\x00\x04")
+        }
       }
-      b'S' => socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
+      b'S' => {
+        if stream_failed && fault is StreamErrorNoReady {
+          probe.release_query.get()
+        }
+        socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
+      }
       b'Q' => {
         let sql = @utf8.decode(bytes[:bytes.length() - 1])
         probe.sql.push(sql)
+        if sql == "stream error" || sql == "copy error" {
+          if sql == "copy error" {
+            socket.write(b"H\x00\x00\x00\x07\x00\x00\x00")
+          }
+          send_control_error(socket, "stream failed")
+          if fault is StreamErrorDisconnect {
+            return
+          }
+          if fault is StreamErrorNoReady {
+            probe.release_query.get()
+          }
+          socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
+          continue
+        }
         if sql == "copy out" {
           socket.write(
             b"H\x00\x00\x00\x07\x00\x00\x00d\x00\x00\x00\x06x\nc\x00\x00\x00\x04C\x00\x00\x00\x0bCOPY 1\x00",
@@ -163,6 +227,7 @@ async fn with_control_pool(
     defer server.close()
     let probe : ProtocolProbe = {
       sql: [],
+      requests: [],
       query_started: Queue(kind=Unbounded),
       cancel_started: Queue(kind=Unbounded),
       release_query: Queue(kind=Unbounded),

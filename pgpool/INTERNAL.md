@@ -19,6 +19,13 @@ callbacks retain the owner gate; their individual methods have another gate
 and an active flag. Cleanup expires the resource first. Escaped concurrent work
 causes retirement, rather than releasing a live socket to another borrower.
 
+Output resource scopes call the client's internal `finish_scope` inside bounded
+cleanup and raise its returned query SQL error outside that cleanup boundary.
+Only a raised synchronization or resource-cleanup failure retires the client;
+callback errors keep priority. Prepared streams invalidate cache entries for
+26000/0A000 during acquisition and finalization, including errors masked by a
+callback exception. No execution is retried.
+
 `Deadline` is absolute in `@async.now()` milliseconds. The minimum inherited
 instant flows through checkout and child scopes; phase limits can shorten it.
 Readiness and slot acquisition consume one wait budget. All hosts consume one
@@ -95,6 +102,10 @@ cancellation sockets, ignored cancellation, lost commit responses, completion
 tags, nested cleanup budgets and capacity accounting. Protected Close and method
 deadline regressions live in `stream_deadline_wbtest.mbt`; immediate recycle
 expiry and retirement accounting live in `recycle_cancel_wbtest.mbt`.
+`stream_error_wbtest.mbt` covers SQL failures versus synchronization and Close
+failures.
+`tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
+savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL
 across Pool/Session transactions, named savepoints and nested transactions,
 including exit precedence, cache/reset policies, diagnostics and normal reuse.

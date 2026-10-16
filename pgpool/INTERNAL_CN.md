@@ -13,6 +13,11 @@ Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用�
 保留作用域计数，实际准备或执行时才加锁。流和 COPY 持有连接至回调退出，句柄
 另外检查过期和重叠调用。逃逸到外层任务的活动操作会导致连接淘汰，不能进入下一次借用。
 
+输出流作用域在有时限的清理中调用客户端内部 `finish_scope`，再在清理边界之外
+抛出其返回的查询 SQL 错误。同步或资源清理实际失败才淘汰连接，回调异常仍优先。
+prepared 流在创建和收尾阶段处理 26000/0A000 缓存失效，即使回调异常遮蔽了
+SQL 错误也会失效；不重试执行。
+
 Deadline 使用 `@async.now()` 的毫秒计时基准，子范围只能缩短。等待 executor
 和容量共用 wait 预算；所有 host 共用 create 预算。健康检查失败允许换连接，
 hook 失败则立即结束获取。最终建连错误保存各目标、阶段、耗时和原始错误。
@@ -64,3 +69,6 @@ recycle_cancel_wbtest.mbt。transaction_scope_wbtest.mbt 覆盖各事务入口�
 逃逸 prepared 回调及阻塞 SQL、缓存和重置策略、诊断、父锁、容量及正常复用。
 真实数据库状态隔离、事务意图、stream/COPY 取消及逃逸 prepared/COPY 回调对新
 借用者阻塞查询的隔离测试见 tests/baseline/pgpool_redesign_integration_test.mbt。
+stream_error_wbtest.mbt 区分 SQL、同步和 Close 失败。
+tests/baseline/pgpool_stream_error_integration_test.mbt 验证
+真实 PostgreSQL 后端复用、保存点回滚和 prepared 缓存失效。

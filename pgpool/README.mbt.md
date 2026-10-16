@@ -38,6 +38,19 @@ ends. Their handles are pool-owned capabilities; concurrent calls to one stream
 also raise `OperationInProgress`. COPY IN requires `finish()` to accept input;
 an unfinished sink is aborted on scope exit.
 
+SQL errors from row, typed, prepared, simple-query and COPY OUT streams leave
+the session usable once the protocol reaches `ReadyForQuery` and resource
+cleanup succeeds. This also applies when the callback stops reading early or
+the remaining results drain in the background. A failed transaction still
+requires rollback; a savepoint scope can roll back its error and let the outer
+transaction continue. Returning the connection to the pool still runs its
+configured reset policy.
+
+Prepared stream errors with SQLSTATE `26000` or `0A000` invalidate the cached
+statement. The next prepared scope acquires a fresh statement; failed SQL is
+never automatically retried. Invalidation also happens when scope cleanup first
+observes the error or a callback exception takes precedence.
+
 ## Transactions
 
 Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests
@@ -111,6 +124,9 @@ does not confirm the SQL stopped. Already-sent SQL is never replayed.
 Drain, rollback and reset share a finite cleanup budget: `cleanup_ms` defaults
 to 5000. Cleanup failures, untrusted protocol state and expired cleanup budgets
 abort and retire the connection. Cleanup also runs on normal scope exit.
+SQL errors reported after successful stream cleanup do not count as cleanup
+failures. Temporary-statement Close results, including failures, are retained
+so a repeated finish cannot turn failed cleanup into success.
 Stream and COPY method deadlines use the same supervision and cleanup budget,
 including protected I/O such as closing a temporary statement. A method timeout
 returns `Timeout(Query)` after cancellation and protocol cleanup complete, or
