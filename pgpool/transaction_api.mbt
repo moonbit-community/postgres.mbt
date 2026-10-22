@@ -219,6 +219,8 @@ async fn[T, E] transaction_scope(
       Err(_) => transaction.rollback_internal() catch { _ => () }
     }
   }
+  // Rollback shields cleanup; observe cancellation before returning a business Err.
+  check_pending_cancellation()
   // A successful nested scope ends its cleanup episode. Failed cleanup keeps
   // the budget for the remaining outer unwind and retires the physical client.
   if !client.is_closed() && !parent.cleanup_mode {
@@ -229,6 +231,8 @@ async fn[T, E] transaction_scope(
 
 ///|
 /// Ok requests commit; Err, an exception, or cancellation requests rollback.
+/// Cancellation received during rollback propagates after bounded cleanup.
+/// An existing callback exception keeps priority.
 pub async fn[T, E] Session::with_transaction(
   self : Session,
   f : async (Transaction) -> Result[T, E],

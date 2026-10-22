@@ -54,8 +54,9 @@ observes the error or a callback exception takes precedence.
 ## Transactions
 
 Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests
-rollback and returns the same business error. Exceptions and task cancellation
-request rollback. Transaction handles have no public `commit` or `rollback`.
+rollback. Without task cancellation, the same business error is returned even
+if rollback cleanup fails. Exceptions and task cancellation request rollback.
+Transaction handles have no public `commit` or `rollback`.
 
 Finish all child tasks before returning from a transaction or savepoint callback.
 Leaving a prepared, stream, COPY or query task active is a scope usage error:
@@ -136,13 +137,16 @@ another borrower only after the owning scope finishes cleanup.
 The completion bound applies to library I/O; application callbacks must
 cooperate with async cancellation. Cleanup errors are diagnostic events and do
 not replace an earlier database error, business `Err`, or callback exception.
-If cancellation arrives during a prepared handle's protected release or session
-return (including `DISCARD ALL` and initialization), the scope finishes bounded
-cleanup and propagates cancellation before user code can resume, whether
-cleanup succeeds or fails. This applies to `with_session`, Pool convenience
-methods and Pool transaction helpers when their callbacks complete normally.
-An existing callback exception keeps its original priority. A transaction
-already confirmed as `Committed` retains that status in its `TransactionRecord`.
+If cancellation arrives during protected transaction or savepoint rollback, a
+prepared handle's release or session return (including `DISCARD ALL` and
+initialization), the scope finishes bounded cleanup and propagates cancellation
+before user code can resume, whether cleanup succeeds or fails. This applies to
+Session transactions, named savepoints, nested transactions, `with_session` and
+Pool convenience methods when their callbacks return normally, including a
+business `Err`. An existing callback exception keeps its original priority.
+Rollback records `RolledBack` after success or `OutcomeUnknown` after a cleanup
+timeout; cancellation does not change that result. A transaction already
+confirmed as `Committed` retains that status in its `TransactionRecord`.
 
 ## Session isolation and hooks
 
