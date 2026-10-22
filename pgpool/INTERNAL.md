@@ -75,6 +75,16 @@ ROLLBACK and savepoint RELEASE produce distinct statuses. Missing decisive
 responses retire the socket and report unknown outcome; a recorded COMMIT
 survives loss of ReadyForQuery. Connection reuse is a separate decision.
 
+On the normal return path, `transaction_scope` checks pending cancellation after
+completion handling and before clearing the cleanup budget. Cancellation received
+during protected rollback therefore propagates before caller code resumes, even
+when the callback returned a business Err and rollback cleanup timed out. Session
+transactions, named savepoints and nested transactions share this check. Without
+cancellation, the business Err is preserved even if cleanup fails; error unwinding
+keeps an existing callback exception. Rollback records remain `RolledBack` on
+success or `OutcomeUnknown` on failure. Cancellation unwind retains the shared
+cleanup budget for enclosing rollback and session return.
+
 Before completion SQL, transaction/savepoint exit synchronously checks its own
 `active_ops`. A nonzero count sets `releasing`, retains `OperationInProgress`
 as the retirement cause and aborts the physical client without suspension.
@@ -117,6 +127,9 @@ failures; `prepared_cancel_wbtest.mbt` covers cancellation during release.
 `release_cancel_wbtest.mbt` covers session-return cancellation during reset and
 initialization, callback exception priority, capacity restoration, reuse and
 confirmed transaction records across Pool entry points.
+`transaction_cancel_wbtest.mbt` covers cancellation during successful or timed-out
+rollback across Session transactions, named savepoints and nested transactions,
+including caller continuation, error priority, records, reuse and capacity.
 `tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
 savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL

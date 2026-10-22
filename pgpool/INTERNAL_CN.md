@@ -47,6 +47,13 @@ TransactionRecord 独立于事件队列。COMMIT 发送前取消则回滚；可�
 真实结果，不追加 ROLLBACK。COMMIT、ROLLBACK、RELEASE 分别记录提交、回滚和
 保存点释放。响应缺失记录未知并淘汰连接；已收到 COMMIT 标签后断连仍保留已提交。
 
+`transaction_scope` 在正常返回路径的事务完成处理后、清理预算重置前检查挂起的取消。
+因此在受保护回滚期间收到的取消，会在调用方继续执行前传播，即使回调返回业务 Err、
+回滚清理超时也一样。Session 事务、命名保存点和嵌套事务共用此检查。没有取消时，
+即使清理失败仍返回原业务 Err；异常退出仍保留已有回调异常。回滚成功记录 RolledBack，
+失败记录 OutcomeUnknown，取消不改变完成记录。取消解栈保留共享清理预算，供外层回滚
+和 Session 归还继续使用。
+
 事务或保存点退出时，必须在完成 SQL 前同步检查自身 `active_ops`。仍有活动子任务
 属于作用域使用错误：设置 releasing，保留 `OperationInProgress` 诊断并立即 abort，
 整个检查不能暂停。仅将 InProgress 记录改为 OutcomeUnknown 并通知完成；异常清理和
@@ -81,3 +88,5 @@ stream_error_wbtest.mbt 区分 SQL、同步和 Close 失败；prepared_cancel_wb
 真实 PostgreSQL 后端复用、保存点回滚和 prepared 缓存失效。
 release_cancel_wbtest.mbt 覆盖 reset 和初始化期间的归还取消、回调异常优先级、
 容量恢复、连接复用，以及各 Pool 入口下已确认的事务完成记录。
+transaction_cancel_wbtest.mbt 覆盖 Session 事务、命名保存点和嵌套事务在回滚成功或
+超时期间收到取消时的调用方后续代码、错误优先级、完成记录、连接复用及容量归还。
