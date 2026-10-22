@@ -3,9 +3,9 @@ name = "moonbit-community/postgres"
 version = "0.1.2"
 
 import {
-  "moonbitlang/x@0.5.5",
-  "moonbit-community/unicode@0.5.2",
-  "moonbitlang/async@0.22.4",
+  "moonbitlang/x@0.5.6",
+  "moonbitlang/async@0.22.5",
+  "moonbit-community/unicode-normalization@0.6.0",
 }
 
 readme = "README.md"
