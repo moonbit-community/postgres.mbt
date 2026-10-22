@@ -7,9 +7,9 @@ import {
 }
 
 // Values
-pub fn[T] bind(BytesView, BytesView, Iter[Int], Iter[T], (T, @buffer.Buffer) -> @protocol.IsNull raise @protocol.ProtocolError, Iter[Int], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+pub fn[T] bind(BytesView, BytesView, Iter[Int32], Iter[T], (T, @buffer.Buffer) -> @protocol.IsNull raise @protocol.ProtocolError, Iter[Int32], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
-pub fn cancel_request(Int, Int, @buffer.Buffer) -> Unit
+pub fn cancel_request(Int32, Int32, @buffer.Buffer) -> Unit
 
 pub fn close(Byte, BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
@@ -19,11 +19,11 @@ pub fn copy_fail(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolErro
 
 pub fn describe(Byte, BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
-pub fn execute(BytesView, Int, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+pub fn execute(BytesView, Int32, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
 pub fn flush(@buffer.Buffer) -> Unit
 
-pub fn parse(BytesView, BytesView, Iter[UInt], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
+pub fn parse(BytesView, BytesView, Iter[UInt32], @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
 pub fn password_message(BytesView, @buffer.Buffer) -> Unit raise @protocol.ProtocolError
 
@@ -46,7 +46,7 @@ pub fn terminate(@buffer.Buffer) -> Unit
 // Types and methods
 pub struct CopyData {
   buf : Bytes
-  len : Int
+  len : Int32
 }
 pub fn CopyData::new(BytesView) -> Self raise @protocol.ProtocolError
 pub fn CopyData::write(Self, @buffer.Buffer) -> Unit

@@ -34,15 +34,15 @@ pub struct Config {
   ssl_mode : @client.SslMode?
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
-  connect_timeout_ms : Int?
+  connect_timeout_ms : Int32?
   keepalives : Bool?
-  keepalives_idle_s : Int?
+  keepalives_idle_s : Int32?
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
   // private fields
 } derive(Eq)
-pub fn Config::Config(Array[ConnectionTarget], user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int, target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self raise
+pub fn Config::Config(Array[ConnectionTarget], user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int32, keepalives? : Bool, keepalives_idle_s? : Int32, target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config]
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::targets(Self) -> ArrayView[ConnectionTarget]
@@ -51,9 +51,9 @@ pub impl @debug.Debug for Config
 pub struct ConnectionTarget {
   host : String?
   hostaddr : String?
-  port : Int
+  port : Int32
 } derive(Eq, @debug.Debug)
-pub fn ConnectionTarget::ConnectionTarget(host? : String, hostaddr? : String, port? : Int) -> Self
+pub fn ConnectionTarget::ConnectionTarget(host? : String, hostaddr? : String, port? : Int32) -> Self
 
 type Connector
 pub fn Connector::Connector(async (@client.Config) -> (@client.Client, @client.ClientExecutor)) -> Self
@@ -90,14 +90,14 @@ pub async fn Pool::query_one(Self, String, params? : Array[&@client.ToSql]) -> @
 pub async fn Pool::query_opt(Self, String, params? : Array[&@client.ToSql]) -> @client.Row?
 pub async fn Pool::query_typed_all(Self, String, Array[@client.Type], params? : Array[&@client.ToSql]) -> Array[@client.Row]
 pub async fn Pool::ready(Self) -> Unit
-pub fn Pool::resize(Self, Int) -> Unit raise
+pub fn Pool::resize(Self, Int32) -> Unit raise
 pub fn Pool::status(Self) -> Status
 pub async fn[T] Pool::with_session(Self, async (Session) -> T) -> T
 pub async fn[T] Pool::with_transaction(Self, async (Transaction) -> T, options? : TransactionOptions) -> T
 pub impl GenericClient for Pool
 
 pub struct PoolAsyncMessage {
-  connection_id : Int
+  connection_id : Int32
   message : @client.AsyncMessage
 } derive(Eq, @debug.Debug)
 pub fn PoolAsyncMessage::equal(Self, Self) -> Bool
@@ -105,14 +105,14 @@ pub fn PoolAsyncMessage::not_equal(Self, Self) -> Bool
 pub fn PoolAsyncMessage::to_repr(Self) -> @debug.Repr
 
 pub struct PoolConfig {
-  max_size : Int
+  max_size : Int32
   timeouts : Timeouts
   queue_mode : QueueMode
   recycling_method : RecyclingMethod
-  statement_cache_capacity : Int
-  async_message_capacity : Int
+  statement_cache_capacity : Int32
+  async_message_capacity : Int32
 } derive(Eq, @debug.Debug)
-pub fn PoolConfig::PoolConfig(Int, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int, async_message_capacity? : Int) -> Self raise
+pub fn PoolConfig::PoolConfig(Int32, timeouts? : Timeouts, queue_mode? : QueueMode, recycling_method? : RecyclingMethod, statement_cache_capacity? : Int32, async_message_capacity? : Int32) -> Self raise
 
 type PoolExecutor
 pub async fn PoolExecutor::run(Self) -> Unit
@@ -172,10 +172,10 @@ pub async fn[T] Session::with_typed_stream(Self, String, Array[@client.Type], pa
 pub impl GenericClient for Session
 
 pub struct Status {
-  size : Int
-  available : Int
-  waiting : Int
-  max_size : Int
+  size : Int32
+  available : Int32
+  waiting : Int32
+  max_size : Int32
   closed : Bool
 } derive(Eq, @debug.Debug)
 
@@ -193,11 +193,11 @@ pub enum TimeoutKind {
 } derive(Eq, @debug.Debug)
 
 pub struct Timeouts {
-  wait_ms : Int?
-  create_ms : Int?
-  recycle_ms : Int?
+  wait_ms : Int32?
+  create_ms : Int32?
+  recycle_ms : Int32?
 } derive(Eq, @debug.Debug)
-pub fn Timeouts::Timeouts(wait_ms? : Int?, create_ms? : Int?, recycle_ms? : Int?) -> Self
+pub fn Timeouts::Timeouts(wait_ms? : Int32?, create_ms? : Int32?, recycle_ms? : Int32?) -> Self
 
 type Transaction
 pub async fn Transaction::batch_execute(Self, String) -> Unit
