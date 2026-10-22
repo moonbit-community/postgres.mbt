@@ -7,17 +7,17 @@ import {
 }
 
 // Values
-pub fn checked_i16(Int) -> Int16 raise ProtocolError
+pub fn checked_i16(Int32) -> Int16 raise ProtocolError
 
-pub fn checked_i32(Int) -> Int raise ProtocolError
+pub fn checked_i32(Int32) -> Int32 raise ProtocolError
 
-pub fn i16_from_usize(Int) -> Int16 raise ProtocolError
+pub fn i16_from_usize(Int32) -> Int16 raise ProtocolError
 
-pub fn i32_from_u32(UInt) -> Int
+pub fn i32_from_u32(UInt32) -> Int32
 
-pub fn i32_from_usize(Int) -> Int raise ProtocolError
+pub fn i32_from_usize(Int32) -> Int32 raise ProtocolError
 
-pub fn u32_from_i32(Int) -> UInt raise ProtocolError
+pub fn u32_from_i32(Int32) -> UInt32 raise ProtocolError
 
 pub fn utf8_encode(String) -> Bytes
 
@@ -35,23 +35,23 @@ pub(all) suberror ProtocolError {
 // Types and methods
 pub struct ByteReader {
   buf : BytesView
-  mut idx : Int
+  mut idx : Int32
 }
 pub fn ByteReader::is_empty(Self) -> Bool
 pub fn ByteReader::new(BytesView) -> Self
 pub fn ByteReader::read_all(Self) -> BytesView
-pub fn ByteReader::read_bytes(Self, Int) -> BytesView raise ProtocolError
+pub fn ByteReader::read_bytes(Self, Int32) -> BytesView raise ProtocolError
 pub fn ByteReader::read_cstr(Self) -> Bytes raise ProtocolError
 pub fn ByteReader::read_f32_be(Self) -> Float raise ProtocolError
 pub fn ByteReader::read_f64_be(Self) -> Double raise ProtocolError
-pub fn ByteReader::read_i16_be(Self) -> Int raise ProtocolError
-pub fn ByteReader::read_i32_be(Self) -> Int raise ProtocolError
+pub fn ByteReader::read_i16_be(Self) -> Int32 raise ProtocolError
+pub fn ByteReader::read_i32_be(Self) -> Int32 raise ProtocolError
 pub fn ByteReader::read_i64_be(Self) -> Int64 raise ProtocolError
 pub fn ByteReader::read_u16_be(Self) -> UInt16 raise ProtocolError
-pub fn ByteReader::read_u32_be(Self) -> UInt raise ProtocolError
+pub fn ByteReader::read_u32_be(Self) -> UInt32 raise ProtocolError
 pub fn ByteReader::read_u64_be(Self) -> UInt64 raise ProtocolError
 pub fn ByteReader::read_u8(Self) -> Byte raise ProtocolError
-pub fn ByteReader::remaining(Self) -> Int
+pub fn ByteReader::remaining(Self) -> Int32
 
 pub(all) enum IsNull {
   Yes
@@ -61,6 +61,6 @@ pub(all) enum IsNull {
 // Type aliases
 pub type Lsn = UInt64
 
-pub type Oid = UInt
+pub type Oid = UInt32
 
 // Traits

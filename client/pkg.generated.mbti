@@ -24,7 +24,7 @@ pub suberror ClientError {
   Encode(String)
   Decode(String)
   WrongType(WrongTypeError)
-  UnsupportedRecursiveType(UInt)
+  UnsupportedRecursiveType(UInt32)
   ColumnNotFound(String)
   RowCount(String)
   UnfinishedChildTransaction
@@ -40,7 +40,7 @@ pub enum AsyncMessage {
 
 type CancelToken
 pub async fn CancelToken::cancel(Self) -> Unit
-pub fn CancelToken::process_id(Self) -> Int
+pub fn CancelToken::process_id(Self) -> Int32
 
 pub(all) enum ChannelBinding {
   Disable
@@ -58,7 +58,7 @@ pub async fn Client::close(Self) -> Unit
 pub async fn Client::copy_in(Self, String) -> CopyInSink
 pub async fn Client::copy_out(Self, String) -> CopyOutStream
 pub fn Client::create(Config) -> (Self, ClientExecutor)
-pub fn Client::create_with_async_message_capacity(Config, Int) -> (Self, ClientExecutor) raise
+pub fn Client::create_with_async_message_capacity(Config, Int32) -> (Self, ClientExecutor) raise
 pub fn Client::dropped_async_messages(Self) -> Int64
 pub async fn Client::execute(Self, String, params? : Array[&ToSql]) -> UInt64
 pub async fn Client::execute_raw(Self, Statement, params? : Array[&ToSql]) -> UInt64
@@ -91,18 +91,18 @@ pub async fn ClientExecutor::run(Self) -> Unit
 
 pub struct Column {
   name : String
-  table_oid : UInt
-  column_id : Int
+  table_oid : UInt32
+  column_id : Int32
   type_ : Type
-  type_size : Int
-  type_modifier : Int
+  type_size : Int32
+  type_modifier : Int32
   format : WireFormat
 } derive(Eq, @debug.Debug)
 
 pub struct Config {
   host : String
   hostaddr : String?
-  port : Int
+  port : Int32
   user : String
   database : String
   password : String?
@@ -111,12 +111,12 @@ pub struct Config {
   channel_binding : ChannelBinding
   application_name : String
   options : String?
-  connect_timeout_ms : Int?
+  connect_timeout_ms : Int32?
   keepalives : Bool?
-  keepalives_idle_s : Int?
+  keepalives_idle_s : Int32?
 } derive(Eq)
-pub fn Config::Config(String, hostaddr? : String, port? : Int, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int, keepalives? : Bool, keepalives_idle_s? : Int) -> Self
-pub fn Config::new_internal(String, String?, Int, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int?, Bool?, Int?) -> Self
+pub fn Config::Config(String, hostaddr? : String, port? : Int32, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, connect_timeout_ms? : Int32, keepalives? : Bool, keepalives_idle_s? : Int32) -> Self
+pub fn Config::new_internal(String, String?, Int32, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int32?, Bool?, Int32?) -> Self
 pub impl @debug.Debug for Config
 
 type CopyInSink
@@ -143,12 +143,12 @@ pub struct DatabaseError {
   column : String?
   datatype : String?
   constraint : String?
-  position : UInt?
-  internal_position : UInt?
+  position : UInt32?
+  internal_position : UInt32?
   internal_query : String?
   where_ : String?
   file : String?
-  line : UInt?
+  line : UInt32?
   routine : String?
 } derive(Eq, @debug.Debug)
 
@@ -176,7 +176,7 @@ pub enum Kind {
 } derive(Eq, @debug.Debug)
 
 pub struct Notification {
-  process_id : Int
+  process_id : Int32
   channel : String
   payload : String
 } derive(Eq, @debug.Debug)
@@ -184,7 +184,7 @@ pub struct Notification {
 type Portal
 pub fn Portal::columns(Self) -> ArrayView[Column]
 pub async fn Portal::execute(Self) -> UInt64
-pub async fn[T] Portal::with_stream(Self, Int, async (RowStream) -> T) -> T
+pub async fn[T] Portal::with_stream(Self, Int32, async (RowStream) -> T) -> T
 
 pub struct QuerySummary {
   command_tag : String
@@ -194,15 +194,15 @@ pub struct QuerySummary {
 
 type Row derive(Eq, @debug.Debug)
 pub fn Row::columns(Self) -> ArrayView[Column]
-pub fn[T : FromSql] Row::get(Self, Int) -> T raise
+pub fn[T : FromSql] Row::get(Self, Int32) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
-pub fn Row::get_raw(Self, Int) -> Bytes?
+pub fn Row::get_raw(Self, Int32) -> Bytes?
 pub fn Row::get_raw_name(Self, String) -> Bytes? raise
-pub fn Row::get_text(Self, Int) -> String? raise
+pub fn Row::get_text(Self, Int32) -> String? raise
 pub fn Row::get_text_name(Self, String) -> String? raise
-pub fn Row::index_of(Self, String) -> Int?
-pub fn Row::len(Self) -> Int
-pub fn[T : FromSql] Row::try_get(Self, Int) -> T? raise
+pub fn Row::index_of(Self, String) -> Int32?
+pub fn Row::len(Self) -> Int32
+pub fn[T : FromSql] Row::try_get(Self, Int32) -> T? raise
 pub fn[T : FromSql] Row::try_get_name(Self, String) -> T? raise
 pub fn Row::values(Self) -> ArrayView[Bytes?]
 
@@ -230,10 +230,10 @@ pub enum SimpleQueryMessage {
 
 type SimpleQueryRow derive(Eq, @debug.Debug)
 pub fn SimpleQueryRow::columns(Self) -> ArrayView[String]
-pub fn SimpleQueryRow::get(Self, Int) -> String?
+pub fn SimpleQueryRow::get(Self, Int32) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
-pub fn SimpleQueryRow::index_of(Self, String) -> Int?
-pub fn SimpleQueryRow::len(Self) -> Int
+pub fn SimpleQueryRow::index_of(Self, String) -> Int32?
+pub fn SimpleQueryRow::len(Self) -> Int32
 pub fn SimpleQueryRow::values(Self) -> ArrayView[String?]
 
 type SimpleQueryStream
@@ -282,7 +282,7 @@ pub struct TransactionOptions {
 pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
 pub struct Type {
-  oid : UInt
+  oid : UInt32
   name : String
   schema : String?
   kind : Kind
@@ -316,7 +316,7 @@ pub fn Type::time() -> Self
 pub fn Type::timestamp() -> Self
 pub fn Type::timestamp_array() -> Self
 pub fn Type::timestamptz() -> Self
-pub fn Type::unknown(UInt, name? : String) -> Self
+pub fn Type::unknown(UInt32, name? : String) -> Self
 pub fn Type::uuid() -> Self
 pub fn Type::uuid_array() -> Self
 pub fn Type::varchar() -> Self
@@ -342,9 +342,9 @@ pub(open) trait FromSql {
   fn from_sql_null(Type, WireFormat) -> Self raise = _
 }
 pub impl FromSql for Bool
-pub impl FromSql for Int
+pub impl FromSql for Int32
 pub impl FromSql for Int64
-pub impl FromSql for UInt
+pub impl FromSql for UInt32
 pub impl FromSql for Float
 pub impl FromSql for Double
 pub impl FromSql for String
@@ -360,9 +360,9 @@ pub(open) trait ToSql {
   fn to_sql(Self, Type, @buffer.Buffer) -> @protocol.IsNull raise
 }
 pub impl ToSql for Bool
-pub impl ToSql for Int
+pub impl ToSql for Int32
 pub impl ToSql for Int64
-pub impl ToSql for UInt
+pub impl ToSql for UInt32
 pub impl ToSql for Float
 pub impl ToSql for Double
 pub impl ToSql for String

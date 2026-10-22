@@ -77,20 +77,20 @@ pub struct AuthenticationSaslFinalBody {
 pub fn AuthenticationSaslFinalBody::data(Self) -> BytesView
 
 pub struct BackendKeyDataBody {
-  process_id : Int
-  secret_key : Int
+  process_id : Int32
+  secret_key : Int32
 }
 
 pub struct ByteRange {
-  start : Int
-  end : Int
+  start : Int32
+  end : Int32
 }
 
 pub struct ColumnFormats {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
-pub fn ColumnFormats::next(Self) -> Int? raise @protocol.ProtocolError
+pub fn ColumnFormats::next(Self) -> Int32? raise @protocol.ProtocolError
 
 pub struct CommandCompleteBody {
   tag : Bytes
@@ -105,29 +105,29 @@ pub fn CopyDataBody::data(Self) -> BytesView
 
 pub struct CopyInResponseBody {
   format : Byte
-  len : Int
+  len : Int32
   storage : Bytes
 }
 pub fn CopyInResponseBody::column_formats(Self) -> ColumnFormats
 
 pub struct CopyOutResponseBody {
   format : Byte
-  len : Int
+  len : Int32
   storage : Bytes
 }
 pub fn CopyOutResponseBody::column_formats(Self) -> ColumnFormats
 
 pub struct DataRowBody {
   storage : Bytes
-  len : Int
+  len : Int32
 } derive(Eq, @debug.Debug)
 pub fn DataRowBody::buffer(Self) -> BytesView
 pub fn DataRowBody::ranges(Self) -> DataRowRanges
 
 pub struct DataRowRanges {
   mut buf : BytesView
-  len : Int
-  mut remaining : Int
+  len : Int32
+  mut remaining : Int32
 }
 pub fn DataRowRanges::next(Self) -> ByteRange?? raise @protocol.ProtocolError
 
@@ -149,25 +149,25 @@ pub fn ErrorResponseBody::fields(Self) -> ErrorFields
 
 pub struct Field {
   name : Bytes
-  table_oid : UInt
-  column_id : Int
-  type_oid : UInt
-  type_size : Int
-  type_modifier : Int
-  format : Int
+  table_oid : UInt32
+  column_id : Int32
+  type_oid : UInt32
+  type_size : Int32
+  type_modifier : Int32
+  format : Int32
 }
 pub fn Field::name_bytes(Self) -> BytesView
 pub fn Field::name_str(Self) -> String raise @protocol.ProtocolError
 
 pub struct Fields {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
 pub fn Fields::next(Self) -> Field? raise @protocol.ProtocolError
 
 pub struct Header {
   tag : Byte
-  len : Int
+  len : Int32
 } derive(@debug.Debug)
 pub fn Header::parse(BytesView) -> Self? raise @protocol.ProtocolError
 
@@ -212,7 +212,7 @@ pub struct NoticeResponseBody {
 pub fn NoticeResponseBody::fields(Self) -> ErrorFields
 
 pub struct NotificationResponseBody {
-  process_id : Int
+  process_id : Int32
   channel : Bytes
   message : Bytes
 }
@@ -223,7 +223,7 @@ pub fn NotificationResponseBody::message_str(Self) -> String raise @protocol.Pro
 
 pub struct ParameterDescriptionBody {
   storage : Bytes
-  len : Int
+  len : Int32
 }
 pub fn ParameterDescriptionBody::parameters(Self) -> Parameters
 
@@ -238,13 +238,13 @@ pub fn ParameterStatusBody::value_str(Self) -> String raise @protocol.ProtocolEr
 
 pub struct Parameters {
   mut buf : BytesView
-  mut remaining : Int
+  mut remaining : Int32
 }
-pub fn Parameters::next(Self) -> UInt? raise @protocol.ProtocolError
+pub fn Parameters::next(Self) -> UInt32? raise @protocol.ProtocolError
 
 pub struct ParsedMessage {
   message : Message
-  consumed : Int
+  consumed : Int32
 }
 
 pub struct ReadyForQueryBody {
@@ -253,7 +253,7 @@ pub struct ReadyForQueryBody {
 
 pub struct RowDescriptionBody {
   storage : Bytes
-  len : Int
+  len : Int32
 }
 pub fn RowDescriptionBody::fields(Self) -> Fields
 
