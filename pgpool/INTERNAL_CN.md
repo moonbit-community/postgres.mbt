@@ -13,7 +13,7 @@ Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用�
 保留作用域计数，实际准备或执行时才加锁。流和 COPY 持有连接至回调退出，句柄
 另外检查过期和重叠调用。逃逸到外层任务的活动操作会导致连接淘汰，不能进入下一次借用。
 
-事务、prepared 和 Session 归还共用 `with_scope_exit` 退出协议。
+事务、prepared、stream/COPY 和 Session 归还共用 `with_scope_exit` 退出协议。
 body 在可取消环境中执行，调用前后检查取消；局部 `errdefer` 受保护地执行
 `on_unwind` 并忽略其异常，保留原回调异常或原生取消。正常返回则受保护地执行
 `on_return`，将其普通异常保存为内部 `Result[Unit, Error]`，退出保护后必经取消检查，
@@ -43,13 +43,16 @@ hook 失败则立即结束获取。最终建连错误保存各目标、阶段、
 嵌套监督器先取消工作任务，再通过 `cancel_active` 加入取消流程并等待协议清理。
 只有取消流程的所有者发送取消包并释放栅栏，其他监督器只能等待。
 预算耗尽时 abort，仍须等待工作任务退出后才释放连接锁或流锁。
+stream/COPY 回调运行在受监督的工作任务中。回调抛出普通异常时，先发布原异常，
+再开始作用域收尾；等待者开始解栈时保存这个异常，完成清理和取消栅栏后保留它。
+若异常在等待者已开始取消之后才出现（例如流方法稍后完成超时解栈），不能覆盖取消。
+正常返回后的收尾错误和原生取消不进入这条错误传递路径。
 
 一次异常解栈共用 `cleanup_deadline`，drain、嵌套 rollback、reset、初始化 hook
 不能各自领取新的宽限期。watchdog 在 raw I/O 的取消保护之外执行 abort。
 重置 hook 使用 cleanup_mode，不能通过嵌套查询重置预算。调用者已处理错误后，
 下一次真正接受的业务操作可以开始新的清理周期。
-事务或 prepared 回调作用域只能在 `with_scope_exit` 正常返回后重置已结束的清理周期；
-失败或取消
+子回调作用域只能在 `with_scope_exit` 正常返回后重置已结束的清理周期；失败或取消
 解栈保留同一个预算，即使子作用域的清理本身成功也不能重置。
 
 事务回调以 Ok/Err 表达提交或回滚意图，完成由 helper 管理。单次使用的
@@ -104,3 +107,5 @@ transaction_completion_wbtest.mbt 覆盖有无取消时 COMMIT/RELEASE 的成功
 断连、超时，以及命令标签已收到但 ReadyForQuery 丢失的情况。取消 COMMIT 后清理
 超时的回归测试同时断言 catch 和后续业务代码均未执行。
 scope_exit_wbtest.mbt 验证回调前后的取消检查及只执行一次的收尾。
+stream_cancel_wbtest.mbt 覆盖所有流和 COPY 入口的退出优先级矩阵，以及监督器
+保留更早回调异常的行为。

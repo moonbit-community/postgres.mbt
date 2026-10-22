@@ -121,6 +121,7 @@ async fn[T] ClientLeaseState::supervise(
   f : async () -> T,
   deadline? : Deadline,
   protect~ : Bool = true,
+  callback_error? : @ref.Ref[Error?],
 ) -> T {
   let deadline = earlier_deadline(self.deadline, deadline)
   ignore(remaining_ms(deadline, Query))
@@ -136,7 +137,7 @@ async fn[T] ClientLeaseState::supervise(
     self.active_control.val = None
     client.end_request_control()
   }
-  self.supervise_worker(f, deadline?, protect~)
+  self.supervise_worker(f, deadline?, protect~, callback_error?)
 }
 
 ///|
@@ -148,6 +149,7 @@ async fn[T] ClientLeaseState::supervise_worker(
   f : async () -> T,
   deadline? : Deadline,
   protect~ : Bool = true,
+  callback_error? : @ref.Ref[Error?],
 ) -> T {
   let deadline = earlier_deadline(self.deadline, deadline)
   ignore(remaining_ms(deadline, Query))
@@ -164,22 +166,38 @@ async fn[T] ClientLeaseState::supervise_worker(
         f()
       }
     })
-    errdefer (if !done.val {
-      @async.protect_from_cancel(() => {
-        worker.cancel()
-        self.cleanup_best_effort(() => {
-          self.cancel_active()
+    errdefer {
+      // Only an exception already observed before waiter unwind has priority.
+      // A method timeout can finish unwinding inside the worker after outer
+      // cancellation has begun; that later error must not replace cancellation.
+      let original_error = match callback_error {
+        Some(error) => error.val
+        None => None
+      }
+      if !done.val {
+        @async.protect_from_cancel(() => {
+          worker.cancel()
+          self.cleanup_best_effort(() => {
+            self.cancel_active()
+            ignore(worker.wait()) catch {
+              _ => ()
+            }
+          })
+          // Cleanup aborts the client on expiry. Join the worker before releasing
+          // any gate, even when the bounded wait ended before protected I/O did.
           ignore(worker.wait()) catch {
             _ => ()
           }
         })
-        // Cleanup aborts the client on expiry. Join the worker before releasing
-        // any gate, even when the bounded wait ended before protected I/O did.
-        ignore(worker.wait()) catch {
-          _ => ()
-        }
-      })
-    })
+      }
+      // A resource callback can already be unwinding inside the worker when
+      // the waiter is cancelled. Preserve that earlier exception only after
+      // joining the same bounded cleanup and cancellation fence. Cancellation
+      // itself and normal-return cleanup errors are never stored here.
+      if original_error is Some(error) {
+        raise error
+      }
+    }
     with_deadline(deadline, Query, () => worker.wait())
   })
 }
@@ -198,12 +216,19 @@ async fn[T] Session::run_operation(
 ///|
 async fn[T] Session::run_scoped_operation(
   self : Session,
-  op : async (@client.Client) -> T,
+  op : async (@client.Client, @ref.Ref[Error?]) -> T,
   deadline? : Deadline,
 ) -> T {
   let client = self.state.begin_operation()
   defer self.state.finish_operation()
-  self.state.supervise(client, () => op(client), deadline?, protect=false)
+  let callback_error = Ref(None)
+  self.state.supervise(
+    client,
+    () => op(client, callback_error),
+    deadline?,
+    protect=false,
+    callback_error~,
+  )
 }
 
 ///|
@@ -219,7 +244,7 @@ async fn[T] Transaction::run_operation(
 ///|
 async fn[T] Transaction::run_scoped_operation(
   self : Transaction,
-  op : async (@client.Client) -> T,
+  op : async (@client.Client, @ref.Ref[Error?]) -> T,
   deadline? : Deadline,
 ) -> T {
   let session : Session = { state: self.state, }
