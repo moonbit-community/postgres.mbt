@@ -20,7 +20,7 @@ pub const SCRAM_SHA_256_PLUS : Bytes = b"SCRAM-SHA-256-PLUS"
 ///|
 /// Normalize a password for SCRAM.
 /// Applies SASLprep-style mapping and prohibited-character checks, using
-/// Unicode 16.0 NFKC rather than the Unicode 3.2 profile required by RFC 4013.
+/// Unicode 18.0 NFKC rather than the Unicode 3.2 profile required by RFC 4013.
 /// This is not a complete RFC 4013 implementation: bidirectional-string and
 /// Unicode 3.2 unassigned-code-point checks are not performed.
 ///
