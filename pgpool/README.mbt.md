@@ -98,9 +98,10 @@ outside the cancelled task. Statuses are `NotStarted`, `InProgress`, `Committed`
 not mean the top-level transaction committed. Reusing a record raises
 `TransactionRecordUsed`.
 
-The server command tag decides completion. COMMIT returning ROLLBACK raises
-`CommitRolledBack`. A possibly sent COMMIT without a decisive response raises
-`CommitOutcomeUnknown` and retires the connection. The library does not follow
+The server command tag decides completion. Without task cancellation, COMMIT
+returning ROLLBACK raises `CommitRolledBack`. A possibly sent COMMIT without a
+decisive response raises `CommitOutcomeUnknown` and retires the connection.
+The library does not follow
 that uncertain COMMIT with ROLLBACK. A confirmed COMMIT remains recorded even
 when the connection fails before protocol synchronization. Task cancellation
 can still be observed after a confirmed commit: inspect the record to determine
@@ -137,16 +138,27 @@ another borrower only after the owning scope finishes cleanup.
 The completion bound applies to library I/O; application callbacks must
 cooperate with async cancellation. Cleanup errors are diagnostic events and do
 not replace an earlier database error, business `Err`, or callback exception.
-If cancellation arrives during protected transaction or savepoint rollback, a
-prepared handle's release or session return (including `DISCARD ALL` and
-initialization), the scope finishes bounded cleanup and propagates cancellation
-before user code can resume, whether cleanup succeeds or fails. This applies to
-Session transactions, named savepoints, nested transactions, `with_session` and
-Pool convenience methods when their callbacks return normally, including a
-business `Err`. An existing callback exception keeps its original priority.
-Rollback records `RolledBack` after success or `OutcomeUnknown` after a cleanup
-timeout; cancellation does not change that result. A transaction already
-confirmed as `Committed` retains that status in its `TransactionRecord`.
+
+Transactions, prepared handles and session return share one
+exit protocol: run the callback, finish protected cleanup and record its result,
+then check cancellation before returning or reporting a completion error.
+This includes COMMIT, savepoint RELEASE/rollback, statement Close,
+`DISCARD ALL` and session initialization.
+
+| Callback exit | Behavior after cleanup |
+| --- | --- |
+| Normal return, cancellation during cleanup | Propagate native cancellation, even if cleanup fails; an ordinary `catch` cannot resume caller code. |
+| Normal return, no cancellation | Return the value or report the scope's completion error. Session-return cleanup failures remain diagnostic; a transaction business `Err` is preserved. |
+| Exception | Preserve the original callback exception over later cancellation or cleanup errors. |
+| Native cancellation | Finish cleanup and continue propagating native cancellation. |
+
+A transaction business `Err` is a normal callback return requesting rollback,
+so cancellation during rollback still takes precedence. Transaction completion
+and task completion are independent: the `TransactionRecord` is written before
+cancellation propagates. A confirmed `Committed`, `RolledBack` or
+`SavepointReleased` status is retained; missing decisive completion records
+`OutcomeUnknown`. Cancellation unwind shares the remaining cleanup budget with
+enclosing scopes, even when a child's cleanup succeeded.
 
 ## Session isolation and hooks
 

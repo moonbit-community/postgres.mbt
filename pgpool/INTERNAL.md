@@ -19,8 +19,8 @@ callbacks retain the owner gate; their individual methods have another gate
 and an active flag. Cleanup expires the resource first. Escaped concurrent work
 causes retirement, rather than releasing a live socket to another borrower.
 
-`with_scope_exit` owns exit precedence for prepared handles and session-return
-callbacks. It checks cancellation before and after the
+`with_scope_exit` owns exit precedence for transactions, prepared handles
+and session-return callbacks. It checks cancellation before and after the
 cancellable body. A local `errdefer` runs protected `on_unwind` and suppresses
 its errors, retaining the original callback exception or native cancellation.
 Normal completion instead runs protected `on_return`, captures ordinary errors
@@ -72,8 +72,10 @@ allocates the grace period; later drain, rollback, reset and initialization use
 the remaining duration. The watchdog can abort even while a raw operation is
 protected. Cleanup hooks use `cleanup_mode` so their queries cannot renew this
 budget. A new accepted business operation after an error was handled starts a
-new episode. A successful child scope clears its completed episode; failed
-cleanup keeps the same budget for the remaining unwind.
+new episode. A transaction or prepared callback scope clears its completed
+episode only after
+`with_scope_exit` returns normally; failure or cancellation keeps the same
+budget for the remaining unwind, even when that child's cleanup succeeded.
 
 Pooled transactions issue SQL through the same controlled Client path as other
 operations. They do not expose the raw client's manual transaction handles.
@@ -85,15 +87,17 @@ ROLLBACK and savepoint RELEASE produce distinct statuses. Missing decisive
 responses retire the socket and report unknown outcome; a recorded COMMIT
 survives loss of ReadyForQuery. Connection reuse is a separate decision.
 
-On the normal return path, `transaction_scope` checks pending cancellation after
-completion handling and before clearing the cleanup budget. Cancellation received
-during protected rollback therefore propagates before caller code resumes, even
-when the callback returned a business Err and rollback cleanup timed out. Session
-transactions, named savepoints and nested transactions share this check. Without
-cancellation, the business Err is preserved even if cleanup fails; error unwinding
-keeps an existing callback exception. Rollback records remain `RolledBack` on
-success or `OutcomeUnknown` on failure. Cancellation unwind retains the shared
-cleanup budget for enclosing rollback and session return.
+COMMIT/RELEASE and rollback helpers finish protocol handling, diagnostics and
+the independent transaction record before `with_scope_exit` decides how the
+caller exits. The normal-return adapter also owns conditional rollback for
+precommit failures: only a started `InProgress` transaction without active
+children is eligible. A possibly sent COMMIT determines its record before
+raising, so this recovery cannot append ROLLBACK after an unknown outcome.
+A business Err is a normal callback return requesting rollback. Without
+cancellation it survives rollback failure; cancellation during that cleanup
+propagates before caller code resumes. Rollback records remain `RolledBack` on
+success or `OutcomeUnknown` on failure. Confirmed completion records are not
+rewritten by cancellation or later session-return failure.
 
 Before completion SQL, transaction/savepoint exit synchronously checks its own
 `active_ops`. A nonzero count sets `releasing`, retains `OperationInProgress`
@@ -139,8 +143,11 @@ confirmed transaction records across Pool entry points.
 `transaction_cancel_wbtest.mbt` covers cancellation during successful or timed-out
 rollback across Session transactions, named savepoints and nested transactions,
 including caller continuation, error priority, records, reuse and capacity.
-`scope_exit_wbtest.mbt` checks cancellation at the body boundaries and
-exactly-once finalization.
+`transaction_completion_wbtest.mbt` covers COMMIT/RELEASE success, SQL errors,
+disconnects, timeouts and tags without ReadyForQuery, both with and without
+cancellation. The cancelled-COMMIT timeout regression checks that neither catch
+nor subsequent caller code executes. `scope_exit_wbtest.mbt` checks cancellation
+at the body boundaries and exactly-once finalization.
 `tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
 savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL

@@ -13,7 +13,7 @@ Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用�
 保留作用域计数，实际准备或执行时才加锁。流和 COPY 持有连接至回调退出，句柄
 另外检查过期和重叠调用。逃逸到外层任务的活动操作会导致连接淘汰，不能进入下一次借用。
 
-prepared 和 Session 归还共用 `with_scope_exit` 退出协议。
+事务、prepared 和 Session 归还共用 `with_scope_exit` 退出协议。
 body 在可取消环境中执行，调用前后检查取消；局部 `errdefer` 受保护地执行
 `on_unwind` 并忽略其异常，保留原回调异常或原生取消。正常返回则受保护地执行
 `on_return`，将其普通异常保存为内部 `Result[Unit, Error]`，退出保护后必经取消检查，
@@ -48,18 +48,22 @@ hook 失败则立即结束获取。最终建连错误保存各目标、阶段、
 不能各自领取新的宽限期。watchdog 在 raw I/O 的取消保护之外执行 abort。
 重置 hook 使用 cleanup_mode，不能通过嵌套查询重置预算。调用者已处理错误后，
 下一次真正接受的业务操作可以开始新的清理周期。
+事务或 prepared 回调作用域只能在 `with_scope_exit` 正常返回后重置已结束的清理周期；
+失败或取消
+解栈保留同一个预算，即使子作用域的清理本身成功也不能重置。
 
 事务回调以 Ok/Err 表达提交或回滚意图，完成由 helper 管理。单次使用的
 TransactionRecord 独立于事件队列。COMMIT 发送前取消则回滚；可能发送后只等待
 真实结果，不追加 ROLLBACK。COMMIT、ROLLBACK、RELEASE 分别记录提交、回滚和
 保存点释放。响应缺失记录未知并淘汰连接；已收到 COMMIT 标签后断连仍保留已提交。
 
-`transaction_scope` 在正常返回路径的事务完成处理后、清理预算重置前检查挂起的取消。
-因此在受保护回滚期间收到的取消，会在调用方继续执行前传播，即使回调返回业务 Err、
-回滚清理超时也一样。Session 事务、命名保存点和嵌套事务共用此检查。没有取消时，
-即使清理失败仍返回原业务 Err；异常退出仍保留已有回调异常。回滚成功记录 RolledBack，
-失败记录 OutcomeUnknown，取消不改变完成记录。取消解栈保留共享清理预算，供外层回滚
-和 Session 归还继续使用。
+COMMIT/RELEASE 和 rollback helper 先完成协议操作、诊断和独立的事务记录，
+再由 `with_scope_exit` 决定调用方如何退出。正常收尾适配器还负责提交前失败的条件
+回滚：只有已开始、仍为 InProgress 且没有活动子任务的事务才允许回滚。COMMIT
+可能发送后必须先确定完成记录再抛错，因此此恢复不能在未知结果后追加 ROLLBACK。
+业务 Err 属于正常返回，并请求回滚；没有取消时即使回滚失败也保留业务 Err，
+收尾期间到达的取消则必须在调用方继续执行前传播。回滚成功记录 RolledBack，失败
+记录 OutcomeUnknown；取消及之后的 Session 归还失败不能改写已确认的完成记录。
 
 事务或保存点退出时，必须在完成 SQL 前同步检查自身 `active_ops`。仍有活动子任务
 属于作用域使用错误：设置 releasing，保留 `OperationInProgress` 诊断并立即 abort，
@@ -96,4 +100,7 @@ release_cancel_wbtest.mbt 覆盖 reset 和初始化期间的归还取消、回�
 容量恢复、连接复用，以及各 Pool 入口下已确认的事务完成记录。
 transaction_cancel_wbtest.mbt 覆盖 Session 事务、命名保存点和嵌套事务在回滚成功或
 超时期间收到取消时的调用方后续代码、错误优先级、完成记录、连接复用及容量归还。
+transaction_completion_wbtest.mbt 覆盖有无取消时 COMMIT/RELEASE 的成功、SQL 错误、
+断连、超时，以及命令标签已收到但 ReadyForQuery 丢失的情况。取消 COMMIT 后清理
+超时的回归测试同时断言 catch 和后续业务代码均未执行。
 scope_exit_wbtest.mbt 验证回调前后的取消检查及只执行一次的收尾。

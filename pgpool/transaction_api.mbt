@@ -104,8 +104,8 @@ async fn Transaction::rollback_internal(self : Transaction) -> Unit {
 ///|
 /// Once COMMIT may have been written, only the actual server tag decides the
 /// record. Never issue ROLLBACK in response to a missing COMMIT response.
+/// The scope exit protects completion and propagates cancellation afterwards.
 async fn Transaction::commit_internal(self : Transaction) -> Unit {
-  check_pending_cancellation()
   ignore(remaining_ms(self.state.deadline, Query))
   let client = self.state.begin_operation()
   defer self.state.finish_operation()
@@ -115,8 +115,7 @@ async fn Transaction::commit_internal(self : Transaction) -> Unit {
   defer {
     self.state.released.val = true
   }
-  let failure : @ref.Ref[Error?] = Ref(None)
-  @async.protect_from_cancel(() => {
+  let failure = try
     self.state.cleanup(() => {
       client.batch_execute(
         match self.savepoint {
@@ -124,38 +123,39 @@ async fn Transaction::commit_internal(self : Transaction) -> Unit {
           Some(name) => "RELEASE SAVEPOINT \{name}"
         },
       )
-    }) catch {
-      error => failure.val = Some(error)
-    }
-    let tags = control.command_tags()
-    if self.savepoint is None && tags.contains("COMMIT") {
-      self.record_completion(Committed, failure.val)
-    } else if self.savepoint is None && tags.contains("ROLLBACK") {
-      self.record_completion(RolledBack, failure.val)
-      raise PoolError::CommitRolledBack
-    } else if self.savepoint is Some(_) && tags.contains("RELEASE") {
-      self.record_completion(SavepointReleased, failure.val)
-    } else if control.was_sent() {
-      client.abort()
-      self.record_completion(OutcomeUnknown, failure.val)
-      // Preserve explicit database errors while retaining the independent
-      // uncertain completion record. Lost responses use a distinct error.
-      if failure.val is Some(@client.ClientError::Database(_) as error) {
-        raise error
-      }
-      raise PoolError::CommitOutcomeUnknown
-    } else {
-      self.state.released.val = false
-      self.state.releasing.val = false
-      self.rollback_internal() catch {
-        _ => ()
-      }
-    }
-    if failure.val is Some(error) {
+    })
+  catch {
+    error => Some(error)
+  } noraise {
+    _ => None
+  }
+  let tags = control.command_tags()
+  if self.savepoint is None && tags.contains("COMMIT") {
+    self.record_completion(Committed, failure)
+  } else if self.savepoint is None && tags.contains("ROLLBACK") {
+    self.record_completion(RolledBack, failure)
+    raise PoolError::CommitRolledBack
+  } else if self.savepoint is Some(_) && tags.contains("RELEASE") {
+    self.record_completion(SavepointReleased, failure)
+  } else if control.was_sent() {
+    client.abort()
+    self.record_completion(OutcomeUnknown, failure)
+    // Preserve explicit database errors while retaining the independent
+    // uncertain completion record. Lost responses use a distinct error.
+    if failure is Some(@client.ClientError::Database(_) as error) {
       raise error
     }
-  })
-  check_pending_cancellation()
+    raise PoolError::CommitOutcomeUnknown
+  } else {
+    self.state.released.val = false
+    self.state.releasing.val = false
+    self.rollback_internal() catch {
+      _ => ()
+    }
+  }
+  if failure is Some(error) {
+    raise error
+  }
 }
 
 ///|
@@ -188,39 +188,47 @@ async fn[T, E] transaction_scope(
     child.state.released.val = true
   }
   let started = Ref(false)
-  errdefer (if !transaction.abort_active_children() &&
-    started.val &&
-    record.status.val == InProgress {
-    transaction.rollback_internal() catch {
-      _ => ()
-    }
-  })
-  // BEGIN can complete as cancellation arrives; cleanup must own it before
-  // cancellation is propagated to the caller.
-  parent.supervise(
-    client,
-    () => {
-      client.batch_execute(sql)
-      started.val = true
-      record.status.val = InProgress
-    },
-    deadline?,
-  )
-  let result = with_deadline(deadline, Query, () => f(transaction))
-  check_pending_cancellation()
-  // commit_internal owns an operation itself, so inspect children before entry.
-  if transaction.abort_active_children() {
-    if result is Ok(_) {
-      raise PoolError::OperationInProgress
-    }
-  } else {
-    match result {
-      Ok(_) => transaction.commit_internal()
-      Err(_) => transaction.rollback_internal() catch { _ => () }
+  let rollback = () => {
+    if !transaction.abort_active_children() &&
+      started.val &&
+      record.status.val == InProgress {
+      transaction.rollback_internal()
     }
   }
-  // Rollback shields cleanup; observe cancellation before returning a business Err.
-  check_pending_cancellation()
+  let result = with_scope_exit(
+    () => {
+      // BEGIN can complete as cancellation arrives; cleanup must own it
+      // before cancellation is propagated to the caller.
+      parent.supervise(
+        client,
+        () => {
+          client.batch_execute(sql)
+          started.val = true
+          record.status.val = InProgress
+        },
+        deadline?,
+      )
+      with_deadline(deadline, Query, () => f(transaction))
+    },
+    result => {
+      // Normal completion owns recovery for errors before COMMIT submission.
+      // A possibly sent COMMIT records its outcome before raising, so the
+      // conditional rollback cannot append SQL to an uncertain completion.
+      errdefer (rollback() catch { _ => () })
+      // commit_internal owns an operation itself; check children first.
+      if transaction.abort_active_children() {
+        if result is Ok(_) {
+          raise PoolError::OperationInProgress
+        }
+      } else {
+        match result {
+          Ok(_) => transaction.commit_internal()
+          Err(_) => transaction.rollback_internal() catch { _ => () }
+        }
+      }
+    },
+    rollback,
+  )
   // A successful nested scope ends its cleanup episode. Failed cleanup keeps
   // the budget for the remaining outer unwind and retires the physical client.
   if !client.is_closed() && !parent.cleanup_mode {
@@ -231,8 +239,8 @@ async fn[T, E] transaction_scope(
 
 ///|
 /// Ok requests commit; Err, an exception, or cancellation requests rollback.
-/// Cancellation received during rollback propagates after bounded cleanup.
-/// An existing callback exception keeps priority.
+/// Normal completion records its outcome before propagating cancellation,
+/// even if commit or rollback fails. An existing callback exception keeps priority.
 pub async fn[T, E] Session::with_transaction(
   self : Session,
   f : async (Transaction) -> Result[T, E],
