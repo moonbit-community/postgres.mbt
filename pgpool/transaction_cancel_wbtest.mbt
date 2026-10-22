@@ -1,4 +1,38 @@
 ///|
+async test "cancelled COMMIT timeout bypasses catch and caller continuation" {
+  with_control_pool(
+    HoldCommit,
+    (group, pool, probe) => {
+      let caught = Ref(false)
+      let continued = Ref(false)
+      let record = TransactionRecord()
+      let task = group.spawn(allow_failure=true, () => {
+        ignore(
+          pool.with_transaction(_ => (Ok(7) : Result[Int32, String]), record~),
+        ) catch {
+          _ => caught.val = true
+        }
+        continued.val = true
+      })
+      probe.query_started.get()
+      assert_eq(record.status(), InProgress)
+      task.cancel()
+      assert_true(
+        expect_pgpool_error_async(() => task.wait())
+        is @async.WaitedTaskAlreadyCancelled,
+      )
+      assert_false(caught.val)
+      assert_false(continued.val)
+      assert_eq(record.status(), OutcomeUnknown)
+      assert_true(probe.sql == ["BEGIN", "COMMIT"])
+      assert_eq(pool.status().size, 0)
+      assert_returned_capacity(pool)
+    },
+    cleanup_ms=40,
+  )
+}
+
+///|
 priv enum RollbackEntry {
   SessionTransaction
   NamedSavepoint
@@ -60,6 +94,7 @@ async fn check_transaction_rollback_exit(
           // rollback is waiting for its protected server response.
           probe.query_started.get()
           let state = saved.val.unwrap().state
+          let cleanup_deadline = state.cleanup_deadline.val.unwrap().at
           assert_eq(record.status(), InProgress)
           assert_false(after_scope.val)
           assert_true(task.try_wait() is None)
@@ -83,6 +118,12 @@ async fn check_transaction_rollback_exit(
                 assert_eq(record.status(), RolledBack)
                 assert_eq(parent_record.status(), InProgress)
                 assert_eq(after_scope.val, !cancel && !callback_raises)
+                if cancel || callback_raises {
+                  assert_eq(
+                    state.cleanup_deadline.val.unwrap().at,
+                    cleanup_deadline,
+                  )
+                }
                 assert_true(task.try_wait() is None)
                 assert_true(pool.shared.slots.try_get() is None)
                 probe.release_query.put(())
@@ -105,6 +146,9 @@ async fn check_transaction_rollback_exit(
           assert_true(@async.now() - started < 600L)
           assert_eq(after_scope.val, !cancel && !callback_raises)
           assert_eq(after_session.val, !cancel && !callback_raises)
+          if cancel || callback_raises {
+            assert_eq(state.cleanup_deadline.val.unwrap().at, cleanup_deadline)
+          }
           let status = if rollback_completes {
             RolledBack
           } else {

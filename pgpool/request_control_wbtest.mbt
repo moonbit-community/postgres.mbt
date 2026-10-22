@@ -11,6 +11,10 @@ priv enum BackendFault {
   HoldCancel
   HoldReset
   HoldCommit
+  HoldCommitError
+  HoldCommitDisconnect
+  HoldCommitTagOnly
+  HoldCommitRollback
   HoldRollback
   HoldClose
   HoldCloseCancel
@@ -172,11 +176,36 @@ async fn serve_control_backend(
           probe.query_started.put(())
           probe.release_query.get()
         }
-        if sql == "COMMIT" {
+        if sql == "COMMIT" || sql.has_prefix("RELEASE SAVEPOINT") {
           match fault {
-            HoldCommit => {
+            HoldCommit
+            | HoldCommitError
+            | HoldCommitDisconnect
+            | HoldCommitTagOnly
+            | HoldCommitRollback => {
               probe.query_started.put(())
               probe.release_query.get()
+              match fault {
+                HoldCommitError => {
+                  send_control_error(socket, "completion failed", code="40001")
+                  socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
+                  continue
+                }
+                HoldCommitDisconnect => return
+                HoldCommitTagOnly => {
+                  if sql == "COMMIT" {
+                    socket.write(b"C\x00\x00\x00\x0bCOMMIT\x00")
+                  } else {
+                    socket.write(b"C\x00\x00\x00\x0cRELEASE\x00")
+                  }
+                  return
+                }
+                HoldCommitRollback => {
+                  send_command(socket, "ROLLBACK", b'I')
+                  continue
+                }
+                _ => ()
+              }
             }
             LostCommit => return
             CommitTagOnly => {
