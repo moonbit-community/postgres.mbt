@@ -19,15 +19,25 @@ callbacks retain the owner gate; their individual methods have another gate
 and an active flag. Cleanup expires the resource first. Escaped concurrent work
 causes retirement, rather than releasing a live socket to another borrower.
 
+`with_scope_exit` owns exit precedence for prepared handles and session-return
+callbacks. It checks cancellation before and after the
+cancellable body. A local `errdefer` runs protected `on_unwind` and suppresses
+its errors, retaining the original callback exception or native cancellation.
+Normal completion instead runs protected `on_return`, captures ordinary errors
+in an internal `Result[Unit, Error]`, and always checks cancellation outside
+protection before returning the callback value or raising the completion error.
+Thus cancellation received during normal cleanup wins even if cleanup failed.
+`on_return` failure never invokes `on_unwind`; each adapter owns its failure
+recovery and releases resources once. The helper adds neither a task group nor
+a cleanup budget, and never represents cancellation as an ordinary error.
+
 Output resource scopes call the client's internal `finish_scope` inside bounded
 cleanup and raise its returned query SQL error outside that cleanup boundary.
 Only a raised synchronization or resource-cleanup failure retires the client;
 callback errors keep priority. Prepared streams invalidate cache entries for
 26000/0A000 during acquisition and finalization, including errors masked by a
-callback exception. No execution is retried. Prepared scopes check cancellation
-before and after callbacks and defer a final check around normal release, so
-cancellation during protected release wins over either success or release
-failure. Error unwinding preserves the original callback exception.
+callback exception. No execution is retried. Prepared and stream handles expire
+before release, and cleanup retains the existing gate and cache-lease rules.
 
 `Deadline` is absolute in `@async.now()` milliseconds. The minimum inherited
 instant flows through checkout and child scopes; phase limits can shorten it.
@@ -107,13 +117,12 @@ DISCARD ALL, statement/type cache invalidation, initialize_session, then idle
 publication. PreserveSession skips discard and initialization but still requires
 protocol synchronization and transaction cleanup. Reconnect retires the socket.
 Return cleanup is best effort with respect to the user's result, with original
-failures retained in bounded PoolEvents. `with_session` registers protected
-error cleanup only around the callback, preserving its original exception or
-cancellation. Normal callback completion releases separately, with a deferred
-cancellation check outside protection even if release fails. Cancellation
-received during reset or initialization therefore propagates before caller code
-resumes, including through Pool convenience and transaction helpers. Each path
-releases once; an already confirmed transaction record keeps its status.
+failures retained in bounded PoolEvents. `with_session` delegates return and
+unwind to `with_scope_exit`, calling `Session::release` once on either path.
+Cancellation received during reset or initialization therefore propagates after
+normal callback completion and before caller code resumes, including through
+Pool convenience and transaction helpers. An existing callback exception keeps
+priority; an already confirmed transaction record keeps its status.
 Event overflow drops oldest entries and increments a counter; it never changes
 transaction records.
 
@@ -130,6 +139,8 @@ confirmed transaction records across Pool entry points.
 `transaction_cancel_wbtest.mbt` covers cancellation during successful or timed-out
 rollback across Session transactions, named savepoints and nested transactions,
 including caller continuation, error priority, records, reuse and capacity.
+`scope_exit_wbtest.mbt` checks cancellation at the body boundaries and
+exactly-once finalization.
 `tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
 savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL

@@ -366,22 +366,11 @@ pub async fn[T] Pool::with_session(
     timeouts.unwrap_or(self.shared.pool_config.val.timeouts),
     deadline?,
   )
-  let result = {
-    // Limit error cleanup to the callback, so normal return owns release once.
-    errdefer @async.protect_from_cancel(() => {
-      session.release() catch {
-        _ => ()
-      }
-    })
-    with_deadline(deadline, Query, () => f(session))
-  }
-  // Observe cancellation even if protected return fails. Callback errors
-  // unwind through the separate errdefer and retain their original cause.
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => session.release())
-  }
-  result
+  with_scope_exit(
+    () => with_deadline(deadline, Query, () => f(session)),
+    _ => session.release(),
+    () => session.release(),
+  )
 }
 
 ///|

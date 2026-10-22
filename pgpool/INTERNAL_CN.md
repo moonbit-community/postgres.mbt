@@ -13,12 +13,19 @@ Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用�
 保留作用域计数，实际准备或执行时才加锁。流和 COPY 持有连接至回调退出，句柄
 另外检查过期和重叠调用。逃逸到外层任务的活动操作会导致连接淘汰，不能进入下一次借用。
 
+prepared 和 Session 归还共用 `with_scope_exit` 退出协议。
+body 在可取消环境中执行，调用前后检查取消；局部 `errdefer` 受保护地执行
+`on_unwind` 并忽略其异常，保留原回调异常或原生取消。正常返回则受保护地执行
+`on_return`，将其普通异常保存为内部 `Result[Unit, Error]`，退出保护后必经取消检查，
+再返回回调值或抛出收尾错误。因此正常收尾期间收到的取消优先于收尾成功或失败。
+`on_return` 失败不会再调用 `on_unwind`；各适配器负责自己的失败恢复，只释放一次。
+此 helper 不新增任务组或清理预算，也不把取消转换成普通 Error。
+
 输出流作用域在有时限的清理中调用客户端内部 `finish_scope`，再在清理边界之外
 抛出其返回的查询 SQL 错误。同步或资源清理实际失败才淘汰连接，回调异常仍优先。
 prepared 流在创建和收尾阶段处理 26000/0A000 缓存失效，即使回调异常遮蔽了
-SQL 错误也会失效；不重试执行。prepared 作用域在回调前后检查取消，并在正常
-释放外用 defer 再检查一次，覆盖受保护释放成功和失败两条路径。异常退出仍保留
-原回调错误。
+SQL 错误也会失效；不重试执行。prepared 和流句柄在释放开始前失效，清理继续遵守
+原有的连接锁、句柄锁和缓存租约规则。
 
 Deadline 使用 `@async.now()` 的毫秒计时基准，子范围只能缩短。等待 executor
 和容量共用 wait 预算；所有 host 共用 create 预算。健康检查失败允许换连接，
@@ -70,11 +77,10 @@ stream/COPY 可能仍持有底层 permit，等待该 permit 会阻塞关闭任�
 归还顺序：协议同步 → 清理遗留事务 → 单独执行 DISCARD ALL → 清空 statement/type
 cache → initialize_session → 空闲队列。PreserveSession 保留状态但仍同步协议和回滚；
 Reconnect 直接淘汰。归还清理失败以 PoolEvent 保留原始原因，不覆盖业务结果。
-`with_session` 仅在回调范围内注册受保护的 errdefer，异常或取消退出保留原始原因。
-回调正常完成时单独受保护地归还，并用 defer 在保护之外检查挂起的取消，即使归还
-失败也会检查。因此在 reset 或初始化 hook 期间收到的取消，会在调用方继续执行前
-传播，Pool 便捷方法和事务入口也遵守此规则。每条路径只归还一次，已确认的事务记录
-保持原状态。
+`with_session` 将正常退出和异常解栈交给 `with_scope_exit`，每条路径只调用一次
+`Session::release`。回调正常完成后，在 reset 或初始化 hook 期间收到的取消，
+会在调用方继续执行前传播，Pool 便捷方法和事务入口也遵守此规则。已有回调异常
+保持优先级，已确认的事务记录保持原状态。
 事件缓冲区溢出丢弃最旧条目并计数，不能影响事务完成记录。
 
 确定性协议测试见 request_control_wbtest.mbt；受保护 Close 和方法 deadline
@@ -90,3 +96,4 @@ release_cancel_wbtest.mbt 覆盖 reset 和初始化期间的归还取消、回�
 容量恢复、连接复用，以及各 Pool 入口下已确认的事务完成记录。
 transaction_cancel_wbtest.mbt 覆盖 Session 事务、命名保存点和嵌套事务在回滚成功或
 超时期间收到取消时的调用方后续代码、错误优先级、完成记录、连接复用及容量归还。
+scope_exit_wbtest.mbt 验证回调前后的取消检查及只执行一次的收尾。

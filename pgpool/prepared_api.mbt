@@ -296,16 +296,11 @@ async fn[T] prepared_scope(
     statement,
     deadline?,
   )
-  errdefer (prepared.release_internal() catch { _ => () })
-  check_pending_cancellation()
-  let result = with_deadline(deadline, Query, () => f(prepared))
-  check_pending_cancellation()
-  // Observe cancellation received during protected release on both success
-  // and failure. Unwinding a callback error still preserves its original cause.
-  {
-    defer check_pending_cancellation()
-    prepared.release_internal()
-  }
+  let result = with_scope_exit(
+    () => with_deadline(deadline, Query, () => f(prepared)),
+    _ => prepared.release_internal(),
+    () => prepared.release_internal(),
+  )
   if !state.cleanup_mode {
     state.cleanup_deadline.val = None
   }
