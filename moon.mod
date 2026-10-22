@@ -1,6 +1,6 @@
 name = "moonbit-community/postgres"
 
-version = "0.1.2"
+version = "0.1.3"
 
 import {
   "moonbitlang/x@0.5.6",
