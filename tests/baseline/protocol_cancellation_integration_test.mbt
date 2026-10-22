@@ -3,6 +3,9 @@
 async fn wait_for_backend_lock(observer : @client.Client, pid : Int32) -> Unit {
   @async.with_timeout(5000, () => {
     while true {
+      // A transaction keeps its first activity snapshot until it is cleared.
+      // The observer may also be the connection holding the blocking lock.
+      observer.batch_execute("select pg_stat_clear_snapshot()")
       let waiting : Bool = observer
         .query_one(
           "select exists(select 1 from pg_stat_activity where pid = $1::int4 and state = 'active' and wait_event_type = 'Lock') as waiting",
@@ -214,6 +217,14 @@ async test "integration prepare timeout behind a table lock does not leak the op
     blocker.batch_execute(
       "BEGIN; LOCK TABLE \{schema}.t IN ACCESS EXCLUSIVE MODE",
     )
+    // Cache the target's idle state before starting its query. The lock waiter
+    // must refresh this transaction's snapshot to observe the later lock wait.
+    let initial_state : String = blocker
+      .query_one("select state from pg_stat_activity where pid = $1::int4", params=[
+        client.cancel_token().process_id() as &@client.ToSql,
+      ])
+      .get_name("state")
+    assert_eq(initial_state, "idle")
     let timeout_fired : @async.Queue[Unit] = Queue(kind=Unbounded)
     let mut delivered = false
     let task = group.spawn(allow_failure=true, () => {
