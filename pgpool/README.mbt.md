@@ -139,10 +139,10 @@ The completion bound applies to library I/O; application callbacks must
 cooperate with async cancellation. Cleanup errors are diagnostic events and do
 not replace an earlier database error, business `Err`, or callback exception.
 
-Transactions, prepared handles and session return share one
+Transactions, prepared handles, stream/COPY scopes and session return share one
 exit protocol: run the callback, finish protected cleanup and record its result,
 then check cancellation before returning or reporting a completion error.
-This includes COMMIT, savepoint RELEASE/rollback, statement Close,
+This includes COMMIT, savepoint RELEASE/rollback, stream drain, statement Close,
 `DISCARD ALL` and session initialization.
 
 | Callback exit | Behavior after cleanup |

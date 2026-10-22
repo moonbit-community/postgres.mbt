@@ -36,6 +36,7 @@ async fn[T] StreamScope::run(
 /// Raised cleanup failures still retire the connection through owner.cleanup.
 async fn[R, T] resource_scope(
   owner : ClientLeaseState,
+  callback_error : @ref.Ref[Error?],
   acquire : async () -> R,
   finish : async (R) -> @client.DatabaseError?,
   f : async (R, StreamScope) -> T,
@@ -53,23 +54,28 @@ async fn[R, T] resource_scope(
       finish(raw)
     })
   }
-  let result = {
-    errdefer (ignore(cleanup()) catch { _ => () })
-    check_pending_cancellation()
-    let result = f(raw, scope)
-    check_pending_cancellation()
-    result
-  }
-  let database_error = {
-    defer check_pending_cancellation()
-    cleanup()
-  }
-  // SQL failure after successful protocol cleanup does not retire the socket.
-  // Raise after cleanup and outside the callback's errdefer. The same budget
-  // remains available to outer rollback without repeating completed cleanup.
-  if database_error is Some(error) {
-    raise error.into_client_error()
-  }
+  let result = with_scope_exit(
+    () => {
+      let outcome = try f(raw, scope) catch {
+        error => Err(error)
+      } noraise {
+        value => Ok(value)
+      }
+      match outcome {
+        Ok(value) => value
+        Err(error) => {
+          // Publish before cleanup suspends so the supervising waiter can
+          // preserve a callback exception across later task cancellation.
+          callback_error.val = Some(error)
+          raise error
+        }
+      }
+    },
+    // A synchronized SQL failure is reported outside owner.cleanup, so it
+    // does not retire the socket or repeat cleanup during error propagation.
+    _ => if cleanup() is Some(error) { raise error.into_client_error() },
+    () => ignore(cleanup()),
+  )
   if !owner.cleanup_mode {
     owner.cleanup_deadline.val = None
   }
@@ -237,9 +243,10 @@ pub async fn[T] Session::with_stream(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.query(sql, params~),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -275,9 +282,10 @@ pub async fn[T] Session::with_typed_stream(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.query_typed(sql, param_types, params~),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -312,9 +320,10 @@ pub async fn[T] Session::with_simple_query(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.simple_query(sql),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -347,9 +356,10 @@ pub async fn[T] Session::with_copy_in(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.copy_in(sql),
         raw => {
           raw.finish_scope()
@@ -385,9 +395,10 @@ pub async fn[T] Session::with_copy_out(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.copy_out(sql),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -421,9 +432,10 @@ pub async fn[T] Transaction::with_stream(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.query(sql, params~),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -443,9 +455,10 @@ pub async fn[T] Transaction::with_typed_stream(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.query_typed(sql, param_types, params~),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -463,9 +476,10 @@ pub async fn[T] Transaction::with_simple_query(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.simple_query(sql),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -483,9 +497,10 @@ pub async fn[T] Transaction::with_copy_in(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.copy_in(sql),
         raw => {
           raw.finish_scope()
@@ -506,9 +521,10 @@ pub async fn[T] Transaction::with_copy_out(
   deadline? : Deadline,
 ) -> T {
   self.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         self.state,
+        callback_error,
         () => client.copy_out(sql),
         raw => raw.finish_scope(),
         (raw, scope) => f({ raw, scope, }),
@@ -533,9 +549,10 @@ pub async fn[T] PreparedStatement::with_stream(
   let state = self.state.scope.state()
   let session : Session = { state, }
   session.run_scoped_operation(
-    client => {
+    (client, callback_error) => {
       resource_scope(
         state,
+        callback_error,
         () => {
           let outcome = try
             client.query_statement(self.state.raw_statement(), params~)

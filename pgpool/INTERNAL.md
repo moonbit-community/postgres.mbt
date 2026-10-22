@@ -19,7 +19,7 @@ callbacks retain the owner gate; their individual methods have another gate
 and an active flag. Cleanup expires the resource first. Escaped concurrent work
 causes retirement, rather than releasing a live socket to another borrower.
 
-`with_scope_exit` owns exit precedence for transactions, prepared handles
+`with_scope_exit` owns exit precedence for transaction, prepared, stream/COPY
 and session-return callbacks. It checks cancellation before and after the
 cancellable body. A local `errdefer` runs protected `on_unwind` and suppresses
 its errors, retaining the original callback exception or native cancellation.
@@ -66,14 +66,19 @@ Nested cancellation first cancels its worker, then joins `cancel_active` and
 protocol cleanup. Only the owner of `cancel_active` sends a packet and releases
 the fence; another supervisor must never release it. Budget expiry aborts the
 client, and supervisors still join their workers before releasing either gate.
+Stream/COPY callbacks run in the supervised worker. They publish an ordinary
+callback exception before starting scope cleanup; the waiter snapshots that
+exception when it begins unwinding and preserves it after joining cleanup and
+the fence. Errors first reported after waiter cancellation (for example, a
+stream method finishing its timeout unwind) cannot replace that cancellation.
+Normal-return cleanup errors and native cancellation never enter this channel.
 
 `cleanup_deadline` is shared by scopes on one lease. The first unwind step
 allocates the grace period; later drain, rollback, reset and initialization use
 the remaining duration. The watchdog can abort even while a raw operation is
 protected. Cleanup hooks use `cleanup_mode` so their queries cannot renew this
 budget. A new accepted business operation after an error was handled starts a
-new episode. A transaction or prepared callback scope clears its completed
-episode only after
+new episode. A child callback scope clears its completed episode only after
 `with_scope_exit` returns normally; failure or cancellation keeps the same
 budget for the remaining unwind, even when that child's cleanup succeeded.
 
@@ -147,7 +152,9 @@ including caller continuation, error priority, records, reuse and capacity.
 disconnects, timeouts and tags without ReadyForQuery, both with and without
 cancellation. The cancelled-COMMIT timeout regression checks that neither catch
 nor subsequent caller code executes. `scope_exit_wbtest.mbt` checks cancellation
-at the body boundaries and exactly-once finalization.
+at the body boundaries and exactly-once finalization. `stream_cancel_wbtest.mbt`
+covers the exit-priority matrix across all stream and COPY entry points,
+including the supervising waiter's preservation of an earlier callback error.
 `tests/baseline/pgpool_stream_error_integration_test.mbt` checks backend reuse,
 savepoint rollback and prepared cache invalidation against PostgreSQL.
 `transaction_scope_wbtest.mbt` covers escaped prepared callbacks and active SQL

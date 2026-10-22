@@ -19,6 +19,8 @@ priv enum BackendFault {
   HoldClose
   HoldCloseCancel
   HoldCloseError
+  HoldStream
+  HoldStreamError
   StreamError
   StreamErrorNoReady
   StreamErrorDisconnect
@@ -75,6 +77,23 @@ async fn send_command(
 }
 
 ///|
+/// Hold a stream completion until the test has observed callback exit.
+async fn held_stream_error(
+  socket : @socket.Tcp,
+  fault : BackendFault,
+  probe : ProtocolProbe,
+) -> Bool {
+  probe.query_started.put(())
+  probe.release_query.get()
+  if fault is HoldStreamError {
+    send_control_error(socket, "stream failed")
+    true
+  } else {
+    false
+  }
+}
+
+///|
 async fn serve_control_backend(
   socket : @socket.Tcp,
   fault : BackendFault,
@@ -88,7 +107,12 @@ async fn serve_control_backend(
     probe.cancel_started.put(())
     match fault {
       HoldCancel | HoldCloseCancel => probe.release_cancel.get()
-      IgnoreCancel | HoldClose | HoldCloseError | StreamErrorNoReady => ()
+      IgnoreCancel
+      | HoldClose
+      | HoldCloseError
+      | HoldStream
+      | HoldStreamError
+      | StreamErrorNoReady => ()
       _ => probe.release_query.put(())
     }
     return
@@ -110,7 +134,11 @@ async fn serve_control_backend(
       b'D' => socket.write(b"t\x00\x00\x00\x06\x00\x00n\x00\x00\x00\x04")
       b'B' => socket.write(b"2\x00\x00\x00\x04")
       b'E' =>
-        if fault
+        if fault is (HoldStream | HoldStreamError) {
+          if !held_stream_error(socket, fault, probe) {
+            socket.write(b"C\x00\x00\x00\x0dSELECT 0\x00")
+          }
+        } else if fault
           is (StreamError
           | StreamErrorNoReady
           | StreamErrorDisconnect
@@ -143,6 +171,32 @@ async fn serve_control_backend(
       b'Q' => {
         let sql = @utf8.decode(bytes[:bytes.length() - 1])
         probe.sql.push(sql)
+        if sql == "held copy in" {
+          socket.write(b"G\x00\x00\x00\x07\x00\x00\x00")
+          continue
+        }
+        if sql == "held simple" || sql == "held copy out" {
+          if sql == "held copy out" {
+            socket.write(b"H\x00\x00\x00\x07\x00\x00\x00")
+          }
+          if held_stream_error(socket, fault, probe) {
+            socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
+          } else {
+            if sql == "held copy out" {
+              socket.write(b"c\x00\x00\x00\x04")
+            }
+            send_command(
+              socket,
+              if sql == "held simple" {
+                "SELECT 0"
+              } else {
+                "COPY 0"
+              },
+              status,
+            )
+          }
+          continue
+        }
         if sql == "stream error" || sql == "copy error" {
           if sql == "copy error" {
             socket.write(b"H\x00\x00\x00\x07\x00\x00\x00")
@@ -235,6 +289,12 @@ async fn serve_control_backend(
           "SELECT 0"
         }
         send_command(socket, tag, status)
+      }
+      b'f' => {
+        if !held_stream_error(socket, fault, probe) {
+          send_control_error(socket, "COPY aborted", code="57014")
+        }
+        socket.write(([b'Z', 0, 0, 0, 5, status] : Bytes))
       }
       _ => fail("unexpected control backend request")
     }

@@ -174,9 +174,10 @@ async test "completed stream cleanup is not repeated when its SQL error unwinds 
   with_control_pool(StreamError, (_, pool, _) => {
     pool.with_session(session => {
       let error = expect_pgpool_error_async(() => {
-        session.run_scoped_operation(client => {
+        session.run_scoped_operation((client, callback_error) => {
           resource_scope(
             session.state,
+            callback_error,
             () => client.simple_query("stream error"),
             raw => {
               let error = raw.finish_scope()
