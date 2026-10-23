@@ -481,7 +481,7 @@ pub fn Pool::resize(self : Pool, max_size : Int32) -> Unit raise {
   self.shared.resize_debt.val += permits_to_remove
   while self.shared.size.val > max_size && self.shared.idle.length() > 0 {
     let connection = self.shared.idle.remove(self.shared.idle.length() - 1)
-    retire_connection(self.shared, connection, close_client=true)
+    retire_connection(self.shared, connection)
   }
 }
 
@@ -509,7 +509,7 @@ pub fn Pool::close(self : Pool) -> Unit {
   }
   while self.shared.idle.length() > 0 {
     let connection = self.shared.idle.remove(self.shared.idle.length() - 1)
-    retire_connection(self.shared, connection, close_client=true)
+    retire_connection(self.shared, connection)
   }
   if !self.shared.ready.done.val {
     self.shared.ready.complete(Some(PoolError::Closed))
@@ -708,11 +708,11 @@ async fn Pool::try_recycle_client(
   let client = if connection.client.val is Some(client) {
     client
   } else {
-    self.discard_client(connection, close_client=false)
+    self.discard_client(connection)
     return None
   }
   if client.is_closed() {
-    self.discard_client(connection, close_client=false)
+    self.discard_client(connection)
     return None
   }
   let session = Session::new(self.shared, connection)
@@ -746,12 +746,12 @@ async fn Pool::run_recycle(
   let client = if connection.client.val is Some(client) {
     client
   } else {
-    self.discard_client(connection, close_client=false)
+    self.discard_client(connection)
     return None
   }
   let started = @async.now()
   // Checkout separately restores its reserved slot on cancellation.
-  errdefer self.discard_client(connection, close_client=true)
+  errdefer self.discard_client(connection)
   try
     run_with_timeout(recycle_ms, Recycle, on_timeout=() => client.abort(), op)
   catch {
@@ -771,13 +771,13 @@ async fn Pool::run_recycle(
         started~,
         cause=error,
       )
-      self.discard_client(connection, close_client=true)
+      self.discard_client(connection)
       return None
     }
   } noraise {
     _ =>
       if client.is_closed() || self.shared.closed.val {
-        self.discard_client(connection, close_client=false)
+        self.discard_client(connection)
         None
       } else {
         emit_event(
@@ -916,12 +916,8 @@ async fn Pool::schedule_connection(
 
 ///|
 /// Drop one unusable pooled client from the pool's size accounting.
-fn Pool::discard_client(
-  self : Pool,
-  connection : ConnectionState,
-  close_client~ : Bool = true,
-) -> Unit {
-  retire_connection(self.shared, connection, close_client~)
+fn Pool::discard_client(self : Pool, connection : ConnectionState) -> Unit {
+  retire_connection(self.shared, connection)
 }
 
 ///|
@@ -958,12 +954,8 @@ fn ConnectionState::new(
 }
 
 ///|
-/// Remove one physical connection from the live pool state and optionally close it.
-fn retire_connection(
-  shared : Shared,
-  connection : ConnectionState,
-  close_client~ : Bool = true,
-) -> Unit {
+/// Retire one physical connection, closing it and settling its accounting once.
+fn retire_connection(shared : Shared, connection : ConnectionState) -> Unit {
   while connection.statement_cache.length() > 0 {
     ignore(
       connection.statement_cache.remove(connection.statement_cache.length() - 1),
@@ -985,7 +977,7 @@ fn retire_connection(
     }
     // Aborted clients already own transport shutdown. Graceful close would
     // wait behind permits still held by escaped stream/COPY callbacks.
-    if close_client && !client.is_closed() {
+    if !client.is_closed() {
       ignore(shared.close_requests.try_put(client)) catch {
         _ => client.abort()
       }

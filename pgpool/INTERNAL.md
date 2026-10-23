@@ -117,6 +117,9 @@ with a closed/expired-handle error. Child expiry precedes parent gate release,
 while only the outer Session returns capacity. Escaped application tasks are
 not joined: their ConnectionState remains retired and is never rebound to a
 replacement client. This scope usage error does not change normal completion.
+Every retirement owns physical closure, including a successful health check
+that finishes after pool close. Repeated retirement settles size and diagnostics
+once; checkout/session release separately restores capacity.
 Retirement does not enqueue graceful close for an already closed client: abort
 owns transport shutdown, and an escaped stream/COPY may still hold a raw permit
 that would block the close worker and pool shutdown.
