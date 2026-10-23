@@ -183,11 +183,14 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> UInt64 {
 /// drains it internally and suppresses the returned row count because the COPY
 /// did not complete successfully. Unexpected transport or protocol errors
 /// still propagate to the caller.
+/// A message containing NUL raises `ProtocolError::InvalidInput` locally and
+/// leaves the sink usable, including for automatic scope cleanup.
 pub async fn CopyInSink::abort(
   self : CopyInSink,
   message~ : String = "COPY aborted",
 ) -> Unit {
   guard !self.finished.val else { return }
+  let bytes = copy_fail_bytes(message)
   self.finished.val = true
   defer (if !self.permit.released.val {
     start_abandoned_copy_in(
@@ -199,7 +202,7 @@ pub async fn CopyInSink::abort(
     )
   })
   try {
-    self.input.put(Fail(message)) catch {
+    self.input.put(Fail(bytes)) catch {
       ClientError::Database(database_error) => {
         self.raise_early_database_error(database_error)
         return
@@ -235,7 +238,7 @@ fn start_abandoned_copy_in(
 ) -> Unit {
   let task = spawn_detached_drain(control, () => {
     defer permit.release()
-    ignore(input.put(Fail("COPY abandoned"))) catch {
+    ignore(input.put(Fail(copy_fail_bytes("COPY abandoned")))) catch {
       _ => ()
     }
     for response = responses.get() {

@@ -556,6 +556,13 @@ physical connection may be discarded. Unlike a PostgreSQL cancel token, abort
 does not try to preserve the session, send `Terminate`, or perform a TLS
 `close_notify` exchange.
 
+`CopyInSink::abort(message=...)` validates the message before changing the
+sink. A NUL character raises `ProtocolError::InvalidInput`; the sink remains
+usable for sends, a valid abort, or automatic scope cleanup. Unexpected COPY
+writer failures close the physical connection and wake pending operations;
+`ClientExecutor::run` reports the original failure. PostgreSQL SQL errors still
+drain through `ReadyForQuery` so a synchronized connection can be reused.
+
 ## Configuration And TLS
 
 `Config::Config` accepts the host, optional concrete `hostaddr`, user, database,

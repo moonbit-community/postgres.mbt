@@ -113,6 +113,13 @@ abort actions while its reader task remains the sole backend reader. An early
 `ErrorResponse` is forwarded to the sink, the input queue is cleared and closed,
 and the writer stops after its current complete frame. The driver joins that
 writer before forwarding the final `ReadyForQuery` or starting another request.
+The request cancels and joins its writer on every exit. Unexpected writer
+failures propagate to this connection's executor task group, cancelling its
+driver/reader and closing active and queued requests; the executor retains the
+original cause. The pool isolates physical executor failures from other sessions.
+`CopyInSink::abort` encodes a complete `CopyFail` before marking the sink
+finished. `Fail` actions carry validated bytes; a NUL message leaves ownership
+and sink state intact so explicit or scoped cleanup can still send a valid abort.
 It is still one logical operation.
 
 ## Error And Notice Fields

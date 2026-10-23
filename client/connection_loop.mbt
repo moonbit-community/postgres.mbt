@@ -210,6 +210,15 @@ async fn Driver::drain_copy_in_request(
   let copy_error = request.copy_error.unwrap()
   let writer_stopped = Ref(false)
   let mut writer : @async.Task[Unit]? = None
+  defer @async.protect_from_cancel(() => {
+    if writer is Some(task) {
+      task.cancel()
+      task.wait() catch {
+        @async.WaitedTaskAlreadyCancelled => ()
+        error => raise error
+      }
+    }
+  })
   while true {
     let message = incoming.get()
     match message {
@@ -254,9 +263,9 @@ fn Driver::spawn_copy_writer(
   input : @async.Queue[CopyInAction],
   stopped : @ref.Ref[Bool],
 ) -> @async.Task[Unit] {
-  group.spawn(no_wait=true, allow_failure=true, () => {
-    self.drain_copy_input(input, stopped)
-  })
+  // Failure belongs to this physical connection's executor task group. It must
+  // cancel the reader/driver even if PostgreSQL never sends ReadyForQuery.
+  group.spawn(no_wait=true, () => self.drain_copy_input(input, stopped))
 }
 
 ///|
@@ -288,10 +297,8 @@ async fn Driver::drain_copy_input(
         self.stream.write(payload.to_bytes())
         return
       }
-      Fail(message) => {
-        let payload = Buffer()
-        @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
-        self.stream.write(payload.to_bytes())
+      Fail(bytes) => {
+        self.stream.write(bytes)
         return
       }
     }

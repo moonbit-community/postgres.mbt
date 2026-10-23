@@ -76,8 +76,8 @@ priv enum CopyInAction {
   Data(Bytes)
   /// Finish COPY successfully with `CopyDone`.
   Finish
-  /// Abort COPY with a textual error message.
-  Fail(String)
+  /// Abort COPY with a complete, validated `CopyFail` frame.
+  Fail(Bytes)
 }
 
 ///|
