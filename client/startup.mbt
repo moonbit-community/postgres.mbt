@@ -225,16 +225,22 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let mut channel_binding_used = false
   // SCRAM authentication spans multiple round trips, so its local state has to
   // survive across several backend auth messages.
-  for msg = read_message(stream) {
+  for msg = read_backend_message(stream, config.max_backend_message_body_bytes) {
     match msg {
       AuthenticationOk => {
         verify_required_channel_binding(config, channel_binding_used)
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationCleartextPassword => {
         reject_unsupported_channel_binding(config)
         send_password_message(stream, config.password)
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationMd5Password(_) => {
         reject_unsupported_channel_binding(config)
@@ -250,33 +256,52 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
         )
         scram = Some(next_scram)
         scram_channel_bound = channel_bound
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationSaslContinue(body) => {
         continue_scram(stream, scram, body.data())
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationSaslFinal(body) => {
         finish_scram(scram, body.data())
         if scram_channel_bound {
           channel_binding_used = true
         }
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       ParameterStatus(body) => {
         // Capture the initial session parameter snapshot now so steady-state
         // runtime helpers start with the same view PostgreSQL advertised here.
         status[body.name_str()] = body.value_str()
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       BackendKeyData(body) => {
         // These values are later reused by `CancelToken` on a separate short-
         // lived control connection.
         process_id = body.process_id
         secret_key = body.secret_key
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
-      NoticeResponse(_) => continue read_message(stream)
+      NoticeResponse(_) =>
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       ReadyForQuery(body) => {
         verify_required_channel_binding(config, channel_binding_used)
         // `ReadyForQuery` is the handoff point from startup/authentication into
@@ -322,24 +347,6 @@ fn verify_required_channel_binding(
 ) -> Unit raise {
   if config.channel_binding is Require && !channel_binding_used {
     raise ClientError::Authentication(channel_binding_required_not_used_message)
-  }
-}
-
-///|
-/// Read and parse one backend message during startup.
-async fn read_message(stream : Stream) -> @backend.Message {
-  let header = stream.read_exactly(5)
-  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
-  let body = stream.read_exactly(body_len - 4)
-  // Reassemble the full packet so startup uses the same parser and validation
-  // path as the steady-state connection loop.
-  let packet = Buffer(size_hint=header.length() + body.length())
-  packet.write_bytes(header)
-  packet.write_bytes(body)
-  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
-    parsed.message
-  } else {
-    raise ClientError::UnexpectedMessage("incomplete backend message")
   }
 }
 

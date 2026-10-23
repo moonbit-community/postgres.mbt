@@ -76,6 +76,19 @@ for the lifetime of every client and pooled session; see the
 [client encoding warning](./client/README.mbt.md#client-encoding) and
 [TODO.md](./TODO.md).
 
+### Backend message size
+
+Client and pool configs limit each backend message body to 64 MiB by default
+(`max_backend_message_body_bytes=67_108_864`). The body excludes the tag and
+four-byte length word. For servers returning larger rows or COPY chunks, set a
+larger positive limit explicitly on `client.Config` or `pgpool.Config`; the
+maximum is `2_147_483_642`. Zero does not disable the limit. Invalid client
+settings fail `ready()` with `ClientError::InvalidConfig` before connecting;
+invalid pool settings fail construction with `ConfigError::InvalidConfig`.
+Malformed or oversized frames fail the connection with `ClientError::Protocol`
+before reading the body. This is a per-frame bound, not a total result-memory
+or pool-memory budget.
+
 ### TLS
 
 The client and pool support three explicit TLS modes:

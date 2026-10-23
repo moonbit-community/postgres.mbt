@@ -51,6 +51,16 @@ statement. The next prepared scope acquires a fresh statement; failed SQL is
 never automatically retried. Invalidation also happens when scope cleanup first
 observes the error or a callback exception takes precedence.
 
+`Config::Config` accepts `max_backend_message_body_bytes`, defaulting to
+`67_108_864` (64 MiB). It applies to every physical connection, including
+startup, and counts each backend frame's body without its tag or length word.
+Use a larger positive value for servers returning larger rows or COPY chunks;
+the maximum is `2_147_483_642`, and zero does not disable the limit. Invalid
+values raise `ConfigError::InvalidConfig` during config construction. A
+malformed or oversized frame closes that connection with
+`ClientError::Protocol`; other pool connections remain available. This does
+not limit the total memory used by results or by the pool.
+
 ## Transactions
 
 Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests

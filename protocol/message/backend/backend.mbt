@@ -168,6 +168,9 @@ pub fn Message::parse(
   if len < 4 {
     raise InvalidInput("invalid message length: header length < 4")
   }
+  if len == 2_147_483_647 {
+    raise InvalidInput("invalid message length: total length overflow")
+  }
   let total_len = len + 1
   if buf.length() < total_len {
     return None

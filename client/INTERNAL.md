@@ -31,6 +31,13 @@ synchronously, including during startup. The executor keeps its task group
 local to `run()`. The driver owns all socket reads, writes ordinary frontend
 messages, and publishes notices, notifications, and parameter-status updates.
 
+Startup and the established driver share `read_backend_message`. It reads
+five header bytes, parses `Header`, checks total-length overflow and the
+configured per-body budget, and only then reads/allocates the body. Protocol
+parser errors at this boundary become `ClientError::Protocol`. Header rejection
+uses the existing startup/driver teardown and wakes readiness/request waiters.
+The client validates positive resource budgets before transport setup.
+
 ## Single-Flight Invariant
 
 One PostgreSQL session has exactly one active logical operation. Public

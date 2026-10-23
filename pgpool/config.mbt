@@ -258,6 +258,9 @@ pub struct Config {
   ssl_mode : @client.SslMode?
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
+  /// Maximum body bytes per backend frame on every physical connection.
+  /// Defaults to 64 MiB; valid range is 1..=2_147_483_642.
+  max_backend_message_body_bytes : Int32
   priv targets : Array[ConnectionTarget]
   connect_timeout_ms : Int32?
   keepalives : Bool?
@@ -284,6 +287,9 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "ssl_mode": @debug.Repr(self.ssl_mode),
     "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
     "channel_binding": @debug.Repr(self.channel_binding),
+    "max_backend_message_body_bytes": @debug.Repr(
+      self.max_backend_message_body_bytes,
+    ),
     "targets": @debug.Repr(self.targets),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
@@ -315,6 +321,7 @@ pub fn Config::Config(
   channel_binding~ : @client.ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -330,6 +337,12 @@ pub fn Config::Config(
     raise ConfigError::DbnameEmpty
   }
   validate_tls_config(ssl_mode, ssl_root_cert)
+  if max_backend_message_body_bytes < 1 ||
+    max_backend_message_body_bytes > 2_147_483_642 {
+    raise ConfigError::InvalidConfig(
+      "max_backend_message_body_bytes must be between 1 and 2147483642",
+    )
+  }
   {
     user,
     password,
@@ -339,6 +352,7 @@ pub fn Config::Config(
     ssl_mode: Some(ssl_mode),
     ssl_root_cert,
     channel_binding: Some(channel_binding),
+    max_backend_message_body_bytes,
     targets: targets.copy(),
     connect_timeout_ms,
     keepalives,
@@ -449,6 +463,7 @@ pub fn Config::get_connection_targets(self : Config) -> Array[@client.Config] {
         self.connect_timeout_ms,
         self.keepalives,
         self.keepalives_idle_s,
+        max_backend_message_body_bytes=self.max_backend_message_body_bytes,
       ),
     )
   }
