@@ -186,7 +186,7 @@ async test "pool new updates status and config without connecting" {
           recycle_ms=Some(33),
         ),
         queue_mode=QueueMode::lifo(),
-        recycling_method=RecyclingMethod::verified(),
+        health_check=HealthCheck::Active,
         statement_cache_capacity=7,
       ),
     )
@@ -196,7 +196,7 @@ async test "pool new updates status and config without connecting" {
     @debug.assert_eq(timeouts.wait_ms, Some(11))
     @debug.assert_eq(timeouts.create_ms, Some(22))
     @debug.assert_eq(timeouts.recycle_ms, Some(33))
-    assert_true(pool.config().recycling_method == RecyclingMethod::verified())
+    assert_true(pool.config().health_check == HealthCheck::Active)
     assert_eq(pool.config().statement_cache_capacity, 7)
     assert_false(pool.is_closed())
     pool.close()
@@ -301,4 +301,117 @@ test "pool config validates statement cache capacity" {
     fail("expected invalid statement cache capacity")
   }
   assert_eq(message, "statement_cache_capacity must be non-negative")
+}
+
+///|
+test "pool backend budgets validate and reach every physical connection" {
+  for limit in [1, 67_108_864, 2_147_483_642] {
+    let config = Config(
+      [ConnectionTarget(host="first"), ConnectionTarget(host="second")],
+      user="moon",
+      application_name="pool-backend-budget",
+      pool=PoolConfig(2),
+      max_backend_message_body_bytes=limit,
+    )
+    assert_eq(config.max_backend_message_body_bytes, limit)
+    assert_true(
+      @debug.to_string(config).contains(
+        "max_backend_message_body_bytes: \{limit}",
+      ),
+    )
+    for target in config.get_connection_targets() {
+      assert_eq(target.max_backend_message_body_bytes, limit)
+      assert_true(
+        @debug.to_string(target).contains(
+          "max_backend_message_body_bytes: \{limit}",
+        ),
+      )
+      let different = @client.Config::Config(
+        target.host,
+        user="moon",
+        application_name="pool-backend-budget",
+        max_backend_message_body_bytes=if limit == 1 { 2 } else { 1 },
+      )
+      assert_true(target != different)
+    }
+    assert_true(
+      config !=
+      {
+        ..config,
+        max_backend_message_body_bytes: if limit == 1 {
+          2
+        } else {
+          1
+        },
+      },
+    )
+  }
+  for limit in [-1, 0, 2_147_483_643, 2_147_483_647] {
+    assert_true(
+      @test.expect_error(() => {
+        Config(
+          [ConnectionTarget(host="first")],
+          user="moon",
+          application_name="pool-budget-invalid",
+          pool=PoolConfig(1),
+          max_backend_message_body_bytes=limit,
+        )
+      })
+      is ConfigError::InvalidConfig(_),
+    )
+  }
+}
+
+///|
+test "pool SCRAM budgets validate and reach every physical connection" {
+  let defaults = Config(
+    [ConnectionTarget(host="first")],
+    user="moon",
+    application_name="scram-default",
+    pool=PoolConfig(1),
+  )
+  assert_eq(defaults.scram_max_iterations, 100_000)
+  for count in [1, 100_000, 2_147_483_647] {
+    let config = Config(
+      [ConnectionTarget(host="first"), ConnectionTarget(host="second")],
+      user="moon",
+      application_name="scram-budget",
+      pool=PoolConfig(2),
+      scram_max_iterations=count,
+    )
+    assert_true(
+      @debug.to_string(config).contains("scram_max_iterations: \{count}"),
+    )
+    assert_true(
+      config !=
+      { ..config, scram_max_iterations: if count == 1 { 2 } else { 1 }, },
+    )
+    for target in config.get_connection_targets() {
+      assert_eq(target.scram_max_iterations, count)
+      assert_true(
+        @debug.to_string(target).contains("scram_max_iterations: \{count}"),
+      )
+      let different = @client.Config::Config(
+        target.host,
+        user="moon",
+        application_name="scram-budget",
+        scram_max_iterations=if count == 1 { 2 } else { 1 },
+      )
+      assert_true(target != different)
+    }
+  }
+  for count in [0, -1, -2_147_483_648] {
+    assert_true(
+      @test.expect_error(() => {
+        Config(
+          [ConnectionTarget(host="first")],
+          user="moon",
+          application_name="scram-invalid",
+          pool=PoolConfig(1),
+          scram_max_iterations=count,
+        )
+      })
+      is ConfigError::InvalidConfig(_),
+    )
+  }
 }

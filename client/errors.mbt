@@ -46,6 +46,14 @@ pub struct DatabaseError {
 } derive(Debug, Eq)
 
 ///|
+/// Restore a query error after a pool scope has completed protected cleanup.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub fn DatabaseError::into_client_error(self : DatabaseError) -> ClientError {
+  ClientError::Database(self)
+}
+
+///|
 /// Describes an early type mismatch detected by the driver.
 ///
 /// The client validates encoder and decoder compatibility before invoking the
@@ -67,6 +75,9 @@ pub struct WrongTypeError {
 /// lifecycle issues, protocol violations, codec errors, and higher-level query
 /// shape checks such as row-count assertions.
 pub suberror ClientError {
+  RequestCancelled
+  CommitRolledBack
+  CommitOutcomeUnknown
   /// Server returned an `ErrorResponse`.
   Database(DatabaseError)
   /// Startup authentication could not be completed.

@@ -1,6 +1,14 @@
 // Helpers that encode client requests into PostgreSQL frontend messages.
 
 ///|
+/// Validate and encode COPY failure before changing any sink state.
+fn copy_fail_bytes(message : String) -> Bytes raise @proto.ProtocolError {
+  let buf = Buffer()
+  @frontend.copy_fail(@proto.utf8_encode(message)[:], buf)
+  buf.to_bytes()
+}
+
+///|
 /// Encode a simple-query protocol request.
 fn simple_query_bytes(sql : String) -> Bytes raise {
   let buf = Buffer()

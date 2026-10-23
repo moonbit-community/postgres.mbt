@@ -47,7 +47,7 @@ fn SimpleQueryStream::new(
 ///|
 /// Build the deferred cleanup object for a temporary prepared statement.
 fn StreamCleanup::new(context : OpContext, name : Bytes) -> StreamCleanup raise {
-  { context, bytes: close_bytes(b'S', name[:]), done: false, }
+  { context, bytes: close_bytes(b'S', name[:]), completion: None, }
 }
 
 ///|
@@ -59,6 +59,7 @@ async fn close_temporary_statement(context : OpContext, name : Bytes) -> Unit {
   let responses = context.client.send_request(
     Messages,
     close_bytes(b'S', name[:]),
+    cleanup=true,
   )
   drain_close_response(responses)
 }
@@ -244,16 +245,21 @@ async fn drain_sync_response(
 
 ///|
 /// Drain all responses produced by `batch_execute`.
-async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit {
+async fn drain_simple_query(
+  responses : @async.Queue[@backend.Message],
+) -> String {
+  let mut tag = ""
   let mut database_error : DatabaseError? = None
   for res = responses.get() {
     match res {
       // `batch_execute` intentionally ignores per-statement rows and metadata;
       // only terminal success or database failure matters here.
-      CommandComplete(_)
-      | EmptyQueryResponse
-      | RowDescription(_)
-      | DataRow(_) => continue responses.get()
+      CommandComplete(body) => {
+        tag = body.tag_str()
+        continue responses.get()
+      }
+      EmptyQueryResponse | RowDescription(_) | DataRow(_) =>
+        continue responses.get()
       ErrorResponse(body) => {
         database_error = Some(parse_database_error(body.fields()))
         continue responses.get()
@@ -262,7 +268,7 @@ async fn drain_simple_query(responses : @async.Queue[@backend.Message]) -> Unit 
         if database_error is Some(err) {
           raise ClientError::Database(err)
         } else {
-          break ()
+          break tag
         }
       _ =>
         fail_response_stream(

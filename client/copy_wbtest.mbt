@@ -166,6 +166,9 @@ fn copy_test_shared(
       ssl_mode=Disable,
       application_name="moonbit-postgres-copy-wbtest",
     ),
+    driver_request: Ref(None),
+    request_control: Ref(None),
+    next_request_id: Ref(0L),
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Unbounded),
     dropped_async_messages: Ref(0L),
@@ -253,7 +256,7 @@ async test "copy in input is bounded and abandoned COPY eventually queues Fail" 
     guard input.get() is Fail(message) else {
       fail("expected abandoned COPY failure")
     }
-    assert_eq(message, "COPY abandoned")
+    assert_eq(message, copy_fail_bytes("COPY abandoned"))
     responses.put(copy_test_ready_for_query_message())
 
     let next = gate.acquire()
@@ -350,7 +353,7 @@ async test "copy in abort is best effort and idempotent" {
       request.responses.put(copy_test_copy_in_response_message([]))
 
       match input.get() {
-        Fail(message) => assert_eq(message, "stop now")
+        Fail(message) => assert_eq(message, copy_fail_bytes("stop now"))
         _ => fail("expected copy fail")
       }
 
@@ -387,7 +390,7 @@ async test "copy in startup cancellation aborts and releases its permit" {
       release_response.get()
       request.responses.put(copy_test_copy_in_response_message([]))
       match input.get() {
-        Fail(message) => assert_eq(message, "COPY abandoned")
+        Fail(message) => assert_eq(message, copy_fail_bytes("COPY abandoned"))
         _ => fail("expected cancellation to abort COPY")
       }
       request.responses.put(copy_test_error_response_message("copy abandoned"))
@@ -517,7 +520,7 @@ async test "client copy helpers reject unexpected messages and finish empty stre
 }
 
 ///|
-async test "client copy out drain_discard covers finished error and unexpected paths" {
+async test "client copy out drains retain SQL errors and reject unexpected messages" {
   let completed_stream : CopyOutStream = {
     control: test_control(None),
     responses: Queue(kind=Unbounded),
@@ -540,11 +543,10 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached_done: None,
     finished: true,
   }
-  let finished_error = expect_error_async(() => {
-    finished_error_stream.drain_discard()
-  })
+  finished_error_stream.drain_discard()
+  let finished_error = expect_error_async(() => finished_error_stream.finish())
   guard finished_error is ClientError::Database(err) else {
-    fail("expected finished drain to surface stored database error")
+    fail("expected finish to surface stored database error")
   }
   assert_eq(err.message, "copy already failed")
 
@@ -563,9 +565,10 @@ async test "client copy out drain_discard covers finished error and unexpected p
     detached_done: None,
     finished: false,
   }
-  let draining_error = expect_error_async(() => draining_stream.drain_discard())
+  draining_stream.drain_discard()
+  let draining_error = expect_error_async(() => draining_stream.finish())
   guard draining_error is ClientError::Database(err) else {
-    fail("expected detached drain database error")
+    fail("expected finish to surface drained database error")
   }
   assert_eq(err.message, "copy drain failed")
   assert_true(draining_stream.finished)
@@ -614,7 +617,7 @@ async test "response helpers drain simple query and close sequences" {
   simple_responses.put(copy_test_data_row_message(Some(b"ok")))
   simple_responses.put(copy_test_command_complete_message("SELECT 1"))
   simple_responses.put(copy_test_ready_for_query_message())
-  drain_simple_query(simple_responses)
+  assert_eq(drain_simple_query(simple_responses), "SELECT 1")
 
   let close_responses : @async.Queue[@backend.Message] = Queue(kind=Unbounded)
   close_responses.put(copy_test_close_complete_message())

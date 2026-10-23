@@ -183,11 +183,14 @@ pub async fn CopyInSink::finish(self : CopyInSink) -> UInt64 {
 /// drains it internally and suppresses the returned row count because the COPY
 /// did not complete successfully. Unexpected transport or protocol errors
 /// still propagate to the caller.
+/// A message containing NUL raises `ProtocolError::InvalidInput` locally and
+/// leaves the sink usable, including for automatic scope cleanup.
 pub async fn CopyInSink::abort(
   self : CopyInSink,
   message~ : String = "COPY aborted",
 ) -> Unit {
   guard !self.finished.val else { return }
+  let bytes = copy_fail_bytes(message)
   self.finished.val = true
   defer (if !self.permit.released.val {
     start_abandoned_copy_in(
@@ -199,7 +202,7 @@ pub async fn CopyInSink::abort(
     )
   })
   try {
-    self.input.put(Fail(message)) catch {
+    self.input.put(Fail(bytes)) catch {
       ClientError::Database(database_error) => {
         self.raise_early_database_error(database_error)
         return
@@ -235,7 +238,7 @@ fn start_abandoned_copy_in(
 ) -> Unit {
   let task = spawn_detached_drain(control, () => {
     defer permit.release()
-    ignore(input.put(Fail("COPY abandoned"))) catch {
+    ignore(input.put(Fail(copy_fail_bytes("COPY abandoned")))) catch {
       _ => ()
     }
     for response = responses.get() {
@@ -306,14 +309,17 @@ pub fn CopyOutStream::formats(self : CopyOutStream) -> ArrayView[WireFormat] {
 /// Read the next COPY OUT payload chunk.
 pub async fn CopyOutStream::next(self : CopyOutStream) -> Bytes? {
   errdefer self.abandon_after_error()
-  self.next_inner()
+  match self.next_inner() {
+    Some(bytes) => Some(bytes)
+    None => self.raise_terminal_error_or_none()
+  }
 }
 
 ///|
 async fn CopyOutStream::next_inner(self : CopyOutStream) -> Bytes? {
   self.assert_attached()
   if self.finished {
-    return self.raise_terminal_error_or_none()
+    return None
   }
   for response = self.responses.get() {
     match response {
@@ -331,7 +337,7 @@ async fn CopyOutStream::next_inner(self : CopyOutStream) -> Bytes? {
         // the connection can safely accept ordinary requests again.
         self.finished = true
         self.release_permit()
-        return self.raise_terminal_error_or_none()
+        return None
       }
       _ =>
         fail_response_stream(
@@ -361,6 +367,20 @@ pub async fn CopyOutStream::collect(self : CopyOutStream) -> Array[Bytes] {
 /// After detach, wait for the drain and report its connection closure or database
 /// error. If no background task could start, drain the remaining responses here.
 pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
+  if self.finish_scope() is Some(error) {
+    raise ClientError::Database(error)
+  }
+}
+
+///|
+/// Join protocol completion and background cleanup. Only query SQL errors are
+/// returned; transport and protocol failures still raise.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub async fn CopyOutStream::finish_scope(
+  self : CopyOutStream,
+) -> DatabaseError? {
+  errdefer self.abandon_after_error()
   if self.detached {
     if self.detached_done is Some(done) {
       done.wait()
@@ -368,16 +388,12 @@ pub async fn CopyOutStream::finish(self : CopyOutStream) -> Unit {
       defer self.release_permit()
       self.drain_discard()
     }
-    ignore(self.raise_terminal_error_or_none())
-    return
-  }
-  for bytes = self.next() {
-    if bytes is Some(_) {
-      continue self.next()
-    } else {
-      break ()
+  } else {
+    while self.next_inner() is Some(_) {
+      ()
     }
   }
+  self.database_error
 }
 
 ///|
@@ -417,11 +433,7 @@ fn CopyOutStream::abandon_after_error(self : CopyOutStream) -> Unit {
 /// Drain the remaining COPY OUT protocol messages without buffering payloads.
 async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
   if self.finished {
-    if self.database_error is Some(err) {
-      raise ClientError::Database(err)
-    } else {
-      return
-    }
+    return
   }
   for response = self.responses.get() {
     match response {
@@ -437,11 +449,7 @@ async fn CopyOutStream::drain_discard(self : CopyOutStream) -> Unit {
       ReadyForQuery(_) => {
         self.finished = true
         self.release_permit()
-        if self.database_error is Some(err) {
-          raise ClientError::Database(err)
-        } else {
-          return
-        }
+        return
       }
       _ =>
         fail_response_stream(
@@ -476,5 +484,16 @@ fn CopyOutStream::raise_terminal_error_or_none(
     raise ClientError::Database(err)
   } else {
     None
+  }
+}
+
+///|
+/// Join cleanup transferred to the executor by a cancelled send/finish call.
+#internal(internal, "for use by pgpool only")
+#doc(hidden)
+pub async fn CopyInSink::finish_scope(self : CopyInSink) -> Unit {
+  self.abort()
+  if self.abandoned_done.val is Some(done) {
+    done.wait()
   }
 }

@@ -197,9 +197,9 @@ priv struct StartupState {
 ///|
 /// Complete PostgreSQL startup, including authentication and parameter capture.
 ///
-/// The function runs before `Shared` exists, so it works directly with the raw
-/// transport stream. Once `ReadyForQuery` arrives, the caller has everything
-/// needed to construct the shared runtime state.
+/// This works directly with the transport before shared readiness is published.
+/// Once `ReadyForQuery` arrives, the caller installs the captured startup state
+/// and marks the connection ready for ordinary requests.
 async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let stream = setup.stream
   // Startup parameters are sent exactly once; afterward the server drives the
@@ -225,16 +225,22 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let mut channel_binding_used = false
   // SCRAM authentication spans multiple round trips, so its local state has to
   // survive across several backend auth messages.
-  for msg = read_message(stream) {
+  for msg = read_backend_message(stream, config.max_backend_message_body_bytes) {
     match msg {
       AuthenticationOk => {
         verify_required_channel_binding(config, channel_binding_used)
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationCleartextPassword => {
         reject_unsupported_channel_binding(config)
         send_password_message(stream, config.password)
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationMd5Password(_) => {
         reject_unsupported_channel_binding(config)
@@ -250,33 +256,57 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
         )
         scram = Some(next_scram)
         scram_channel_bound = channel_bound
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationSaslContinue(body) => {
-        continue_scram(stream, scram, body.data())
-        continue read_message(stream)
+        continue_scram(
+          stream,
+          scram,
+          body.data(),
+          max_iterations=config.scram_max_iterations,
+        )
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       AuthenticationSaslFinal(body) => {
         finish_scram(scram, body.data())
         if scram_channel_bound {
           channel_binding_used = true
         }
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       ParameterStatus(body) => {
         // Capture the initial session parameter snapshot now so steady-state
         // runtime helpers start with the same view PostgreSQL advertised here.
         status[body.name_str()] = body.value_str()
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
       BackendKeyData(body) => {
         // These values are later reused by `CancelToken` on a separate short-
         // lived control connection.
         process_id = body.process_id
         secret_key = body.secret_key
-        continue read_message(stream)
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       }
-      NoticeResponse(_) => continue read_message(stream)
+      NoticeResponse(_) =>
+        continue read_backend_message(
+            stream,
+            config.max_backend_message_body_bytes,
+          )
       ReadyForQuery(body) => {
         verify_required_channel_binding(config, channel_binding_used)
         // `ReadyForQuery` is the handoff point from startup/authentication into
@@ -326,24 +356,6 @@ fn verify_required_channel_binding(
 }
 
 ///|
-/// Read and parse one backend message during startup.
-async fn read_message(stream : Stream) -> @backend.Message {
-  let header = stream.read_exactly(5)
-  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
-  let body = stream.read_exactly(body_len - 4)
-  // Reassemble the full packet so startup uses the same parser and validation
-  // path as the steady-state connection loop.
-  let packet = Buffer(size_hint=header.length() + body.length())
-  packet.write_bytes(header)
-  packet.write_bytes(body)
-  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
-    parsed.message
-  } else {
-    raise ClientError::UnexpectedMessage("incomplete backend message")
-  }
-}
-
-///|
 /// Send a cleartext password response.
 async fn send_password_message(stream : Stream, password : String?) -> Unit {
   let password = require_password(password)
@@ -364,17 +376,21 @@ async fn begin_scram(
 ) -> (@auth.ScramSha256, Bool) {
   let password = require_password(password)
   let nonce = secure_random_bytes(18)
-  let (mechanism, scram_binding) = choose_scram_binding(
-    body, channel_binding, transport_binding,
-  )
+  let (mechanism, scram_binding) = authentication_step(() => {
+    choose_scram_binding(body, channel_binding, transport_binding)
+  })
   let channel_bound = scram_binding is TlsServerEndPoint(_)
-  let scram = @auth.ScramSha256::new(
-    @proto.utf8_encode(password)[:],
-    scram_binding,
-    nonce[:],
-  )
+  let scram = authentication_step(() => {
+    @auth.ScramSha256::new(
+      @proto.utf8_encode(password)[:],
+      scram_binding,
+      nonce[:],
+    )
+  })
   let buf = Buffer()
-  @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
+  authentication_step(() => {
+    @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
+  })
   stream.write(buf.to_bytes())
   (scram, channel_bound)
 }
@@ -385,20 +401,41 @@ async fn continue_scram(
   stream : Stream,
   scram : @auth.ScramSha256?,
   data : BytesView,
+  max_iterations~ : Int32,
 ) -> Unit {
   let scram = require_scram(scram)
-  // Each server challenge mutates the SCRAM state machine before the next
-  // client proof is serialized and written.
-  scram.update(data)
+  authentication_step(() => scram.begin_update(data, max_iterations~))
+  while true {
+    let done = authentication_step(() => scram.advance_update(max_steps=256))
+    // Yield after every batch, including the last, so cancellation or the
+    // connection deadline is observed before any final proof is sent.
+    @async.pause()
+    if done {
+      break
+    }
+  }
   let buf = Buffer()
-  @frontend.sasl_response(scram.message(), buf)
+  authentication_step(() => @frontend.sasl_response(scram.message(), buf))
   stream.write(buf.to_bytes())
 }
 
 ///|
 /// Finish an in-flight SCRAM exchange.
 fn finish_scram(scram : @auth.ScramSha256?, data : BytesView) -> Unit raise {
-  require_scram(scram).finish(data)
+  authentication_step(() => require_scram(scram).finish(data))
+}
+
+///|
+/// Protocol authentication helpers stay pure; the network client classifies
+/// their input/state/limit errors as authentication failures.
+fn[T] authentication_step(f : () -> T raise) -> T raise {
+  f() catch {
+    @proto.ProtocolError::InvalidInput(message)
+    | @proto.ProtocolError::UnexpectedEof(message)
+    | @proto.ProtocolError::Overflow(message) =>
+      raise ClientError::Authentication(message)
+    error => raise error
+  }
 }
 
 ///|
@@ -417,7 +454,7 @@ fn require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
   if scram is Some(scram) {
     scram
   } else {
-    raise ClientError::UnexpectedMessage(
+    raise ClientError::Authentication(
       "received SCRAM continuation without an active SCRAM exchange",
     )
   }

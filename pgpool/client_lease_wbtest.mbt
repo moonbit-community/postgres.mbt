@@ -1,65 +1,21 @@
 ///|
-async test "pgpool session gate rejects work after scope expiry" {
-  @async.with_task_group(group => {
-    let pool = client_api_test_pool(group)
-    let connection = client_api_test_connection(group)
-    let state : ClientLeaseState = {
-      pool: pool.shared,
-      connection,
-      gate: Mutex(),
-      active_ops: Ref(0),
-      releasing: Ref(true),
-      released: Ref(false),
-    }
-
-    expect_pool_lease_released(
-      expect_pgpool_error_async(() => state.begin_operation()),
+async test "lease expiration wins over busy gate and releases capacity once" {
+  with_callback_scope_pool(0, 1, (_, pool, _, _, _) => {
+    let session = pool.checkout_session()
+    let client = session.state.begin_operation()
+    assert_true(!client.is_closed())
+    assert_true(
+      @test.expect_error(() => session.state.begin_operation())
+      is PoolError::OperationInProgress,
     )
-    expect_pool_lease_released(
-      expect_pgpool_error_async(() => state.begin_cancellable_scope()),
-    )
-    expect_pool_lease_released(
-      expect_pgpool_error_async(() => state.begin_transaction_scope()),
-    )
-
-    state.releasing.val = false
-    state.released.val = true
-    expect_pool_lease_released(
-      expect_pgpool_error_async(() => state.begin_operation()),
-    )
-    pool.close()
-  })
-}
-
-///|
-async test "pgpool session release waits for the active gate owner" {
-  @async.with_task_group(group => {
-    let pool = client_api_test_pool(group)
-    let connection = client_api_test_connection(group, id=1)
-    pool.shared.connections.push(connection)
-    let state : ClientLeaseState = {
-      pool: pool.shared,
-      connection,
-      gate: Mutex(),
-      active_ops: Ref(1),
-      releasing: Ref(false),
-      released: Ref(false),
-    }
-    assert_true(state.gate.try_acquire())
-    let session : Session = { state, }
-
+    session.state.finish_operation()
     session.release()
-    assert_true(state.releasing.val)
-    assert_false(state.released.val)
-
-    state.finish_operation()
-    assert_eq(state.active_ops.val, 0)
-    assert_true(state.released.val)
-    assert_eq(pool.shared.connections.length(), 0)
-
     session.release()
-    state.finalize_release()
-    assert_eq(pool.shared.connections.length(), 0)
-    pool.close()
+    assert_true(
+      @test.expect_error(() => session.state.begin_operation())
+      is PoolError::ScopeExpired,
+    )
+    assert_true(pool.shared.slots.try_get() is Some(_))
+    assert_true(pool.shared.slots.try_get() is None)
   })
 }

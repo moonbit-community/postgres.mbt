@@ -1,367 +1,314 @@
-// Pooled transaction APIs.
+// Transaction intent and independently observable completion.
 
 ///|
-/// Start one transaction using PostgreSQL's default `BEGIN` settings or the
-/// given `BEGIN` options.
-///
-/// The call waits in FIFO order for earlier session work. The returned
-/// `Transaction` keeps the connection checked out until commit or rollback.
-async fn Session::transaction(
-  self : Session,
-  options~ : TransactionOptions = TransactionOptions(),
-) -> Transaction {
-  let (client, connection) = self.state.begin_transaction_scope()
-  errdefer self.state.finish_transaction_scope()
-  let client_options = @client.TransactionOptions::TransactionOptions(
-    isolation_level?=options.isolation_level,
-    read_only?=options.read_only,
-    deferrable?=options.deferrable,
+fn begin_sql(options : TransactionOptions) -> String {
+  let clauses = ["BEGIN"]
+  if options.isolation_level is Some(level) {
+    let level = match level {
+      ReadUncommitted => "READ UNCOMMITTED"
+      ReadCommitted => "READ COMMITTED"
+      RepeatableRead => "REPEATABLE READ"
+      Serializable => "SERIALIZABLE"
+    }
+    clauses.push("ISOLATION LEVEL " + level)
+  }
+  if options.read_only is Some(value) {
+    clauses.push(if value { "READ ONLY" } else { "READ WRITE" })
+  }
+  if options.deferrable is Some(value) {
+    clauses.push(if value { "DEFERRABLE" } else { "NOT DEFERRABLE" })
+  }
+  clauses.join(" ")
+}
+
+///|
+fn quote_savepoint(name : String) -> String raise {
+  if name.is_empty() || name.contains("\u0000") {
+    raise PoolError::InvalidConfig("invalid savepoint name")
+  }
+  "\"" + name.replace_all(old="\"", new="\"\"") + "\""
+}
+
+///|
+fn Transaction::record_completion(
+  self : Transaction,
+  status : TransactionStatus,
+  cause : Error?,
+) -> Unit {
+  self.record.status.val = status
+  emit_event(
+    self.state.pool,
+    TransactionCompleted,
+    Cleanup,
+    connection_id=self.state.connection.id,
+    scope_id=self.state.id,
+    cause?,
+    transaction_status=status,
   )
-  let transaction = client.transaction(options=client_options)
-  Transaction::new(connection, transaction, ClientLease(self.state))
 }
 
 ///|
-/// Run one callback inside a transaction and auto-complete it.
-///
-/// On normal return, the transaction is committed if the callback did not
-/// already finish it explicitly. If the callback raises or is cancelled, the
-/// transaction is rolled back best-effort unless it was already finished.
-pub async fn[T] Session::with_transaction(
-  self : Session,
-  f : async (Transaction) -> T,
-  options~ : TransactionOptions = TransactionOptions(),
-) -> T {
-  let transaction = self.transaction(options~)
-  errdefer (if !transaction.state.finished.val {
-    transaction.rollback_best_effort()
-  })
-  let result = f(transaction)
-  check_pending_cancellation()
-  if !transaction.state.finished.val {
-    transaction.commit_internal()
+/// Retire escaped work before any completion SQL or parent gate release.
+/// This check must not suspend: another task must never acquire this socket
+/// between detecting an active child and aborting its physical client.
+fn Transaction::abort_active_children(self : Transaction) -> Bool {
+  if self.state.active_ops.val == 0 {
+    return false
   }
-  result
+  self.state.releasing.val = true
+  let cause = PoolError::OperationInProgress
+  self.state.connection.failure.val = Some(cause)
+  if self.state.connection.client.val is Some(client) {
+    client.abort()
+  }
+  // Closing a socket does not acknowledge rollback. Do not overwrite a
+  // confirmed result or emit completion again during errdefer/final defer.
+  if self.record.status.val == InProgress {
+    self.record_completion(OutcomeUnknown, Some(cause))
+  }
+  true
 }
 
 ///|
-/// Release the outer scope holding a pooled transaction's connection lease.
-fn TransactionOwner::finish_scope(self : TransactionOwner) -> Unit {
-  match self {
-    ClientLease(state) => state.finish_transaction_scope()
-    ParentTransaction(state) => state.finish_nested_scope()
+async fn Transaction::rollback_internal(self : Transaction) -> Unit {
+  let client = self.state.scoped_client()
+  self.state.releasing.val = true
+  defer {
+    self.state.released.val = true
   }
-}
-
-///|
-/// Start one transaction operation or reject work after completion begins.
-async fn TransactionState::begin_operation(
-  self : TransactionState,
-) -> @client.Transaction {
-  if self.finished.val {
-    raise PoolError::ScopeExpired
-  }
-  self.gate.acquire()
-  if self.finished.val {
-    self.gate.release()
-    raise PoolError::ScopeExpired
-  }
-  if self.transaction.val is Some(transaction) {
-    transaction
-  } else {
-    self.gate.release()
-    raise PoolError::ScopeExpired
-  }
-}
-
-///|
-/// Finish one transaction operation.
-fn TransactionState::finish_operation(self : TransactionState) -> Unit {
-  self.gate.release()
-}
-
-///|
-/// Start one nested transaction or savepoint scope on this transaction.
-async fn TransactionState::begin_nested_scope(
-  self : TransactionState,
-) -> (@client.Transaction, ConnectionState) {
-  if self.finished.val {
-    raise PoolError::ScopeExpired
-  }
-  self.gate.acquire()
-  if self.finished.val {
-    self.gate.release()
-    raise PoolError::ScopeExpired
-  }
-  if self.transaction.val is Some(transaction) {
-    (transaction, self.connection)
-  } else {
-    self.gate.release()
-    raise PoolError::ScopeExpired
-  }
-}
-
-///|
-/// Finish one nested transaction or savepoint scope on this transaction.
-fn TransactionState::finish_nested_scope(self : TransactionState) -> Unit {
-  self.finish_operation()
-}
-
-///|
-/// Access the raw transaction while an outer transaction scope owns the gate.
-fn TransactionState::scoped_transaction(
-  self : TransactionState,
-) -> @client.Transaction raise {
-  if self.finished.val {
-    raise PoolError::ScopeExpired
-  }
-  if self.transaction.val is Some(transaction) {
-    transaction
-  } else {
-    raise PoolError::ScopeExpired
-  }
-}
-
-///|
-/// Release the outer client or parent transaction once this transaction completes.
-fn TransactionState::release_owner_scope(self : TransactionState) -> Unit {
-  if self.owner_released.val {
+  if client.is_closed() {
+    // An escaped nested scope may already have aborted the shared socket.
+    // Retain that diagnostic without attempting rollback on a dead client.
+    self.record_completion(OutcomeUnknown, self.state.connection.failure.val)
     return
   }
-  self.owner_released.val = true
-  self.owner.finish_scope()
+  let sql = match self.savepoint {
+    None => "ROLLBACK"
+    Some(name) => "ROLLBACK TO SAVEPOINT \{name}; RELEASE SAVEPOINT \{name}"
+  }
+  let outcome = try self.state.cleanup(() => client.batch_execute(sql)) catch {
+    error => Err(error)
+  } noraise {
+    _ => Ok(())
+  }
+  match outcome {
+    Err(error) => {
+      self.record_completion(OutcomeUnknown, Some(error))
+      raise error
+    }
+    Ok(_) => ()
+  }
+  self.record_completion(RolledBack, None)
 }
 
 ///|
-/// Wait for every active operation to finish and take ownership of the transaction.
-async fn Transaction::take_for_completion(
-  self : Transaction,
-) -> @client.Transaction {
-  if self.state.finished.val {
-    raise PoolError::ScopeExpired
-  }
-  self.state.gate.acquire()
-  errdefer self.state.gate.release()
-  if self.state.finished.val {
-    raise PoolError::ScopeExpired
-  }
-  check_pending_cancellation()
-  self.state.finished.val = true
-  if self.state.transaction.val is Some(transaction) {
-    self.state.transaction.val = None
-    self.state.gate.release()
-    transaction
-  } else {
-    raise PoolError::ScopeExpired
-  }
-}
-
-///|
-/// Commit one pooled transaction after all in-flight operations finish.
+/// Once COMMIT may have been written, only the actual server tag decides the
+/// record. Never issue ROLLBACK in response to a missing COMMIT response.
+/// The scope exit protects completion and propagates cancellation afterwards.
 async fn Transaction::commit_internal(self : Transaction) -> Unit {
-  let transaction = self.take_for_completion()
-  defer self.state.release_owner_scope()
-  defer check_pending_cancellation()
-  @async.protect_from_cancel(() => transaction.commit())
-}
-
-///|
-/// Roll back one pooled transaction while ignoring rollback failures.
-async fn Transaction::rollback_best_effort(self : Transaction) -> Unit {
-  try
-    @async.protect_from_cancel(() => {
-      let transaction = self.take_for_completion()
-      defer self.state.release_owner_scope()
-      transaction.rollback()
+  ignore(remaining_ms(self.state.deadline, Query))
+  let client = self.state.begin_operation()
+  defer self.state.finish_operation()
+  let control = client.begin_request_control()
+  defer client.end_request_control()
+  self.state.releasing.val = true
+  defer {
+    self.state.released.val = true
+  }
+  let failure = try
+    self.state.cleanup(() => {
+      client.batch_execute(
+        match self.savepoint {
+          None => "COMMIT"
+          Some(name) => "RELEASE SAVEPOINT \{name}"
+        },
+      )
     })
   catch {
-    _ => ()
+    error => Some(error)
   } noraise {
-    _ => ()
+    _ => None
+  }
+  let tags = control.command_tags()
+  if self.savepoint is None && tags.contains("COMMIT") {
+    self.record_completion(Committed, failure)
+  } else if self.savepoint is None && tags.contains("ROLLBACK") {
+    self.record_completion(RolledBack, failure)
+    raise PoolError::CommitRolledBack
+  } else if self.savepoint is Some(_) && tags.contains("RELEASE") {
+    self.record_completion(SavepointReleased, failure)
+  } else if control.was_sent() {
+    client.abort()
+    self.record_completion(OutcomeUnknown, failure)
+    // Preserve explicit database errors while retaining the independent
+    // uncertain completion record. Lost responses use a distinct error.
+    if failure is Some(@client.ClientError::Database(_) as error) {
+      raise error
+    }
+    raise PoolError::CommitOutcomeUnknown
+  } else {
+    self.state.released.val = false
+    self.state.releasing.val = false
+    self.rollback_internal() catch {
+      _ => ()
+    }
+  }
+  if failure is Some(error) {
+    raise error
   }
 }
 
 ///|
-/// Run one async operation against the live transaction.
-async fn[T] Transaction::run_operation(
-  self : Transaction,
-  op : async (@client.Transaction) -> T,
-) -> T {
-  let transaction = self.state.begin_operation()
-  defer self.state.finish_operation()
-  check_pending_cancellation()
-  defer check_pending_cancellation()
-  @async.protect_from_cancel(() => op(transaction))
-}
-
-///|
-/// Commit this pooled transaction explicitly.
-///
-/// Preconditions: the transaction must not already be finished, and no nested
-/// transaction/savepoint scope may still be active. The call waits for any
-/// in-flight non-exclusive operation to finish first.
-pub async fn Transaction::commit(self : Transaction) -> Unit {
-  self.commit_internal()
-}
-
-///|
-/// Roll back this pooled transaction explicitly.
-///
-/// Preconditions and completion behavior match `commit()`, except the final SQL
-/// action is `ROLLBACK`.
-pub async fn Transaction::rollback(self : Transaction) -> Unit {
-  let transaction = self.take_for_completion()
-  defer self.state.release_owner_scope()
-  defer check_pending_cancellation()
-  @async.protect_from_cancel(() => transaction.rollback())
-}
-
-///|
-/// Start one nested transaction backed by an unnamed savepoint.
-///
-/// Preconditions: the parent transaction must still be active and must not
-/// already be inside another nested transaction scope. The returned nested
-/// transaction must also be committed or rolled back.
-async fn Transaction::transaction(self : Transaction) -> Transaction {
-  let (transaction, connection) = self.state.begin_nested_scope()
-  errdefer self.state.finish_nested_scope()
-  let nested = transaction.transaction()
-  Transaction::new(connection, nested, ParentTransaction(self.state))
-}
-
-///|
-/// Start one nested transaction backed by a named savepoint.
-///
-/// `name` is passed to the client as a case-sensitive savepoint identifier.
-/// The client quotes it and rejects empty names or NUL characters.
-async fn Transaction::savepoint(
-  self : Transaction,
-  name : String,
-) -> Transaction {
-  let (transaction, connection) = self.state.begin_nested_scope()
-  errdefer self.state.finish_nested_scope()
-  let nested = transaction.savepoint(name)
-  Transaction::new(connection, nested, ParentTransaction(self.state))
-}
-
-///|
-/// Run one callback inside an unnamed savepoint-backed nested transaction.
-///
-/// On success the nested transaction is committed if still unfinished; on error
-/// or cancellation it is rolled back best-effort.
-pub async fn[T] Transaction::with_transaction(
-  self : Transaction,
-  f : async (Transaction) -> T,
-) -> T {
-  let nested = self.transaction()
-  errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
-  let result = f(nested)
-  check_pending_cancellation()
-  if !nested.state.finished.val {
-    nested.commit_internal()
+async fn[T, E] transaction_scope(
+  parent : ClientLeaseState,
+  sql : String,
+  savepoint : String?,
+  f : async (Transaction) -> Result[T, E],
+  deadline : Deadline?,
+  record : TransactionRecord,
+  claimed~ : Bool = false,
+) -> Result[T, E] {
+  if !claimed {
+    record.claim()
+  }
+  let client = parent.begin_operation()
+  defer parent.finish_operation()
+  let deadline = earlier_deadline(parent.deadline, deadline)
+  let child = Session::new(
+    parent.pool,
+    parent.connection,
+    deadline?,
+    cleanup_deadline=parent.cleanup_deadline,
+    cleanup_mode=parent.cleanup_mode,
+  )
+  let transaction : Transaction = { state: child.state, savepoint, record, }
+  defer {
+    ignore(transaction.abort_active_children())
+    child.state.releasing.val = true
+    child.state.released.val = true
+  }
+  let started = Ref(false)
+  let rollback = () => {
+    if !transaction.abort_active_children() &&
+      started.val &&
+      record.status.val == InProgress {
+      transaction.rollback_internal()
+    }
+  }
+  let result = with_scope_exit(
+    () => {
+      // BEGIN can complete as cancellation arrives; cleanup must own it
+      // before cancellation is propagated to the caller.
+      parent.supervise(
+        client,
+        () => {
+          client.batch_execute(sql)
+          started.val = true
+          record.status.val = InProgress
+        },
+        deadline?,
+      )
+      with_deadline(deadline, Query, () => f(transaction))
+    },
+    result => {
+      // Normal completion owns recovery for errors before COMMIT submission.
+      // A possibly sent COMMIT records its outcome before raising, so the
+      // conditional rollback cannot append SQL to an uncertain completion.
+      errdefer (rollback() catch { _ => () })
+      // commit_internal owns an operation itself; check children first.
+      if transaction.abort_active_children() {
+        if result is Ok(_) {
+          raise PoolError::OperationInProgress
+        }
+      } else {
+        match result {
+          Ok(_) => transaction.commit_internal()
+          Err(_) => transaction.rollback_internal() catch { _ => () }
+        }
+      }
+    },
+    rollback,
+  )
+  // A successful nested scope ends its cleanup episode. Failed cleanup keeps
+  // the budget for the remaining outer unwind and retires the physical client.
+  if !client.is_closed() && !parent.cleanup_mode {
+    parent.cleanup_deadline.val = None
   }
   result
 }
 
 ///|
-/// Run one callback inside a named savepoint-backed nested transaction.
-///
-/// On success the nested transaction is committed if still unfinished; on error
-/// or cancellation it is rolled back best-effort. The client quotes `name` as
-/// a case-sensitive identifier and rejects empty names or NUL characters.
-pub async fn[T] Transaction::with_savepoint(
+/// Ok requests commit; Err, an exception, or cancellation requests rollback.
+/// Normal completion records its outcome before propagating cancellation,
+/// even if commit or rollback fails. An existing callback exception keeps priority.
+pub async fn[T, E] Session::with_transaction(
+  self : Session,
+  f : async (Transaction) -> Result[T, E],
+  options~ : TransactionOptions = TransactionOptions(),
+  deadline? : Deadline,
+  record~ : TransactionRecord = TransactionRecord(),
+) -> Result[T, E] {
+  transaction_scope(self.state, begin_sql(options), None, f, deadline, record)
+}
+
+///|
+/// Ok releases this savepoint; it does not commit the enclosing transaction.
+pub async fn[T, E] Transaction::with_savepoint(
   self : Transaction,
   name : String,
-  f : async (Transaction) -> T,
-) -> T {
-  let nested = self.savepoint(name)
-  errdefer (if !nested.state.finished.val { nested.rollback_best_effort() })
-  let result = f(nested)
-  check_pending_cancellation()
-  if !nested.state.finished.val {
-    nested.commit_internal()
-  }
-  result
+  f : async (Transaction) -> Result[T, E],
+  deadline? : Deadline,
+  record~ : TransactionRecord = TransactionRecord(),
+) -> Result[T, E] {
+  let name = quote_savepoint(name)
+  transaction_scope(
+    self.state,
+    "SAVEPOINT \{name}",
+    Some(name),
+    f,
+    deadline,
+    record,
+  )
 }
 
 ///|
-/// Run one query inside this transaction and collect all rows.
-pub async fn Transaction::query_all(
+pub async fn[T, E] Transaction::with_transaction(
   self : Transaction,
-  sql : String,
-  params~ : Array[&@client.ToSql] = [],
-) -> Array[@client.Row] {
-  self.with_prepared(sql, prepared => prepared.query_all(params~))
+  f : async (Transaction) -> Result[T, E],
+  deadline? : Deadline,
+  record~ : TransactionRecord = TransactionRecord(),
+) -> Result[T, E] {
+  self.with_savepoint(
+    "pgpool_\{self.state.pool.next_scope_id.val}",
+    f,
+    deadline?,
+    record~,
+  )
 }
 
 ///|
-/// Run one query inside this transaction and require exactly one row.
-///
-/// Edge behavior: this helper materializes all rows first and raises
-/// `@client.ClientError::RowCount` when PostgreSQL returned anything other than
-/// exactly one row.
-pub async fn Transaction::query_one(
-  self : Transaction,
-  sql : String,
-  params~ : Array[&@client.ToSql] = [],
-) -> @client.Row {
-  self.with_prepared(sql, prepared => prepared.query_one(params~))
-}
-
-///|
-/// Run one query inside this transaction and allow zero or one rows.
-///
-/// Edge behavior: raises `@client.ClientError::RowCount` when more than one row is
-/// returned.
-pub async fn Transaction::query_opt(
-  self : Transaction,
-  sql : String,
-  params~ : Array[&@client.ToSql] = [],
-) -> @client.Row? {
-  self.with_prepared(sql, prepared => prepared.query_opt(params~))
-}
-
-///|
-/// Run one typed query inside the transaction and collect all rows.
-///
-/// The connection-local statement cache is used unless caching is disabled.
-pub async fn Transaction::query_typed_all(
-  self : Transaction,
-  sql : String,
-  param_types : Array[@client.Type],
-  params~ : Array[&@client.ToSql] = [],
-) -> Array[@client.Row] {
-  self.with_prepared_typed(sql, param_types, prepared => {
-    prepared.query_all(params~)
-  })
-}
-
-///|
-/// Execute one command inside this transaction and return its affected row count as `UInt64`.
-pub async fn Transaction::execute(
-  self : Transaction,
-  sql : String,
-  params~ : Array[&@client.ToSql] = [],
-) -> UInt64 {
-  self.with_prepared(sql, prepared => prepared.execute(params~))
-}
-
-///|
-/// Execute one or more SQL commands inside this transaction.
-pub async fn Transaction::batch_execute(
-  self : Transaction,
-  sql : String,
-) -> Unit {
-  self.run_operation(txn => txn.batch_execute(sql))
-}
-
-///|
-/// Perform a lightweight health check while the transaction is open.
-///
-/// Side effects: executes `select 1::int4 as value` inside the current
-/// transaction instead of using a transaction-independent probe.
-pub async fn Transaction::check_connection(self : Transaction) -> Unit {
-  self.run_operation(txn => {
-    ignore(txn.query("select 1::int4 as value").finish())
-  })
+pub async fn[T, E] Pool::with_transaction(
+  self : Pool,
+  f : async (Transaction) -> Result[T, E],
+  options~ : TransactionOptions = TransactionOptions(),
+  deadline? : Deadline,
+  timeouts? : Timeouts,
+  record~ : TransactionRecord = TransactionRecord(),
+) -> Result[T, E] {
+  record.claim()
+  self.with_session(
+    session => {
+      transaction_scope(
+        session.state,
+        begin_sql(options),
+        None,
+        f,
+        deadline,
+        record,
+        claimed=true,
+      )
+    },
+    deadline?,
+    timeouts?,
+  )
 }

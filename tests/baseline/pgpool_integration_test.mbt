@@ -6,14 +6,14 @@ fn make_pool_config(
   create_ms~ : Int32? = None,
   recycle_ms~ : Int32? = None,
   queue_mode~ : @pgpool.QueueMode = @pgpool.QueueMode::fifo(),
-  recycling_method~ : @pgpool.RecyclingMethod = @pgpool.RecyclingMethod::fast(),
+  health_check~ : @pgpool.HealthCheck = @pgpool.HealthCheck::Passive,
   statement_cache_capacity~ : Int32 = 100,
 ) -> @pgpool.PoolConfig raise {
   PoolConfig(
     max_size,
     timeouts=Timeouts(wait_ms~, create_ms~, recycle_ms~),
     queue_mode~,
-    recycling_method~,
+    health_check~,
     statement_cache_capacity~,
   )
 }
@@ -84,7 +84,7 @@ async fn assert_pool_idle_notification(
         ssl_mode~,
         application_name="moonbit-postgres-pool-idle-notification",
       ),
-      PoolConfig(1),
+      PoolConfig(1, reset_policy=PreserveSession),
     )
     let publisher = start_client(
       as_client_config(
@@ -161,9 +161,8 @@ async test "integration pool with_session keeps affinity" {
 }
 
 ///|
-/// A bare BEGIN must not let a Fast pool hand an open transaction to another
-/// borrower. Releasing the lease restores the single slot for a new backend.
-async test "integration pool Fast retires an active transaction on return" {
+/// Return rolls back a bare BEGIN before the next borrower reuses the backend.
+async test "integration pool rolls back an active transaction on return" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
@@ -179,15 +178,15 @@ async test "integration pool Fast retires an active transaction on return" {
       session.batch_execute("BEGIN")
       pid
     })
-    assert_eq(pool.status().size, 0)
-    assert_eq(pool.status().available, 0)
+    assert_eq(pool.status().size, 1)
+    assert_eq(pool.status().available, 1)
 
     let replacement = pool.query_one(
       "select pg_backend_pid()::int4 as pid, 7::int4 as value",
     )
     let replacement_pid : Int32 = replacement.get_name("pid")
     let value : Int32 = replacement.get_name("value")
-    assert_true(first_pid != replacement_pid)
+    assert_eq(first_pid, replacement_pid)
     assert_eq(value, 7)
     assert_eq(pool.status().size, 1)
     assert_eq(pool.status().available, 1)
@@ -197,8 +196,8 @@ async test "integration pool Fast retires an active transaction on return" {
 
 ///|
 /// A failed statement inside BEGIN leaves PostgreSQL in E until rollback.
-/// The next borrower must get a working new physical connection.
-async test "integration pool Fast retires a failed transaction on return" {
+/// Return rolls back the failed transaction before reusing the connection.
+async test "integration pool rolls back a failed transaction on return" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
@@ -222,15 +221,15 @@ async test "integration pool Fast retires a failed transaction on return" {
       )
       pid
     })
-    assert_eq(pool.status().size, 0)
-    assert_eq(pool.status().available, 0)
+    assert_eq(pool.status().size, 1)
+    assert_eq(pool.status().available, 1)
 
     let replacement = pool.query_one(
       "select pg_backend_pid()::int4 as pid, 8::int4 as value",
     )
     let replacement_pid : Int32 = replacement.get_name("pid")
     let value : Int32 = replacement.get_name("value")
-    assert_true(first_pid != replacement_pid)
+    assert_eq(first_pid, replacement_pid)
     assert_eq(value, 8)
     assert_eq(pool.status().size, 1)
     assert_eq(pool.status().available, 1)
@@ -239,9 +238,9 @@ async test "integration pool Fast retires a failed transaction on return" {
 }
 
 ///|
-/// Ending the transaction before return keeps the same idle backend and its
-/// session settings available for Fast recycling.
-async test "integration pool Fast reuses a rolled back idle connection" {
+/// Ending the transaction keeps the physical backend; default reset restores
+/// startup settings before another borrower observes it.
+async test "integration pool resets a rolled back idle connection" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
@@ -272,7 +271,7 @@ async test "integration pool Fast reuses a rolled back idle connection" {
       .query_one("show application_name")
       .get_name("application_name")
     assert_eq(next_pid, first_pid)
-    assert_eq(application_name, "moonbit-fast-idle")
+    assert_eq(application_name, "moonbit-postgres-pool-rolled-back")
     pool.close()
   })
 }
@@ -361,40 +360,42 @@ async test "integration pool supplies cross-session concurrency" {
 }
 
 ///|
-/// A transaction owns its session until the callback ends. Work queued through
-/// the outer Session must not interleave with it.
-async test "integration pooled transaction blocks outer session FIFO" {
+async test "integration pooled transaction rejects outer session and restores it" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
     let pool = make_pool(
       group,
-      as_client_config(config, application_name="moonbit-postgres-pool-tx"),
-      make_pool_config(1),
+      as_client_config(config, application_name="pool-tx-exclusive"),
+      PoolConfig(1),
     )
-
-    let value : Int32 = pool.with_session(session => {
-      let waiters : @async.Queue[@async.Task[Int32]] = Queue(kind=Unbounded)
-      session.with_transaction(tx => {
+    defer pool.close()
+    pool.with_session(session => {
+      let result : Result[Unit, Unit] = session.with_transaction(tx => {
         tx.batch_execute(
-          "create temp table moon_tx_fifo(value int4); insert into moon_tx_fifo values (9)",
+          "create temp table moon_tx(value int4); insert into moon_tx values (9)",
         )
-        let task = group.spawn(no_wait=true, () => {
-          session
-          .query_one("select max(value)::int4 as value from moon_tx_fifo")
-          .get_name("value")
+        assert_true(
+          expect_error_async(() => session.check_connection())
+          is @pgpool.PoolError::OperationInProgress,
+        )
+        let saved : Result[Unit, Unit] = tx.with_savepoint("child", child => {
+          assert_true(
+            expect_error_async(() => tx.check_connection())
+            is @pgpool.PoolError::OperationInProgress,
+          )
+          child.check_connection()
+          Ok(())
         })
-        waiters.put(task)
-        assert_task_stays_pending(
-          task, "expected outer Session call to wait until transaction completion",
-        )
+        assert_eq(saved, Ok(()))
+        tx.check_connection()
+        Ok(())
       })
-      let task = waiters.get()
-      wait_for_task_or_fail(
-        task, "expected outer Session call to resume after transaction completion",
+      assert_eq(result, Ok(()))
+      assert_eq(
+        session.query_one("select value from moon_tx").get_name("value"),
+        9,
       )
     })
-    assert_eq(value, 9)
-    pool.close()
   })
 }
 

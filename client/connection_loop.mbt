@@ -60,6 +60,16 @@ async fn Driver::run(self : Driver, group : @async.TaskGroup[Unit]) -> Unit {
     while true {
       let request = self.shared.requests.get()
       active = Some(request)
+      if request.record.control is Some(control) && control.cancelled.val {
+        if !request.record.cleanup {
+          self.close_request(request, Some(ClientError::RequestCancelled))
+          active = None
+          continue
+        }
+        control.fence.wait()
+      }
+      self.shared.driver_request.val = Some(request.record)
+      request.record.sent.val = true
       match request.kind {
         Terminate => {
           self.stream.write(request.bytes)
@@ -104,6 +114,13 @@ async fn Driver::receive_messages(
             raise ClientError::UnexpectedMessage(
               "backend response without an active request",
             )
+        }
+      }
+      if self.shared.driver_request.val is Some(record) {
+        match message {
+          CommandComplete(body) => record.tags.push(body.tag_str())
+          ReadyForQuery(_) => record.complete.val = true
+          _ => ()
         }
       }
       if message is ReadyForQuery(_) {
@@ -169,6 +186,7 @@ async fn Driver::forward_message_to_request(
 ) -> Unit {
   match message {
     ReadyForQuery(body) => {
+      request.record.complete.val = true
       self.shared.transaction_status.val = body.status
       request.responses.put(message)
     }
@@ -192,6 +210,15 @@ async fn Driver::drain_copy_in_request(
   let copy_error = request.copy_error.unwrap()
   let writer_stopped = Ref(false)
   let mut writer : @async.Task[Unit]? = None
+  defer @async.protect_from_cancel(() => {
+    if writer is Some(task) {
+      task.cancel()
+      task.wait() catch {
+        @async.WaitedTaskAlreadyCancelled => ()
+        error => raise error
+      }
+    }
+  })
   while true {
     let message = incoming.get()
     match message {
@@ -215,6 +242,7 @@ async fn Driver::drain_copy_in_request(
         }
       }
       ReadyForQuery(body) => {
+        request.record.complete.val = true
         if writer is Some(writer) {
           writer.wait()
         }
@@ -235,9 +263,9 @@ fn Driver::spawn_copy_writer(
   input : @async.Queue[CopyInAction],
   stopped : @ref.Ref[Bool],
 ) -> @async.Task[Unit] {
-  group.spawn(no_wait=true, allow_failure=true, () => {
-    self.drain_copy_input(input, stopped)
-  })
+  // Failure belongs to this physical connection's executor task group. It must
+  // cancel the reader/driver even if PostgreSQL never sends ReadyForQuery.
+  group.spawn(no_wait=true, () => self.drain_copy_input(input, stopped))
 }
 
 ///|
@@ -269,10 +297,8 @@ async fn Driver::drain_copy_input(
         self.stream.write(payload.to_bytes())
         return
       }
-      Fail(message) => {
-        let payload = Buffer()
-        @frontend.copy_fail(@proto.utf8_encode(message)[:], payload)
-        self.stream.write(payload.to_bytes())
+      Fail(bytes) => {
+        self.stream.write(bytes)
         return
       }
     }
@@ -387,15 +413,8 @@ fn Shared::push_async_message(self : Shared, message : AsyncMessage) -> Unit {
 ///|
 /// Read and parse one backend message from the connection stream.
 async fn Driver::read_message(self : Driver) -> @backend.Message {
-  let header = self.stream.read_exactly(5)
-  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
-  let body = self.stream.read_exactly(body_len - 4)
-  let packet = Buffer(size_hint=header.length() + body.length())
-  packet.write_bytes(header)
-  packet.write_bytes(body)
-  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
-    parsed.message
-  } else {
-    raise ClientError::UnexpectedMessage("incomplete backend message")
-  }
+  read_backend_message(
+    self.stream,
+    self.shared.config.max_backend_message_body_bytes,
+  )
 }

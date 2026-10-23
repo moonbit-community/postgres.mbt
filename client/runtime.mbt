@@ -76,8 +76,8 @@ priv enum CopyInAction {
   Data(Bytes)
   /// Finish COPY successfully with `CopyDone`.
   Finish
-  /// Abort COPY with a textual error message.
-  Fail(String)
+  /// Abort COPY with a complete, validated `CopyFail` frame.
+  Fail(Bytes)
 }
 
 ///|
@@ -91,6 +91,7 @@ let request_response_queue_kind : @aqueue.Kind = Blocking(8)
 /// The request owns the exact bytes to write on the wire and the queue that the
 /// connection loop will feed with backend messages for this request.
 priv struct Request {
+  record : RequestRecord
   kind : RequestKind
   bytes : Bytes
   responses : @async.Queue[@backend.Message]
@@ -133,6 +134,9 @@ priv struct OpContext {
 /// type metadata, and publish async messages. Only connection identity allocation
 /// uses a module-level counter.
 priv struct Shared {
+  driver_request : @ref.Ref[RequestRecord?]
+  request_control : @ref.Ref[RequestControl?]
+  next_request_id : @ref.Ref[Int64]
   connection_id : UInt64
   config : Config
   requests : @async.Queue[Request]
@@ -184,7 +188,9 @@ struct ClientExecutor {
 priv struct StreamCleanup {
   context : OpContext
   bytes : Bytes
-  mut done : Bool
+  /// A started Close is not necessarily a successful Close. Keep its result
+  /// so all later finishers join it and observe the same cleanup failure.
+  mut completion : Completion?
 }
 
 ///|

@@ -29,6 +29,9 @@ fn Client::create_with_capacity_unchecked(
   let types : Map[@proto.Oid, Type] = Map([])
   seed_builtin_types(types)
   let shared = {
+    driver_request: Ref(None),
+    request_control: Ref(None),
+    next_request_id: Ref(0L),
     config,
     requests: Queue(kind=Unbounded),
     async_messages: Queue(kind=Blocking(capacity)),
@@ -190,6 +193,7 @@ async fn ClientExecutor::run_connection(
 async fn connect_authenticated(
   config : Config,
 ) -> (ConnectionSetup, StartupState) {
+  config.validate_resource_limits()
   let setup = connect_stream(config)
   let transferred = Ref(false)
   defer (if !transferred.val { setup.stream.close() })
@@ -272,6 +276,7 @@ pub async fn Client::close(self : Client) -> Unit {
   }
   let responses = @async.Queue(kind=Unbounded)
   let submitted = self.shared.requests.try_put({
+    record: self.new_request_record(true),
     kind: Terminate,
     bytes: terminate_bytes(),
     responses,
@@ -406,4 +411,10 @@ pub async fn CancelToken::cancel(self : CancelToken) -> Unit {
   let buf = Buffer()
   @frontend.cancel_request(self.process_id.val, self.secret_key.val, buf)
   conn.write(buf.to_bytes())
+  // The server closes this connection after processing the cancel packet.
+  // Waiting for EOF prevents a late cancel from reaching a subsequent query.
+  let byte = FixedArray::make(1, b'\x00')
+  while conn.read(byte) != 0 {
+    ()
+  }
 }

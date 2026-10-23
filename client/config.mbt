@@ -88,6 +88,12 @@ pub struct Config {
   application_name : String
   /// Optional PostgreSQL `options` startup parameter.
   options : String?
+  /// Maximum bytes in one backend message body, excluding its tag and length.
+  /// Must be in 1..=2_147_483_642; defaults to 64 MiB.
+  max_backend_message_body_bytes : Int32
+  /// Maximum SCRAM PBKDF2 iterations accepted from the server.
+  /// Must be positive; defaults to 100_000.
+  scram_max_iterations : Int32
   /// Optional end-to-end connection timeout in milliseconds.
   connect_timeout_ms : Int32?
   /// Whether TCP keepalive should be enabled on the socket.
@@ -116,6 +122,10 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "channel_binding": @debug.Repr(self.channel_binding),
     "application_name": @debug.Repr(self.application_name),
     "options": @debug.Repr(self.options),
+    "max_backend_message_body_bytes": @debug.Repr(
+      self.max_backend_message_body_bytes,
+    ),
+    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
     "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
@@ -128,6 +138,9 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
 /// Defaults are chosen to keep secure TLS on the main path: port `5432`,
 /// `ssl_mode = SslMode::VerifyFull`, and database name equal to the user name.
 /// Callers pass `application_name` explicitly.
+/// Backend bodies default to 64 MiB and SCRAM to 100_000 iterations. Both
+/// budgets must be positive; the executor validates them before connecting and
+/// reports invalid settings through `Client::ready` without a throwing constructor.
 pub fn Config::Config(
   host : String,
   hostaddr? : String,
@@ -140,6 +153,8 @@ pub fn Config::Config(
   channel_binding~ : ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -156,6 +171,8 @@ pub fn Config::Config(
     channel_binding,
     application_name,
     options,
+    max_backend_message_body_bytes,
+    scram_max_iterations,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
@@ -166,7 +183,8 @@ pub fn Config::Config(
 /// Internal constructor for a single PostgreSQL connection target.
 ///
 /// Used by pgpool to build one client config per endpoint. Callers
-/// supply every field explicitly; no defaults or validation are applied here.
+/// supply connection fields explicitly; resource limits retain their defaults.
+/// Validation happens before connection startup.
 #internal(internal, "for internal use only")
 pub fn Config::new_internal(
   host : String,
@@ -183,6 +201,8 @@ pub fn Config::new_internal(
   connect_timeout_ms : Int32?,
   keepalives : Bool?,
   keepalives_idle_s : Int32?,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
 ) -> Config {
   {
     host,
@@ -196,8 +216,24 @@ pub fn Config::new_internal(
     channel_binding,
     application_name,
     options,
+    max_backend_message_body_bytes,
+    scram_max_iterations,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
+  }
+}
+
+///|
+/// Validate resource budgets before opening the transport.
+fn Config::validate_resource_limits(self : Config) -> Unit raise ClientError {
+  if self.scram_max_iterations < 1 {
+    raise ClientError::InvalidConfig("scram_max_iterations must be positive")
+  }
+  if self.max_backend_message_body_bytes < 1 ||
+    self.max_backend_message_body_bytes > 2_147_483_642 {
+    raise ClientError::InvalidConfig(
+      "max_backend_message_body_bytes must be between 1 and 2147483642",
+    )
   }
 }

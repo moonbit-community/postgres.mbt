@@ -1,142 +1,265 @@
-// GenericClient implementations for pooled handles.
-
 ///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn query_all(self, sql, params?) {
-  self.query_all(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn query_one(self, sql, params?) {
-  self.query_one(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn query_opt(self, sql, params?) {
-  self.query_opt(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn query_typed_all(
+pub impl GenericClient for Session with fn query_all(
   self,
   sql,
-  param_types,
   params?,
+  deadline?,
 ) {
-  self.query_typed_all(sql, param_types, params=params.unwrap_or([]))
+  self.query_all(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn execute(self, sql, params?) {
-  self.execute(sql, params=params.unwrap_or([]))
+pub impl GenericClient for Transaction with fn query_all(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.query_all(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn batch_execute(self, sql) {
-  self.batch_execute(sql)
+pub impl GenericClient for Pool with fn query_all(self, sql, params?, deadline?) {
+  self.query_all(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pools implement the shared high-level query trait using automatic checkout.
-pub impl GenericClient for Pool with fn check_connection(self) {
-  self.check_connection()
+pub impl GenericClient for Session with fn query_one(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.query_one(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn query_all(self, sql, params?) {
-  self.query_all(sql, params=params.unwrap_or([]))
+pub impl GenericClient for Transaction with fn query_one(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.query_one(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn query_one(self, sql, params?) {
-  self.query_one(sql, params=params.unwrap_or([]))
+pub impl GenericClient for Pool with fn query_one(self, sql, params?, deadline?) {
+  self.query_one(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn query_opt(self, sql, params?) {
-  self.query_opt(sql, params=params.unwrap_or([]))
+pub impl GenericClient for Session with fn query_opt(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.query_opt(sql, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled clients implement the shared high-level query trait.
+pub impl GenericClient for Transaction with fn query_opt(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.query_opt(sql, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn query_opt(self, sql, params?, deadline?) {
+  self.query_opt(sql, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Session with fn execute(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.execute(sql, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Transaction with fn execute(
+  self,
+  sql,
+  params?,
+  deadline?,
+) {
+  self.execute(sql, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn execute(self, sql, params?, deadline?) {
+  self.execute(sql, params=params.unwrap_or([]), deadline?)
+}
+
+///|
 pub impl GenericClient for Session with fn query_typed_all(
   self,
   sql,
   param_types,
   params?,
+  deadline?,
 ) {
-  self.query_typed_all(sql, param_types, params=params.unwrap_or([]))
+  self.query_typed_all(sql, param_types, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn execute(self, sql, params?) {
-  self.execute(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn batch_execute(self, sql) {
-  self.batch_execute(sql)
-}
-
-///|
-/// Pooled clients implement the shared high-level query trait.
-pub impl GenericClient for Session with fn check_connection(self) {
-  self.check_connection()
-}
-
-///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn query_all(self, sql, params?) {
-  self.query_all(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn query_one(self, sql, params?) {
-  self.query_one(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn query_opt(self, sql, params?) {
-  self.query_opt(sql, params=params.unwrap_or([]))
-}
-
-///|
-/// Pooled transactions implement the shared high-level query trait.
 pub impl GenericClient for Transaction with fn query_typed_all(
   self,
   sql,
   param_types,
   params?,
+  deadline?,
 ) {
-  self.query_typed_all(sql, param_types, params=params.unwrap_or([]))
+  self.query_typed_all(sql, param_types, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn execute(self, sql, params?) {
-  self.execute(sql, params=params.unwrap_or([]))
+pub impl GenericClient for Pool with fn query_typed_all(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_all(sql, param_types, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn batch_execute(self, sql) {
-  self.batch_execute(sql)
+pub impl GenericClient for Session with fn query_typed_one(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_one(sql, param_types, params=params.unwrap_or([]), deadline?)
 }
 
 ///|
-/// Pooled transactions implement the shared high-level query trait.
-pub impl GenericClient for Transaction with fn check_connection(self) {
-  self.check_connection()
+pub impl GenericClient for Transaction with fn query_typed_one(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_one(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn query_typed_one(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_one(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Session with fn query_typed_opt(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_opt(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Transaction with fn query_typed_opt(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_opt(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn query_typed_opt(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.query_typed_opt(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Session with fn execute_typed(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.execute_typed(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Transaction with fn execute_typed(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.execute_typed(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn execute_typed(
+  self,
+  sql,
+  param_types,
+  params?,
+  deadline?,
+) {
+  self.execute_typed(sql, param_types, params=params.unwrap_or([]), deadline?)
+}
+
+///|
+pub impl GenericClient for Session with fn batch_execute(self, sql, deadline?) {
+  self.batch_execute(sql, deadline?)
+}
+
+///|
+pub impl GenericClient for Transaction with fn batch_execute(
+  self,
+  sql,
+  deadline?,
+) {
+  self.batch_execute(sql, deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn batch_execute(self, sql, deadline?) {
+  self.batch_execute(sql, deadline?)
+}
+
+///|
+pub impl GenericClient for Session with fn check_connection(self, deadline?) {
+  self.check_connection(deadline?)
+}
+
+///|
+pub impl GenericClient for Transaction with fn check_connection(self, deadline?) {
+  self.check_connection(deadline?)
+}
+
+///|
+pub impl GenericClient for Pool with fn check_connection(self, deadline?) {
+  self.check_connection(deadline?)
 }

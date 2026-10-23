@@ -28,15 +28,17 @@ pub fn QueueMode::lifo() -> QueueMode {
 }
 
 ///|
-/// Phase of checkout reported by `PoolError::Timeout`.
-///
-/// `Wait` means the caller could not obtain pool capacity in time, `Create`
-/// means opening a new physical connection timed out, and `Recycle` means
-/// checkout-time validation or cleanup of an idle connection timed out.
+/// Phase reported by timeout errors and diagnostic events.
+/// Wait includes executor readiness and capacity; Create includes startup and
+/// initialization; Recycle is checkout health verification. Query is business
+/// I/O, Hook is acquisition validation, and Cleanup is the shared grace period.
 pub enum TimeoutKind {
   Wait
   Create
   Recycle
+  Hook
+  Query
+  Cleanup
 } derive(Eq, Debug)
 
 ///|
@@ -71,7 +73,7 @@ pub fn TransactionOptions::TransactionOptions(
 /// connection, or recycles an idle connection. `None` leaves the phase
 /// unbounded. Negative values are rejected by `PoolConfig::PoolConfig` or checkout.
 pub struct Timeouts {
-  /// Maximum wait for a checkout slot before raising `PoolError::Timeout(Wait)`.
+  /// Combined executor readiness and capacity wait; zero polls immediately.
   wait_ms : Int32?
   /// Maximum wait for opening a new physical connection.
   create_ms : Int32?
@@ -93,55 +95,20 @@ pub fn Timeouts::Timeouts(
 }
 
 ///|
-/// Checkout-time cleanup policy for already-open physical connections.
-///
-/// This policy runs only when the pool reuses an idle connection. New
-/// connections skip it and instead run the optional `post_create` hook.
-pub enum RecyclingMethod {
-  Fast
-  Verified
-  Clean
+/// Checkout health verification, independent of session reset on return.
+pub(all) enum HealthCheck {
+  Passive
+  Active
   Custom(String)
 } derive(Eq, Debug)
 
 ///|
-/// Construct fast recycling mode.
-///
-/// The pool trusts the idle connection without sending any SQL.
-pub fn RecyclingMethod::fast() -> RecyclingMethod {
-  Fast
-}
-
-///|
-/// Construct verified recycling mode.
-///
-/// The pool runs a lightweight connection check before handing the connection
-/// out again.
-pub fn RecyclingMethod::verified() -> RecyclingMethod {
-  Verified
-}
-
-///|
-/// Construct clean recycling mode.
-///
-/// The pool runs the same cleanup SQL sequence used by
-/// `deadpool-postgres`-style "clean" recycling. In practice this closes
-/// open portals/cursors, resets session settings, clears LISTEN state, releases
-/// advisory locks, and discards temporary objects before reuse.
-/// Prepared statements and their cached plans are preserved so the
-/// connection-local statement cache remains effective across checkouts.
-pub fn RecyclingMethod::clean() -> RecyclingMethod {
-  Clean
-}
-
-///|
-/// Construct custom recycling mode.
-///
-/// `sql` is executed with `batch_execute` during checkout of an idle
-/// connection. If it fails or times out, that physical connection is discarded.
-pub fn RecyclingMethod::custom(sql : String) -> RecyclingMethod {
-  Custom(sql)
-}
+/// Session isolation policy applied before a connection becomes available.
+pub(all) enum ResetPolicy {
+  DiscardAll
+  PreserveSession
+  Reconnect
+} derive(Eq, Debug)
 
 ///|
 /// Capacity and checkout policy for one pool instance.
@@ -152,8 +119,14 @@ pub struct PoolConfig {
   timeouts : Timeouts
   /// Strategy used when selecting from the idle connection list.
   queue_mode : QueueMode
-  /// Cleanup strategy applied when reusing an idle connection.
-  recycling_method : RecyclingMethod
+  /// Checkout health verification, independent of return-time reset.
+  health_check : HealthCheck
+  /// Session isolation before the next borrower receives this connection.
+  reset_policy : ResetPolicy
+  /// One finite grace period shared by drain, rollback, reset and baseline hooks.
+  cleanup_ms : Int32
+  /// Maximum buffered diagnostic events; oldest events are dropped on overflow.
+  event_capacity : Int32
   /// Maximum prepared statements cached on each physical connection.
   ///
   /// `0` disables caching.
@@ -171,7 +144,10 @@ pub fn PoolConfig::PoolConfig(
   max_size : Int32,
   timeouts~ : Timeouts = Timeouts(),
   queue_mode~ : QueueMode = Fifo,
-  recycling_method~ : RecyclingMethod = Fast,
+  health_check~ : HealthCheck = Active,
+  reset_policy~ : ResetPolicy = DiscardAll,
+  cleanup_ms~ : Int32 = 5000,
+  event_capacity~ : Int32 = 256,
   statement_cache_capacity~ : Int32 = 100,
   async_message_capacity~ : Int32 = 256,
 ) -> PoolConfig raise {
@@ -179,7 +155,10 @@ pub fn PoolConfig::PoolConfig(
     max_size,
     timeouts,
     queue_mode,
-    recycling_method,
+    health_check,
+    reset_policy,
+    cleanup_ms,
+    event_capacity,
     statement_cache_capacity,
     async_message_capacity,
   })
@@ -187,7 +166,10 @@ pub fn PoolConfig::PoolConfig(
     max_size,
     timeouts,
     queue_mode,
-    recycling_method,
+    health_check,
+    reset_policy,
+    cleanup_ms,
+    event_capacity,
     statement_cache_capacity,
     async_message_capacity,
   }
@@ -276,6 +258,12 @@ pub struct Config {
   ssl_mode : @client.SslMode?
   ssl_root_cert : String?
   channel_binding : @client.ChannelBinding?
+  /// Maximum body bytes per backend frame on every physical connection.
+  /// Defaults to 64 MiB; valid range is 1..=2_147_483_642.
+  max_backend_message_body_bytes : Int32
+  /// Maximum SCRAM PBKDF2 iterations on every physical connection.
+  /// Defaults to 100_000; must be positive.
+  scram_max_iterations : Int32
   priv targets : Array[ConnectionTarget]
   connect_timeout_ms : Int32?
   keepalives : Bool?
@@ -302,6 +290,10 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "ssl_mode": @debug.Repr(self.ssl_mode),
     "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
     "channel_binding": @debug.Repr(self.channel_binding),
+    "max_backend_message_body_bytes": @debug.Repr(
+      self.max_backend_message_body_bytes,
+    ),
+    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
     "targets": @debug.Repr(self.targets),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
@@ -333,6 +325,8 @@ pub fn Config::Config(
   channel_binding~ : @client.ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -348,6 +342,15 @@ pub fn Config::Config(
     raise ConfigError::DbnameEmpty
   }
   validate_tls_config(ssl_mode, ssl_root_cert)
+  if scram_max_iterations < 1 {
+    raise ConfigError::InvalidConfig("scram_max_iterations must be positive")
+  }
+  if max_backend_message_body_bytes < 1 ||
+    max_backend_message_body_bytes > 2_147_483_642 {
+    raise ConfigError::InvalidConfig(
+      "max_backend_message_body_bytes must be between 1 and 2147483642",
+    )
+  }
   {
     user,
     password,
@@ -357,6 +360,8 @@ pub fn Config::Config(
     ssl_mode: Some(ssl_mode),
     ssl_root_cert,
     channel_binding: Some(channel_binding),
+    max_backend_message_body_bytes,
+    scram_max_iterations,
     targets: targets.copy(),
     connect_timeout_ms,
     keepalives,
@@ -393,6 +398,10 @@ pub suberror PoolError {
   ExecutorAlreadyStarted
   Timeout(TimeoutKind)
   ScopeExpired
+  OperationInProgress
+  TransactionRecordUsed
+  CommitRolledBack
+  CommitOutcomeUnknown
   /// A lifecycle hook returned with an open transaction; the connection was discarded.
   HookLeftOpenTransaction
   InvalidConfig(String)
@@ -411,6 +420,11 @@ fn validate_pool_config(config : PoolConfig) -> Unit raise {
   }
   if config.async_message_capacity < 1 {
     raise PoolError::InvalidConfig("async_message_capacity must be positive")
+  }
+  if config.cleanup_ms < 0 || config.event_capacity < 1 {
+    raise PoolError::InvalidConfig(
+      "cleanup_ms must be non-negative and event_capacity positive",
+    )
   }
   validate_timeout("wait_ms", config.timeouts.wait_ms)
   validate_timeout("create_ms", config.timeouts.create_ms)
@@ -458,6 +472,8 @@ pub fn Config::get_connection_targets(self : Config) -> Array[@client.Config] {
         self.connect_timeout_ms,
         self.keepalives,
         self.keepalives_idle_s,
+        max_backend_message_body_bytes=self.max_backend_message_body_bytes,
+        scram_max_iterations=self.scram_max_iterations,
       ),
     )
   }
@@ -508,3 +524,15 @@ fn validate_tls_config(
     }
   }
 }
+
+///|
+pub extend HealthCheck with @debug.Debug::{to_repr}
+
+///|
+pub extend HealthCheck with Eq::{equal, not_equal}
+
+///|
+pub extend ResetPolicy with @debug.Debug::{to_repr}
+
+///|
+pub extend ResetPolicy with Eq::{equal, not_equal}

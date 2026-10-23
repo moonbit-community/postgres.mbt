@@ -168,6 +168,9 @@ pub fn Message::parse(
   if len < 4 {
     raise InvalidInput("invalid message length: header length < 4")
   }
+  if len == 2_147_483_647 {
+    raise InvalidInput("invalid message length: total length overflow")
+  }
   let total_len = len + 1
   if buf.length() < total_len {
     return None
@@ -288,11 +291,10 @@ pub fn Message::parse(
 }
 
 ///|
-/// Legacy body of `AuthenticationMD5Password`.
+/// Body of `AuthenticationMD5Password`.
 ///
-/// The server provides a 4-byte salt that the frontend would have mixed into
-/// the deprecated MD5 password response. The client package still parses this
-/// message so it can reject MD5 authentication explicitly.
+/// Contains the server's 4-byte salt. The client package parses this message
+/// to reject unsupported MD5 authentication explicitly.
 ///
 /// See:
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
@@ -429,16 +431,11 @@ pub fn AuthenticationSaslFinalBody::data(
 ///|
 /// Body of `BackendKeyData`.
 ///
-/// Protocol 3.2 extends the secret key to a variable-length byte field. This
-/// parser still models the pre-3.2 fixed-width integer form and therefore
-/// documents the current implementation boundary.
+/// Parses the protocol 3.0 format with a fixed-width secret key.
 ///
-/// Wire order on the server side:
+/// Wire order:
 /// 1. `Int32` backend process ID
-/// 2. `Byte n` secret key bytes to end of message
-///
-/// Current implementation boundary:
-/// - parses step 2 as the historical pre-3.2 `Int32` form
+/// 2. `Int32` secret key
 ///
 /// See:
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
