@@ -24,6 +24,7 @@ async test "integration pool custom connector supports target failover" {
           target.keepalives,
           target.keepalives_idle_s,
           max_backend_message_body_bytes=target.max_backend_message_body_bytes,
+          scram_max_iterations=target.scram_max_iterations,
         )
         @client.Client::create(bad_target)
       } else {

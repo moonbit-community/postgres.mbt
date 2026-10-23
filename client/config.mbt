@@ -91,6 +91,9 @@ pub struct Config {
   /// Maximum bytes in one backend message body, excluding its tag and length.
   /// Must be in 1..=2_147_483_642; defaults to 64 MiB.
   max_backend_message_body_bytes : Int32
+  /// Maximum SCRAM PBKDF2 iterations accepted from the server.
+  /// Must be positive; defaults to 100_000.
+  scram_max_iterations : Int32
   /// Optional end-to-end connection timeout in milliseconds.
   connect_timeout_ms : Int32?
   /// Whether TCP keepalive should be enabled on the socket.
@@ -122,6 +125,7 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "max_backend_message_body_bytes": @debug.Repr(
       self.max_backend_message_body_bytes,
     ),
+    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
     "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
@@ -134,6 +138,9 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
 /// Defaults are chosen to keep secure TLS on the main path: port `5432`,
 /// `ssl_mode = SslMode::VerifyFull`, and database name equal to the user name.
 /// Callers pass `application_name` explicitly.
+/// Backend bodies default to 64 MiB and SCRAM to 100_000 iterations. Both
+/// budgets must be positive; the executor validates them before connecting and
+/// reports invalid settings through `Client::ready` without a throwing constructor.
 pub fn Config::Config(
   host : String,
   hostaddr? : String,
@@ -147,6 +154,7 @@ pub fn Config::Config(
   application_name~ : String,
   options? : String,
   max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -164,6 +172,7 @@ pub fn Config::Config(
     application_name,
     options,
     max_backend_message_body_bytes,
+    scram_max_iterations,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
@@ -193,6 +202,7 @@ pub fn Config::new_internal(
   keepalives : Bool?,
   keepalives_idle_s : Int32?,
   max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
 ) -> Config {
   {
     host,
@@ -207,6 +217,7 @@ pub fn Config::new_internal(
     application_name,
     options,
     max_backend_message_body_bytes,
+    scram_max_iterations,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
@@ -216,6 +227,9 @@ pub fn Config::new_internal(
 ///|
 /// Validate resource budgets before opening the transport.
 fn Config::validate_resource_limits(self : Config) -> Unit raise ClientError {
+  if self.scram_max_iterations < 1 {
+    raise ClientError::InvalidConfig("scram_max_iterations must be positive")
+  }
   if self.max_backend_message_body_bytes < 1 ||
     self.max_backend_message_body_bytes > 2_147_483_642 {
     raise ClientError::InvalidConfig(

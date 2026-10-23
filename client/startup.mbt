@@ -197,9 +197,9 @@ priv struct StartupState {
 ///|
 /// Complete PostgreSQL startup, including authentication and parameter capture.
 ///
-/// The function runs before `Shared` exists, so it works directly with the raw
-/// transport stream. Once `ReadyForQuery` arrives, the caller has everything
-/// needed to construct the shared runtime state.
+/// This works directly with the transport before shared readiness is published.
+/// Once `ReadyForQuery` arrives, the caller installs the captured startup state
+/// and marks the connection ready for ordinary requests.
 async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
   let stream = setup.stream
   // Startup parameters are sent exactly once; afterward the server drives the
@@ -262,7 +262,12 @@ async fn startup(setup : ConnectionSetup, config : Config) -> StartupState {
           )
       }
       AuthenticationSaslContinue(body) => {
-        continue_scram(stream, scram, body.data())
+        continue_scram(
+          stream,
+          scram,
+          body.data(),
+          max_iterations=config.scram_max_iterations,
+        )
         continue read_backend_message(
             stream,
             config.max_backend_message_body_bytes,
@@ -371,17 +376,21 @@ async fn begin_scram(
 ) -> (@auth.ScramSha256, Bool) {
   let password = require_password(password)
   let nonce = secure_random_bytes(18)
-  let (mechanism, scram_binding) = choose_scram_binding(
-    body, channel_binding, transport_binding,
-  )
+  let (mechanism, scram_binding) = authentication_step(() => {
+    choose_scram_binding(body, channel_binding, transport_binding)
+  })
   let channel_bound = scram_binding is TlsServerEndPoint(_)
-  let scram = @auth.ScramSha256::new(
-    @proto.utf8_encode(password)[:],
-    scram_binding,
-    nonce[:],
-  )
+  let scram = authentication_step(() => {
+    @auth.ScramSha256::new(
+      @proto.utf8_encode(password)[:],
+      scram_binding,
+      nonce[:],
+    )
+  })
   let buf = Buffer()
-  @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
+  authentication_step(() => {
+    @frontend.sasl_initial_response(mechanism[:], scram.message(), buf)
+  })
   stream.write(buf.to_bytes())
   (scram, channel_bound)
 }
@@ -392,20 +401,41 @@ async fn continue_scram(
   stream : Stream,
   scram : @auth.ScramSha256?,
   data : BytesView,
+  max_iterations~ : Int32,
 ) -> Unit {
   let scram = require_scram(scram)
-  // Each server challenge mutates the SCRAM state machine before the next
-  // client proof is serialized and written.
-  scram.update(data)
+  authentication_step(() => scram.begin_update(data, max_iterations~))
+  while true {
+    let done = authentication_step(() => scram.advance_update(max_steps=256))
+    // Yield after every batch, including the last, so cancellation or the
+    // connection deadline is observed before any final proof is sent.
+    @async.pause()
+    if done {
+      break
+    }
+  }
   let buf = Buffer()
-  @frontend.sasl_response(scram.message(), buf)
+  authentication_step(() => @frontend.sasl_response(scram.message(), buf))
   stream.write(buf.to_bytes())
 }
 
 ///|
 /// Finish an in-flight SCRAM exchange.
 fn finish_scram(scram : @auth.ScramSha256?, data : BytesView) -> Unit raise {
-  require_scram(scram).finish(data)
+  authentication_step(() => require_scram(scram).finish(data))
+}
+
+///|
+/// Protocol authentication helpers stay pure; the network client classifies
+/// their input/state/limit errors as authentication failures.
+fn[T] authentication_step(f : () -> T raise) -> T raise {
+  f() catch {
+    @proto.ProtocolError::InvalidInput(message)
+    | @proto.ProtocolError::UnexpectedEof(message)
+    | @proto.ProtocolError::Overflow(message) =>
+      raise ClientError::Authentication(message)
+    error => raise error
+  }
 }
 
 ///|
@@ -424,7 +454,7 @@ fn require_scram(scram : @auth.ScramSha256?) -> @auth.ScramSha256 raise {
   if scram is Some(scram) {
     scram
   } else {
-    raise ClientError::UnexpectedMessage(
+    raise ClientError::Authentication(
       "received SCRAM continuation without an active SCRAM exchange",
     )
   }

@@ -38,6 +38,17 @@ parser errors at this boundary become `ClientError::Protocol`. Header rejection
 uses the existing startup/driver teardown and wakes readiness/request waiters.
 The client validates positive resource budgets before transport setup.
 
+SCRAM validates a positive configured iteration budget before connecting and
+checks the server's decimal count for overflow and the budget before PBKDF2.
+The pure protocol package shares `HiState` between synchronous `hi`/`update`
+and the hidden `begin_update`/`advance_update` helpers. Begin does no HMAC;
+Deriving hides the final message and rejects updates or authentication finish.
+Each advance counts both PBKDF2 and proof HMACs toward its budget. Startup
+advances at most 256 per batch and calls cancellable `@async.pause()` after
+every batch, including the last before writing the proof. Connection timeout
+and cancellation therefore unwind through the existing transport owner.
+Protocol SCRAM errors become `ClientError::Authentication` at the client boundary.
+
 ## Single-Flight Invariant
 
 One PostgreSQL session has exactly one active logical operation. Public

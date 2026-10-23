@@ -261,6 +261,9 @@ pub struct Config {
   /// Maximum body bytes per backend frame on every physical connection.
   /// Defaults to 64 MiB; valid range is 1..=2_147_483_642.
   max_backend_message_body_bytes : Int32
+  /// Maximum SCRAM PBKDF2 iterations on every physical connection.
+  /// Defaults to 100_000; must be positive.
+  scram_max_iterations : Int32
   priv targets : Array[ConnectionTarget]
   connect_timeout_ms : Int32?
   keepalives : Bool?
@@ -290,6 +293,7 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "max_backend_message_body_bytes": @debug.Repr(
       self.max_backend_message_body_bytes,
     ),
+    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
     "targets": @debug.Repr(self.targets),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
@@ -322,6 +326,7 @@ pub fn Config::Config(
   application_name~ : String,
   options? : String,
   max_backend_message_body_bytes~ : Int32 = 67_108_864,
+  scram_max_iterations~ : Int32 = 100_000,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -337,6 +342,9 @@ pub fn Config::Config(
     raise ConfigError::DbnameEmpty
   }
   validate_tls_config(ssl_mode, ssl_root_cert)
+  if scram_max_iterations < 1 {
+    raise ConfigError::InvalidConfig("scram_max_iterations must be positive")
+  }
   if max_backend_message_body_bytes < 1 ||
     max_backend_message_body_bytes > 2_147_483_642 {
     raise ConfigError::InvalidConfig(
@@ -353,6 +361,7 @@ pub fn Config::Config(
     ssl_root_cert,
     channel_binding: Some(channel_binding),
     max_backend_message_body_bytes,
+    scram_max_iterations,
     targets: targets.copy(),
     connect_timeout_ms,
     keepalives,
@@ -464,6 +473,7 @@ pub fn Config::get_connection_targets(self : Config) -> Array[@client.Config] {
         self.keepalives,
         self.keepalives_idle_s,
         max_backend_message_body_bytes=self.max_backend_message_body_bytes,
+        scram_max_iterations=self.scram_max_iterations,
       ),
     )
   }
