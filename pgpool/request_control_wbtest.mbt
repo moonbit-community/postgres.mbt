@@ -3,6 +3,7 @@
 ///|
 priv enum BackendFault {
   Normal
+  CopyDisconnect
   LostCommit
   CommitTagOnly
   CommitRollback
@@ -171,7 +172,7 @@ async fn serve_control_backend(
       b'Q' => {
         let sql = @utf8.decode(bytes[:bytes.length() - 1])
         probe.sql.push(sql)
-        if sql == "held copy in" {
+        if sql == "held copy in" || sql == "broken copy in" {
           socket.write(b"G\x00\x00\x00\x07\x00\x00\x00")
           continue
         }
@@ -289,6 +290,10 @@ async fn serve_control_backend(
           "SELECT 0"
         }
         send_command(socket, tag, status)
+      }
+      b'd' => {
+        guard fault is CopyDisconnect else { fail("unexpected COPY data") }
+        return
       }
       b'f' => {
         if !held_stream_error(socket, fault, probe) {

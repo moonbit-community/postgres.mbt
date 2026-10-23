@@ -256,7 +256,7 @@ async test "copy in input is bounded and abandoned COPY eventually queues Fail" 
     guard input.get() is Fail(message) else {
       fail("expected abandoned COPY failure")
     }
-    assert_eq(message, "COPY abandoned")
+    assert_eq(message, copy_fail_bytes("COPY abandoned"))
     responses.put(copy_test_ready_for_query_message())
 
     let next = gate.acquire()
@@ -353,7 +353,7 @@ async test "copy in abort is best effort and idempotent" {
       request.responses.put(copy_test_copy_in_response_message([]))
 
       match input.get() {
-        Fail(message) => assert_eq(message, "stop now")
+        Fail(message) => assert_eq(message, copy_fail_bytes("stop now"))
         _ => fail("expected copy fail")
       }
 
@@ -390,7 +390,7 @@ async test "copy in startup cancellation aborts and releases its permit" {
       release_response.get()
       request.responses.put(copy_test_copy_in_response_message([]))
       match input.get() {
-        Fail(message) => assert_eq(message, "COPY abandoned")
+        Fail(message) => assert_eq(message, copy_fail_bytes("COPY abandoned"))
         _ => fail("expected cancellation to abort COPY")
       }
       request.responses.put(copy_test_error_response_message("copy abandoned"))

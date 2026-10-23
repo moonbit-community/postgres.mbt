@@ -36,7 +36,10 @@ callbacks can compose within them. Each actual preparation or execution is
 exclusive. Stream and COPY callbacks hold the connection until their scope
 ends. Their handles are pool-owned capabilities; concurrent calls to one stream
 also raise `OperationInProgress`. COPY IN requires `finish()` to accept input;
-an unfinished sink is aborted on scope exit.
+an unfinished sink is aborted on scope exit. A NUL in an abort message raises
+`ProtocolError::InvalidInput` locally; scope cleanup can still abort the sink.
+COPY transport/writer failures retire that physical connection and release its
+checkout capacity; the pool and other physical connections remain usable.
 
 SQL errors from row, typed, prepared, simple-query and COPY OUT streams leave
 the session usable once the protocol reaches `ReadyForQuery` and resource
