@@ -302,3 +302,62 @@ test "pool config validates statement cache capacity" {
   }
   assert_eq(message, "statement_cache_capacity must be non-negative")
 }
+
+///|
+test "pool backend budgets validate and reach every physical connection" {
+  for limit in [1, 67_108_864, 2_147_483_642] {
+    let config = Config(
+      [ConnectionTarget(host="first"), ConnectionTarget(host="second")],
+      user="moon",
+      application_name="pool-backend-budget",
+      pool=PoolConfig(2),
+      max_backend_message_body_bytes=limit,
+    )
+    assert_eq(config.max_backend_message_body_bytes, limit)
+    assert_true(
+      @debug.to_string(config).contains(
+        "max_backend_message_body_bytes: \{limit}",
+      ),
+    )
+    for target in config.get_connection_targets() {
+      assert_eq(target.max_backend_message_body_bytes, limit)
+      assert_true(
+        @debug.to_string(target).contains(
+          "max_backend_message_body_bytes: \{limit}",
+        ),
+      )
+      let different = @client.Config::Config(
+        target.host,
+        user="moon",
+        application_name="pool-backend-budget",
+        max_backend_message_body_bytes=if limit == 1 { 2 } else { 1 },
+      )
+      assert_true(target != different)
+    }
+    assert_true(
+      config !=
+      {
+        ..config,
+        max_backend_message_body_bytes: if limit == 1 {
+          2
+        } else {
+          1
+        },
+      },
+    )
+  }
+  for limit in [-1, 0, 2_147_483_643, 2_147_483_647] {
+    assert_true(
+      @test.expect_error(() => {
+        Config(
+          [ConnectionTarget(host="first")],
+          user="moon",
+          application_name="pool-budget-invalid",
+          pool=PoolConfig(1),
+          max_backend_message_body_bytes=limit,
+        )
+      })
+      is ConfigError::InvalidConfig(_),
+    )
+  }
+}

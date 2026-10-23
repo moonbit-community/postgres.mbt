@@ -128,6 +128,7 @@ fn make_pool(
     connect_timeout_ms?=config.connect_timeout_ms,
     keepalives?=config.keepalives,
     keepalives_idle_s?=config.keepalives_idle_s,
+    max_backend_message_body_bytes=config.max_backend_message_body_bytes,
     target_session_attrs=@pgpool.TargetSessionAttrs::any(),
     load_balance_hosts=Disable,
     pool=pool_config,

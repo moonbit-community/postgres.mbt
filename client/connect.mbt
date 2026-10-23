@@ -193,6 +193,7 @@ async fn ClientExecutor::run_connection(
 async fn connect_authenticated(
   config : Config,
 ) -> (ConnectionSetup, StartupState) {
+  config.validate_resource_limits()
   let setup = connect_stream(config)
   let transferred = Ref(false)
   defer (if !transferred.val { setup.stream.close() })

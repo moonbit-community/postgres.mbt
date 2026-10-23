@@ -564,6 +564,17 @@ startup options, connect timeout, and TCP keepalive settings.
 The `Debug` output for a config shows `<hidden>` in place of a configured
 password; a missing password remains `None`.
 
+`max_backend_message_body_bytes` defaults to `67_108_864` (64 MiB) and counts
+only one backend frame's body, excluding its tag and four-byte length word.
+It must be in `1..=2_147_483_642`; zero does not disable it. To accept larger
+rows or COPY chunks, pass a larger limit to `Config::Config` explicitly.
+The constructor remains non-throwing; `ready()` reports
+`ClientError::InvalidConfig` before connecting when the limit is invalid.
+Both startup and ordinary reads reject malformed or oversized headers with
+`ClientError::Protocol`, close the connection, and wake pending requests
+without reading the rejected body. Accumulated result sets are not bounded by
+this setting.
+
 TLS modes are:
 
 - `SslMode::Disable`: plaintext

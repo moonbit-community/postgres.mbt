@@ -88,6 +88,9 @@ pub struct Config {
   application_name : String
   /// Optional PostgreSQL `options` startup parameter.
   options : String?
+  /// Maximum bytes in one backend message body, excluding its tag and length.
+  /// Must be in 1..=2_147_483_642; defaults to 64 MiB.
+  max_backend_message_body_bytes : Int32
   /// Optional end-to-end connection timeout in milliseconds.
   connect_timeout_ms : Int32?
   /// Whether TCP keepalive should be enabled on the socket.
@@ -116,6 +119,9 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     "channel_binding": @debug.Repr(self.channel_binding),
     "application_name": @debug.Repr(self.application_name),
     "options": @debug.Repr(self.options),
+    "max_backend_message_body_bytes": @debug.Repr(
+      self.max_backend_message_body_bytes,
+    ),
     "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
     "keepalives": @debug.Repr(self.keepalives),
     "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
@@ -140,6 +146,7 @@ pub fn Config::Config(
   channel_binding~ : ChannelBinding = Disable,
   application_name~ : String,
   options? : String,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
   connect_timeout_ms? : Int32,
   keepalives? : Bool,
   keepalives_idle_s? : Int32,
@@ -156,6 +163,7 @@ pub fn Config::Config(
     channel_binding,
     application_name,
     options,
+    max_backend_message_body_bytes,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
@@ -166,7 +174,8 @@ pub fn Config::Config(
 /// Internal constructor for a single PostgreSQL connection target.
 ///
 /// Used by pgpool to build one client config per endpoint. Callers
-/// supply every field explicitly; no defaults or validation are applied here.
+/// supply connection fields explicitly; resource limits retain their defaults.
+/// Validation happens before connection startup.
 #internal(internal, "for internal use only")
 pub fn Config::new_internal(
   host : String,
@@ -183,6 +192,7 @@ pub fn Config::new_internal(
   connect_timeout_ms : Int32?,
   keepalives : Bool?,
   keepalives_idle_s : Int32?,
+  max_backend_message_body_bytes~ : Int32 = 67_108_864,
 ) -> Config {
   {
     host,
@@ -196,8 +206,20 @@ pub fn Config::new_internal(
     channel_binding,
     application_name,
     options,
+    max_backend_message_body_bytes,
     connect_timeout_ms,
     keepalives,
     keepalives_idle_s,
+  }
+}
+
+///|
+/// Validate resource budgets before opening the transport.
+fn Config::validate_resource_limits(self : Config) -> Unit raise ClientError {
+  if self.max_backend_message_body_bytes < 1 ||
+    self.max_backend_message_body_bytes > 2_147_483_642 {
+    raise ClientError::InvalidConfig(
+      "max_backend_message_body_bytes must be between 1 and 2147483642",
+    )
   }
 }

@@ -406,15 +406,8 @@ fn Shared::push_async_message(self : Shared, message : AsyncMessage) -> Unit {
 ///|
 /// Read and parse one backend message from the connection stream.
 async fn Driver::read_message(self : Driver) -> @backend.Message {
-  let header = self.stream.read_exactly(5)
-  let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
-  let body = self.stream.read_exactly(body_len - 4)
-  let packet = Buffer(size_hint=header.length() + body.length())
-  packet.write_bytes(header)
-  packet.write_bytes(body)
-  if @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) {
-    parsed.message
-  } else {
-    raise ClientError::UnexpectedMessage("incomplete backend message")
-  }
+  read_backend_message(
+    self.stream,
+    self.shared.config.max_backend_message_body_bytes,
+  )
 }
