@@ -178,3 +178,80 @@ async test "zero recycle budget retires the dequeued client and restores exactly
     assert_eq(pool.status().size, 0)
   })
 }
+
+///|
+async test "pool close during health check closes and retires the connection once" {
+  @async.with_timeout(3000, () => {
+    @async.with_task_group(group => {
+      let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+      defer server.close()
+      let checking : @async.Queue[Unit] = Queue(kind=Unbounded)
+      let check_gate : @async.Queue[Unit] = Queue(kind=Unbounded)
+      let backend = group.spawn(() => {
+        let (socket, _) = server.accept()
+        defer socket.close()
+        let startup = socket.read_exactly(4)
+        ignore(
+          socket.read_exactly(
+            @proto.ByteReader::new(startup[:]).read_i32_be() - 4,
+          ),
+        )
+        socket.write(b"R\x00\x00\x00\x08\x00\x00\x00\x00Z\x00\x00\x00\x05I")
+        assert_eq(socket.read_exactly(5), b"S\x00\x00\x00\x04")
+        checking.put(())
+        check_gate.get()
+        socket.write(b"Z\x00\x00\x00\x05I")
+        assert_eq(socket.read_exactly(5), b"X\x00\x00\x00\x04")
+        assert_true(socket.read_some(max_len=1) is None)
+      })
+      let (pool, executor) = Pool::create(
+        Config(
+          [ConnectionTarget(host="127.0.0.1", port=server.addr.port())],
+          user="moon",
+          ssl_mode=Disable,
+          application_name="close-during-health-check",
+          pool=PoolConfig(1, health_check=Active, reset_policy=PreserveSession),
+        ),
+      )
+      defer pool.close()
+      let running = group.spawn(() => executor.run())
+      pool.ready()
+      let session = pool.checkout_session()
+      let retired = session.state.connection
+      let physical = retired.client.val.unwrap()
+      defer physical.abort()
+      session.release()
+      let checkout = group.spawn(allow_failure=true, () => {
+        pool.checkout_session()
+      })
+      checking.get()
+      pool.close()
+      assert_eq(pool.status().size, 1)
+      assert_true(running.try_wait() is None)
+      check_gate.put(())
+      assert_true(
+        expect_pgpool_error_async(() => checkout.wait()) is PoolError::Closed,
+      )
+      running.wait()
+      backend.wait()
+      assert_true(physical.is_closed())
+      assert_true(retired.client.val is None)
+      assert_eq(pool.status().size, 0)
+      assert_eq(pool.status().available, 0)
+      assert_eq(pool.status().waiting, 0)
+      assert_eq(pool.shared.connections.length(), 0)
+      pool.discard_client(retired)
+      pool.discard_client(retired)
+      pool.close()
+      assert_eq(pool.status().size, 0)
+      let mut replacements = 0
+      while pool.next_event() is Some(event) {
+        if event.kind is ConnectionReplaced {
+          assert_eq(event.connection_id, Some(retired.id))
+          replacements += 1
+        }
+      }
+      assert_eq(replacements, 1)
+    })
+  })
+}
