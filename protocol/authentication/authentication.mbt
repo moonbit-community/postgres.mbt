@@ -144,19 +144,9 @@ pub fn hi(
   salt : BytesView,
   iterations : Int32,
 ) -> Bytes raise @proto.ProtocolError {
-  if iterations <= 0 {
-    raise InvalidInput("iteration count must be positive")
-  }
-  let buf = Buffer(size_hint=salt.length() + 4)
-  buf.write_bytesview(salt)
-  buf.write_bytesview(b"\x00\x00\x00\x01"[:])
-  let mut prev = @crypto.hmac_sha256(str, buf.to_bytes()[:])
-  let mut hi = prev
-  for _ in 1..<iterations {
-    prev = @crypto.hmac_sha256(str, prev[:])
-    hi = xor_bytes(hi[:], prev[:])
-  }
-  hi
+  let state = HiState::new(str, salt, iterations)
+  ignore(state.advance(iterations))
+  state.result
 }
 
 ///|
@@ -245,6 +235,7 @@ fn ChannelBinding::cbind_data(self : ChannelBinding) -> BytesView {
 /// - https://www.postgresql.org/docs/current/sasl-authentication.html#SASL-AUTH-END
 enum State {
   Update(nonce~ : Bytes, password~ : Bytes, channel_binding~ : ChannelBinding)
+  Deriving(ScramDerivation)
   Finish(salted_password~ : Bytes, auth_message~ : Bytes)
   Done
 }
@@ -335,7 +326,7 @@ pub fn ScramSha256::message(
   self : ScramSha256,
 ) -> BytesView raise @proto.ProtocolError {
   match self.state {
-    Done => raise InvalidInput("invalid SCRAM state")
+    Deriving(_) | Done => raise InvalidInput("invalid SCRAM state")
     _ => self.message[:]
   }
 }
@@ -344,6 +335,9 @@ pub fn ScramSha256::message(
 /// Consume a SCRAM `server-first-message` and prepare the client final payload.
 ///
 /// The input should be the bytes carried by `AuthenticationSASLContinue`.
+/// `max_iterations` defaults to 100_000 and must be positive. Larger server
+/// counts are rejected before PBKDF2 begins; pass a larger limit explicitly
+/// when needed. This synchronous API completes derivation before returning.
 ///
 /// Expected server message shape:
 /// 1. `r=<combined nonce>`
@@ -361,13 +355,36 @@ pub fn ScramSha256::message(
 pub fn ScramSha256::update(
   self : ScramSha256,
   message : BytesView,
+  max_iterations~ : Int32 = 100_000,
 ) -> Unit raise @proto.ProtocolError {
+  self.begin_update(message, max_iterations~)
+  while !self.advance_update(max_steps=256) {
+    ()
+  }
+}
+
+///|
+/// Prepare derivation without running PBKDF2. The async client advances the
+/// pure state in bounded batches and yields between calls.
+#internal(internal, "for use by client only")
+#doc(hidden)
+pub fn ScramSha256::begin_update(
+  self : ScramSha256,
+  message : BytesView,
+  max_iterations~ : Int32,
+) -> Unit raise @proto.ProtocolError {
+  if max_iterations <= 0 {
+    raise InvalidInput("max_iterations must be positive")
+  }
   let (client_nonce, password, channel_binding) = match self.state {
     Update(nonce~, password~, channel_binding~) =>
       (nonce, password, channel_binding)
     _ => raise InvalidInput("invalid SCRAM state")
   }
   let parsed = Parser::new(message).server_first_message()
+  if parsed.iteration_count > max_iterations {
+    raise InvalidInput("SCRAM iteration count exceeds max_iterations")
+  }
   if !starts_with(parsed.nonce[:], client_nonce[:]) {
     raise InvalidInput("invalid nonce")
   }
@@ -377,9 +394,7 @@ pub fn ScramSha256::update(
   let salt = @base64.decode(salt_str) catch {
     _ => raise InvalidInput("invalid base64 salt")
   }
-  let salted_password = hi(password[:], salt[:], parsed.iteration_count)
-  let client_key = @crypto.hmac_sha256(salted_password[:], b"Client Key"[:])
-  let stored_key = @crypto.sha256_bytes(client_key[:])
+  let hi = HiState::new(password[:], salt[:], parsed.iteration_count)
   let cbind = Buffer(
     size_hint=channel_binding.gs2_header().length() +
       channel_binding.cbind_data().length(),
@@ -414,6 +429,55 @@ pub fn ScramSha256::update(
   auth.write_bytesview(b","[:])
   auth.write_bytesview(client_final_without_proof[:])
   let auth_message = auth.to_bytes()
+  self.state = Deriving({
+    hi,
+    auth_message,
+    client_final: client_final_without_proof,
+    client_key: None,
+  })
+}
+
+///|
+priv struct ScramDerivation {
+  hi : HiState
+  auth_message : Bytes
+  client_final : Bytes
+  mut client_key : Bytes?
+}
+
+///|
+/// Perform at most `max_steps` HMACs, including the two used for the proof.
+/// Return true only once the client-final payload is ready to send.
+#internal(internal, "for use by client only")
+#doc(hidden)
+pub fn ScramSha256::advance_update(
+  self : ScramSha256,
+  max_steps~ : Int32,
+) -> Bool raise @proto.ProtocolError {
+  if max_steps <= 0 {
+    raise InvalidInput("max_steps must be positive")
+  }
+  guard self.state is Deriving(progress) else {
+    raise InvalidInput("invalid SCRAM state")
+  }
+  let mut budget = max_steps - progress.hi.advance(max_steps)
+  if progress.hi.remaining > 0 || budget == 0 {
+    return false
+  }
+  let salted_password = progress.hi.result
+  if progress.client_key is None {
+    progress.client_key = Some(
+      @crypto.hmac_sha256(salted_password[:], b"Client Key"[:]),
+    )
+    budget -= 1
+  }
+  if budget == 0 {
+    return false
+  }
+  let client_key = progress.client_key.unwrap()
+  let stored_key = @crypto.sha256_bytes(client_key[:])
+  let auth_message = progress.auth_message
+  let client_final_without_proof = progress.client_final
   let client_signature = @crypto.hmac_sha256(stored_key[:], auth_message[:])
   let client_proof = xor_bytes(client_key[:], client_signature[:])
   let client_proof_b64 = @proto.utf8_encode(@base64.encode(client_proof[:]))
@@ -427,6 +491,7 @@ pub fn ScramSha256::update(
   final_msg.write_bytesview(client_proof_b64[:])
   self.message = final_msg.to_bytes()
   self.state = Finish(salted_password~, auth_message~)
+  true
 }
 
 ///|
@@ -582,7 +647,14 @@ fn Parser::posit_number(self : Parser) -> Int32 raise @proto.ProtocolError {
   }
   let mut n = 0
   for b in digits {
-    n = n * 10 + (b.to_int() - '0'.to_int())
+    let digit = b.to_int() - b'0'.to_int()
+    if n > (2_147_483_647 - digit) / 10 {
+      raise InvalidInput("iteration count exceeds Int32 range")
+    }
+    n = n * 10 + digit
+  }
+  if n == 0 {
+    raise InvalidInput("iteration count must be positive")
   }
   n
 }

@@ -29,6 +29,14 @@
 `ClientError::Protocol`；拒绝头部后沿现有清理路径关闭连接并唤醒等待者。
 资源预算在建立传输连接前验证，必须为正数。
 
+SCRAM 在连接前验证正数迭代预算；服务端十进制计数在乘加前检查溢出，
+并在 PBKDF2 开始前检查上限。纯协议包通过 `HiState` 共享同步 `hi`/`update`
+与隐藏的 `begin_update`/`advance_update` 计算状态，begin 不执行 HMAC。
+Deriving 状态不允许读取最终消息、重复更新或完成认证。每批最多 256 次 HMAC，
+包括 PBKDF2 和证明计算；startup 在每批结束后调用可取消的 `@async.pause()`，
+最后一批也先让出再发送证明。连接超时和取消沿现有传输所有权路径清理。
+协议包中的 SCRAM 错误在客户端边界转换为 `ClientError::Authentication`。
+
 ## 单操作执行不变量
 
 一个 PostgreSQL 会话同一时刻只允许一个逻辑操作处于活动状态。公共入口在提交协议工作前，

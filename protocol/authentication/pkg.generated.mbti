@@ -34,7 +34,7 @@ pub fn ScramSha256::finish(Self, BytesView) -> Unit raise @protocol.ProtocolErro
 pub fn ScramSha256::message(Self) -> BytesView raise @protocol.ProtocolError
 pub fn ScramSha256::new(BytesView, ChannelBinding, BytesView) -> Self raise @protocol.ProtocolError
 pub fn ScramSha256::new_inner(BytesView, ChannelBinding, Bytes) -> Self raise @protocol.ProtocolError
-pub fn ScramSha256::update(Self, BytesView) -> Unit raise @protocol.ProtocolError
+pub fn ScramSha256::update(Self, BytesView, max_iterations? : Int32) -> Unit raise @protocol.ProtocolError
 
 type State
 

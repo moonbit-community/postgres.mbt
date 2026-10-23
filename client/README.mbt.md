@@ -582,6 +582,16 @@ Both startup and ordinary reads reject malformed or oversized headers with
 without reading the rejected body. Accumulated result sets are not bounded by
 this setting.
 
+`scram_max_iterations` defaults to `100_000` and must be in
+`1..=2_147_483_647`. For a server configured with more iterations, explicitly
+pass a higher value to `Config::Config`. Zero does not disable the limit.
+Invalid configuration fails `ready()` with `ClientError::InvalidConfig` before
+connecting. Invalid or excessive server iteration counts raise
+`ClientError::Authentication` before derivation begins. Derivation yields after
+every batch of at most 256 HMACs, including the final batch before sending the
+proof. Cancellation and `connect_timeout_ms` cover this computation, and other
+connections on the event loop can continue working.
+
 TLS modes are:
 
 - `SslMode::Disable`: plaintext

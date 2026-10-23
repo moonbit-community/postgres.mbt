@@ -361,3 +361,57 @@ test "pool backend budgets validate and reach every physical connection" {
     )
   }
 }
+
+///|
+test "pool SCRAM budgets validate and reach every physical connection" {
+  let defaults = Config(
+    [ConnectionTarget(host="first")],
+    user="moon",
+    application_name="scram-default",
+    pool=PoolConfig(1),
+  )
+  assert_eq(defaults.scram_max_iterations, 100_000)
+  for count in [1, 100_000, 2_147_483_647] {
+    let config = Config(
+      [ConnectionTarget(host="first"), ConnectionTarget(host="second")],
+      user="moon",
+      application_name="scram-budget",
+      pool=PoolConfig(2),
+      scram_max_iterations=count,
+    )
+    assert_true(
+      @debug.to_string(config).contains("scram_max_iterations: \{count}"),
+    )
+    assert_true(
+      config !=
+      { ..config, scram_max_iterations: if count == 1 { 2 } else { 1 }, },
+    )
+    for target in config.get_connection_targets() {
+      assert_eq(target.scram_max_iterations, count)
+      assert_true(
+        @debug.to_string(target).contains("scram_max_iterations: \{count}"),
+      )
+      let different = @client.Config::Config(
+        target.host,
+        user="moon",
+        application_name="scram-budget",
+        scram_max_iterations=if count == 1 { 2 } else { 1 },
+      )
+      assert_true(target != different)
+    }
+  }
+  for count in [0, -1, -2_147_483_648] {
+    assert_true(
+      @test.expect_error(() => {
+        Config(
+          [ConnectionTarget(host="first")],
+          user="moon",
+          application_name="scram-invalid",
+          pool=PoolConfig(1),
+          scram_max_iterations=count,
+        )
+      })
+      is ConfigError::InvalidConfig(_),
+    )
+  }
+}

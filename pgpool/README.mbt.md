@@ -64,6 +64,14 @@ malformed or oversized frame closes that connection with
 `ClientError::Protocol`; other pool connections remain available. This does
 not limit the total memory used by results or by the pool.
 
+`scram_max_iterations` defaults to `100_000` on all physical connections. Raise
+it explicitly on `Config::Config` for a server using a higher SCRAM iteration
+count; the valid range is `1..=2_147_483_647`. Zero does not disable the limit,
+and invalid settings raise `ConfigError::InvalidConfig` at construction.
+Excessive or malformed server counts fail authentication before PBKDF2 begins.
+Computation yields between bounded batches, so connection/create deadlines and
+cancellation can stop authentication without sending an incomplete proof.
+
 ## Transactions
 
 Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests

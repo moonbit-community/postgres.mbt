@@ -76,7 +76,7 @@ for the lifetime of every client and pooled session; see the
 [client encoding warning](./client/README.mbt.md#client-encoding) and
 [TODO.md](./TODO.md).
 
-### Backend message size
+### Resource limits
 
 Client and pool configs limit each backend message body to 64 MiB by default
 (`max_backend_message_body_bytes=67_108_864`). The body excludes the tag and
@@ -88,6 +88,18 @@ invalid pool settings fail construction with `ConfigError::InvalidConfig`.
 Malformed or oversized frames fail the connection with `ClientError::Protocol`
 before reading the body. This is a per-frame bound, not a total result-memory
 or pool-memory budget.
+
+SCRAM authentication accepts at most `100_000` server-requested iterations by
+default. If your server uses a higher count, explicitly set
+`scram_max_iterations` on `client.Config` or `pgpool.Config` to a suitable larger
+value in `1..=2_147_483_647`. Zero does not disable the limit. Invalid settings
+use the same configuration errors as the message budget; excessive or malformed
+server counts fail with `ClientError::Authentication` before PBKDF2 begins.
+The client yields after batches of at most 256 HMAC operations, so cancellation,
+connection timeouts, and other connections can progress during authentication.
+The protocol package remains synchronous and independent of the async runtime;
+`ScramSha256::update(..., max_iterations=...)` has the same default count limit,
+while the low-level `hi` function keeps its caller-selected positive count.
 
 ### TLS
 
@@ -151,6 +163,7 @@ References:
 
 ### Testing
 
+- Run resource safety regressions with an independent process watchdog: `node scripts/resource_safety_test.mjs`
 - Run PostgreSQL integration tests: `node scripts/pg_integration_test.mjs`
 - Run PostgreSQL integration coverage tests: `node scripts/pg_integration_test.mjs --enable-coverage`
 
