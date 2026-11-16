@@ -33,8 +33,8 @@ async test "integration pool custom connector supports target failover" {
     })
     let declarative = @pgpool.Config::Config(
       [
-        @pgpool.ConnectionTarget(host=config.host, port=config.port),
-        @pgpool.ConnectionTarget(host=config.host, port=config.port),
+        ConnectionTarget(host=config.host, port=config.port),
+        ConnectionTarget(host=config.host, port=config.port),
       ],
       user=config.user,
       dbname=config.database,

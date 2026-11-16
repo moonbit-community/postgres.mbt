@@ -315,10 +315,7 @@ async test "integration pooled transaction options and savepoint" {
           .get_name("value"),
         )
       },
-      options=TransactionOptions(
-        isolation_level=@pgpool.IsolationLevel::Serializable,
-        read_only=false,
-      ),
+      options=TransactionOptions(isolation_level=Serializable, read_only=false),
     )
     assert_eq(value, Ok(1))
     pool.close()

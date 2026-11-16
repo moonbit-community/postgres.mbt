@@ -114,24 +114,22 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     None
   }
   @debug.Repr::record({
-    "host": @debug.Repr(self.host),
-    "hostaddr": @debug.Repr(self.hostaddr),
-    "port": @debug.Repr(self.port),
-    "user": @debug.Repr(self.user),
-    "database": @debug.Repr(self.database),
-    "password": @debug.Repr(password),
-    "ssl_mode": @debug.Repr(self.ssl_mode),
-    "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
-    "channel_binding": @debug.Repr(self.channel_binding),
-    "application_name": @debug.Repr(self.application_name),
-    "options": @debug.Repr(self.options),
-    "max_backend_message_body_bytes": @debug.Repr(
-      self.max_backend_message_body_bytes,
-    ),
-    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
-    "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
-    "keepalives": @debug.Repr(self.keepalives),
-    "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
+    "host": Repr(self.host),
+    "hostaddr": Repr(self.hostaddr),
+    "port": Repr(self.port),
+    "user": Repr(self.user),
+    "database": Repr(self.database),
+    "password": Repr(password),
+    "ssl_mode": Repr(self.ssl_mode),
+    "ssl_root_cert": Repr(self.ssl_root_cert),
+    "channel_binding": Repr(self.channel_binding),
+    "application_name": Repr(self.application_name),
+    "options": Repr(self.options),
+    "max_backend_message_body_bytes": Repr(self.max_backend_message_body_bytes),
+    "scram_max_iterations": Repr(self.scram_max_iterations),
+    "connect_timeout_ms": Repr(self.connect_timeout_ms),
+    "keepalives": Repr(self.keepalives),
+    "keepalives_idle_s": Repr(self.keepalives_idle_s),
   })
 }
 
@@ -231,11 +229,11 @@ pub fn Config::new_internal(
 /// Validate resource budgets before opening the transport.
 fn Config::validate_resource_limits(self : Config) -> Unit raise ClientError {
   if self.scram_max_iterations < 1 {
-    raise ClientError::InvalidConfig("scram_max_iterations must be positive")
+    raise InvalidConfig("scram_max_iterations must be positive")
   }
   if self.max_backend_message_body_bytes < 1 ||
     self.max_backend_message_body_bytes > 2_147_483_642 {
-    raise ClientError::InvalidConfig(
+    raise InvalidConfig(
       "max_backend_message_body_bytes must be between 1 and 2147483642",
     )
   }

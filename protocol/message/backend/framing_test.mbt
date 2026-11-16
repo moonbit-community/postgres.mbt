@@ -5,7 +5,7 @@ test "backend parser checks lengths before total length arithmetic" {
     prefix.write_byte(b'd')
     prefix.write_int_be(length)
     try @backend.Message::parse(prefix.to_bytes()[:]) catch {
-      @proto.ProtocolError::InvalidInput(_) => ()
+      InvalidInput(_) => ()
       error => raise error
     } noraise {
       _ => fail("invalid backend length was accepted")

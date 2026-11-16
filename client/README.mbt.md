@@ -406,9 +406,7 @@ accepts the enum value through its `isolation_level` option:
 async fn _serializable_transaction(client : @client.Client) -> Unit {
   client.with_transaction(
     _tx => (),
-    options=@client.TransactionOptions(
-      isolation_level=@client.IsolationLevel::Serializable,
-    ),
+    options=TransactionOptions(isolation_level=Serializable),
   )
 }
 ```
