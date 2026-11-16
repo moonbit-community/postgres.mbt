@@ -30,7 +30,7 @@ async test "integration client transaction cancellation rolls back" {
       as_client_config(config, application_name="moonbit-client-tx-cancel"),
       group,
     )
-    defer client.close()
+    defer @async.protect_from_cancel(() => client.close())
     client.batch_execute("create temp table moon_tx_cancel(value int4)")
     cancel_transaction_callback(wait_for_cancel => {
       client.with_transaction(tx => {

@@ -214,7 +214,7 @@ async fn[T, E] transaction_scope(
       // Normal completion owns recovery for errors before COMMIT submission.
       // A possibly sent COMMIT records its outcome before raising, so the
       // conditional rollback cannot append SQL to an uncertain completion.
-      errdefer (rollback() catch { _ => () })
+      errdefer @async.protect_from_cancel(() => rollback() catch { _ => () })
       // commit_internal owns an operation itself; check children first.
       if transaction.abort_active_children() {
         if result is Ok(_) {

@@ -173,10 +173,7 @@ pub async fn[T] Client::with_prepared_typed(
   check_pending_cancellation()
   let result = f(scoped)
   check_pending_cancellation()
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => scoped.state.finish())
-  }
+  with_cancellation_boundary(() => scoped.state.finish())
   result
 }
 
@@ -215,10 +212,7 @@ pub async fn[T] Transaction::with_prepared_typed(
   check_pending_cancellation()
   let result = f(scoped)
   check_pending_cancellation()
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => scoped.state.finish())
-  }
+  with_cancellation_boundary(() => scoped.state.finish())
   result
 }
 
@@ -304,10 +298,7 @@ pub async fn[T] Transaction::with_portal(
   check_pending_cancellation()
   let result = f(portal)
   check_pending_cancellation()
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => portal.finish())
-  }
+  with_cancellation_boundary(() => portal.finish())
   result
 }
 

@@ -48,7 +48,7 @@ fn ClientLeaseState::scoped_client(
 async fn[T] ClientLeaseState::cleanup(
   self : ClientLeaseState,
   f : async () -> T,
-) -> T {
+) -> T nocancel {
   if self.cleanup_deadline.val is None {
     self.cleanup_deadline.val = Some({
       at: @async.now() + self.pool.pool_config.val.cleanup_ms.to_int64(),
@@ -107,7 +107,7 @@ async fn[T] ClientLeaseState::cleanup(
 async fn ClientLeaseState::cleanup_best_effort(
   self : ClientLeaseState,
   f : async () -> Unit,
-) -> Unit {
+) -> Unit nocancel {
   self.cleanup(f) catch {
     _ => ()
   }

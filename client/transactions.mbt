@@ -499,13 +499,10 @@ async fn[T] with_transaction_stream(
   })
   let result = f(stream)
   check_pending_cancellation()
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => {
-      stream.detach()
-      ignore(stream.finish())
-    })
-  }
+  with_cancellation_boundary(() => {
+    stream.detach()
+    ignore(stream.finish())
+  })
   result
 }
 
@@ -534,8 +531,7 @@ async fn[T] Transaction::run_scope_operation(
   self.assert_open()
   errdefer self.invalidate_if_connection_closed()
   check_pending_cancellation()
-  defer check_pending_cancellation()
-  @async.protect_from_cancel(() => f(self.context))
+  with_cancellation_boundary(() => f(self.context))
 }
 
 ///|
@@ -738,14 +734,13 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
   if !must_rollback {
     check_pending_cancellation()
   }
-  defer check_pending_cancellation()
   let submitted = Ref(false)
   errdefer (if submitted.val {
     // Completion drains through ReadyForQuery before reporting SQL errors.
     self.finished.val = true
     self.release_owner_permit()
   })
-  @async.protect_from_cancel(() => {
+  with_cancellation_boundary(() => {
     submitted.val = true
     try {
       match (command, self.savepoint) {
