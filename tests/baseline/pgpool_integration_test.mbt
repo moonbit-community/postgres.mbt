@@ -6,7 +6,7 @@ fn make_pool_config(
   create_ms~ : Int32? = None,
   recycle_ms~ : Int32? = None,
   queue_mode~ : @pgpool.QueueMode = @pgpool.QueueMode::fifo(),
-  health_check~ : @pgpool.HealthCheck = @pgpool.HealthCheck::Passive,
+  health_check~ : @pgpool.HealthCheck = Passive,
   statement_cache_capacity~ : Int32 = 100,
 ) -> @pgpool.PoolConfig raise {
   PoolConfig(
@@ -101,7 +101,7 @@ async fn assert_pool_idle_notification(
           fail("pool closed before delivering an idle notification")
         }
         match item.message {
-          @client.AsyncMessage::Notification(notification) => {
+          Notification(notification) => {
             assert_eq(notification.channel, channel)
             assert_eq(notification.payload, "ping")
             assert_eq(item.connection_id, 1)

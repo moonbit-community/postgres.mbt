@@ -237,9 +237,7 @@ fn string_format(type_ : Type) -> WireFormat {
 ///|
 fn validate_string_param(value : StringView) -> Unit raise ClientError {
   if value.contains("\u0000") {
-    raise ClientError::Encode(
-      "PostgreSQL string parameters must not contain NUL (U+0000)",
-    )
+    raise Encode("PostgreSQL string parameters must not contain NUL (U+0000)")
   }
 }
 

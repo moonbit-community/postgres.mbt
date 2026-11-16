@@ -51,7 +51,7 @@ pub struct DatabaseError {
 #internal(internal, "for use by pgpool only")
 #doc(hidden)
 pub fn DatabaseError::into_client_error(self : DatabaseError) -> ClientError {
-  ClientError::Database(self)
+  Database(self)
 }
 
 ///|

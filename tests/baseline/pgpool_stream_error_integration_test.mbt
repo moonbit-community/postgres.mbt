@@ -171,10 +171,7 @@ async test "integration pooled SQL stream errors roll back savepoints and commit
               )
             })
             assert_eq(expect_database_error(error).code, Some("22012"))
-            assert_eq(
-              child_record.status(),
-              @pgpool.TransactionStatus::RolledBack,
-            )
+            assert_eq(child_record.status(), RolledBack)
             assert_eq(tx.query_one("select pg_backend_pid()").get(0), pid)
             tx.batch_execute("insert into stream_recovery values (1)")
           }
@@ -188,7 +185,7 @@ async test "integration pooled SQL stream errors roll back savepoints and commit
       record~,
     )
     assert_eq(result, Ok(()))
-    assert_eq(record.status(), @pgpool.TransactionStatus::Committed)
+    assert_eq(record.status(), Committed)
     assert_eq(pool.status().available, 1)
   })
 }

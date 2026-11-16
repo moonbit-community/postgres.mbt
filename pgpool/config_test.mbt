@@ -14,11 +14,11 @@ test "client and pool config debug redacts passwords" {
   assert_eq(client.password, Some("api_probe_secret"))
 
   let pool = @pgpool.Config::Config(
-    [@pgpool.ConnectionTarget(host="db.example")],
+    [ConnectionTarget(host="db.example")],
     user="moon",
     password="pool_probe_secret",
     application_name="pool-debug-test",
-    pool=@pgpool.PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   let pool_debug = @debug.to_string(pool)
   assert_true(pool_debug.contains("dbname: \"moon\""))
@@ -38,10 +38,10 @@ test "client and pool config debug redacts passwords" {
     @debug.to_string(client_without_password).contains("password: None"),
   )
   let pool_without_password = @pgpool.Config::Config(
-    [@pgpool.ConnectionTarget(host="db.example")],
+    [ConnectionTarget(host="db.example")],
     user="moon",
     application_name="pool-no-password-debug-test",
-    pool=@pgpool.PoolConfig::PoolConfig(1),
+    pool=PoolConfig(1),
   )
   assert_true(
     @debug.to_string(pool_without_password).contains("password: None"),
@@ -69,7 +69,7 @@ test "pool config constructors and targets" {
     2,
     timeouts=Timeouts(wait_ms=Some(10), create_ms=Some(20), recycle_ms=Some(30)),
     queue_mode=@pgpool.QueueMode::lifo(),
-    health_check=@pgpool.HealthCheck::Active,
+    health_check=Active,
     statement_cache_capacity=7,
   )
   assert_eq(pool_config.max_size, 2)
@@ -78,8 +78,8 @@ test "pool config constructors and targets" {
 
   let config = @pgpool.Config::Config(
     [
-      @pgpool.ConnectionTarget(host="one.db", hostaddr="10.0.0.1", port=1111),
-      @pgpool.ConnectionTarget(host="two.db", hostaddr="10.0.0.2", port=2222),
+      ConnectionTarget(host="one.db", hostaddr="10.0.0.1", port=1111),
+      ConnectionTarget(host="two.db", hostaddr="10.0.0.2", port=2222),
     ],
     user="moon",
     dbname="moondb",
@@ -108,15 +108,9 @@ test "public isolation constructors configure client and pool transactions" {
       @client.IsolationLevel::ReadUncommitted,
       @pgpool.IsolationLevel::ReadUncommitted,
     ),
-    (
-      @client.IsolationLevel::ReadCommitted,
-      @pgpool.IsolationLevel::ReadCommitted,
-    ),
-    (
-      @client.IsolationLevel::RepeatableRead,
-      @pgpool.IsolationLevel::RepeatableRead,
-    ),
-    (@client.IsolationLevel::Serializable, @pgpool.IsolationLevel::Serializable),
+    (ReadCommitted, ReadCommitted),
+    (RepeatableRead, RepeatableRead),
+    (Serializable, Serializable),
   ]
   for level in levels {
     let (client_level, pool_level) = level
@@ -134,7 +128,7 @@ test "public isolation constructors configure client and pool transactions" {
 test "pool config target array is a private snapshot" {
   let configured = [
     @pgpool.ConnectionTarget(host="primary.db", hostaddr="10.0.0.1"),
-    @pgpool.ConnectionTarget(host="replica.db", hostaddr="10.0.0.2", port=5433),
+    ConnectionTarget(host="replica.db", hostaddr="10.0.0.2", port=5433),
   ]
   let config = @pgpool.Config::Config(
     configured,
@@ -142,7 +136,7 @@ test "pool config target array is a private snapshot" {
     application_name="pool-target-snapshot",
     pool=PoolConfig(1),
   )
-  configured[0] = @pgpool.ConnectionTarget(host="other.db", port=9999)
+  configured[0] = ConnectionTarget(host="other.db", port=9999)
   configured.clear()
 
   let target_view = config.targets()
@@ -198,7 +192,7 @@ test "pool config validation rejects invalid settings" {
 
   let invalid_tls = @test.expect_error(() => {
     @pgpool.Config::Config(
-      [@pgpool.ConnectionTarget(host="db.example")],
+      [ConnectionTarget(host="db.example")],
       user="moon",
       dbname="moondb",
       ssl_mode=VerifyCa,

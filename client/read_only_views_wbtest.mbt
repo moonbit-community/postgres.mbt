@@ -20,16 +20,14 @@ test "kind retains read-only enum labels and composite fields" {
     oid: 90001U,
     name: "mood",
     schema: Some("test"),
-    kind: Kind::Enum(enum_labels[:]),
+    kind: Enum(enum_labels[:]),
   }
-  guard enum_type.kind is Kind::Enum(labels) else {
-    fail("expected enum metadata")
-  }
+  guard enum_type.kind is Enum(labels) else { fail("expected enum metadata") }
   let label_copy = labels.to_owned()
   label_copy.clear()
   assert_eq(labels.length(), 2)
   assert_eq(labels[0], "sad")
-  guard enum_type.kind is Kind::Enum(reloaded_labels) else {
+  guard enum_type.kind is Enum(reloaded_labels) else {
     fail("expected retained enum metadata")
   }
   assert_eq(reloaded_labels[1], "happy")
@@ -41,20 +39,20 @@ test "kind retains read-only enum labels and composite fields" {
     oid: 90002U,
     name: "pair",
     schema: Some("test"),
-    kind: Kind::Composite(composite_fields[:]),
+    kind: Composite(composite_fields[:]),
   }
-  guard composite_type.kind is Kind::Composite(fields) else {
+  guard composite_type.kind is Composite(fields) else {
     fail("expected composite metadata")
   }
   let field_copy = fields.to_owned()
   field_copy.clear()
   assert_eq(fields.length(), 2)
   assert_eq(fields[0].name, "left")
-  guard composite_type.kind is Kind::Composite(reloaded_fields) else {
+  guard composite_type.kind is Composite(reloaded_fields) else {
     fail("expected retained composite metadata")
   }
   assert_eq(reloaded_fields[1].type_.oid, 25U)
-  guard Type::int4_array().kind is Kind::Array(element) else {
+  guard Type::int4_array().kind is Array(element) else {
     fail("expected array metadata")
   }
   assert_eq(element, Type::int4())
@@ -110,12 +108,12 @@ async test "simple query descriptions and rows survive later result sets" {
   responses.put(copy_test_ready_for_query_message())
   let stream = SimpleQueryStream::new(test_control(None), responses, None)
 
-  guard stream.next() is Some(SimpleQueryMessage::RowDescription(first)) else {
+  guard stream.next() is Some(RowDescription(first)) else {
     fail("expected first description")
   }
   let first_copy = first.to_owned()
   first_copy.clear()
-  guard stream.next() is Some(SimpleQueryMessage::Row(first_row)) else {
+  guard stream.next() is Some(Row(first_row)) else {
     fail("expected first row")
   }
   let first_values = first_row.values().to_owned()
@@ -125,12 +123,12 @@ async test "simple query descriptions and rows survive later result sets" {
   assert_eq(first_row.get_name("first"), Some("one"))
   ignore(stream.next())
 
-  guard stream.next() is Some(SimpleQueryMessage::RowDescription(second)) else {
+  guard stream.next() is Some(RowDescription(second)) else {
     fail("expected second description")
   }
   assert_eq(first[0], "first")
   assert_eq(second[0], "second")
-  guard stream.next() is Some(SimpleQueryMessage::Row(second_row)) else {
+  guard stream.next() is Some(Row(second_row)) else {
     fail("expected second row")
   }
   assert_eq(second_row.get_name("second"), Some("two"))

@@ -32,7 +32,7 @@ impl @client.ToSql for SchemaStatus with fn to_sql(self, type_, buf) {
       Done => b"done"
     },
   )
-  @proto.IsNull::No
+  No
 }
 
 ///|
@@ -48,7 +48,7 @@ impl @client.FromSql for SchemaStatus with fn moonbit_type_name() {
 ///|
 impl @client.FromSql for SchemaStatus with fn from_sql(type_, format, raw) {
   assert_true(schema_status_accepts(type_))
-  assert_eq(format, @client.WireFormat::Binary)
+  assert_eq(format, Binary)
   match @utf8.decode(raw) {
     "ready" => Ready
     "done" => Done

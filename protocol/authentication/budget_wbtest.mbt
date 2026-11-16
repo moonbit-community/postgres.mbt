@@ -28,8 +28,7 @@ test "SCRAM synchronous and incremental derivation match a fixed transcript" {
   assert_eq(incremental.message().to_owned(), expected_final)
   incremental.finish(verifier)
   assert_true(
-    @test.expect_error(() => incremental.message())
-    is @proto.ProtocolError::InvalidInput(_),
+    @test.expect_error(() => incremental.message()) is InvalidInput(_),
   )
 }
 
@@ -52,7 +51,7 @@ test "PBKDF2 Hi matches fixed vectors and rejects nonpositive iterations" {
   for count in [0, -1] {
     assert_true(
       @test.expect_error(() => hi(b"password", b"salt", count))
-      is @proto.ProtocolError::InvalidInput(_),
+      is InvalidInput(_),
     )
   }
 }
@@ -70,8 +69,7 @@ test "SCRAM iteration parser rejects invalid decimal input and overflow before d
       "r=rOprNGfwEbeRWgbNEkqOserver,s=c2FsdA==,i=\{count}",
     )
     assert_true(
-      @test.expect_error(() => scram.update(first))
-      is @proto.ProtocolError::InvalidInput(_),
+      @test.expect_error(() => scram.update(first)) is InvalidInput(_),
     )
     assert_eq(scram.message().to_owned(), initial)
     assert_true(scram.state is Update(..))
@@ -98,7 +96,7 @@ test "SCRAM iteration parser rejects invalid decimal input and overflow before d
           max_iterations=limit,
         )
       })
-      is @proto.ProtocolError::InvalidInput(_),
+      is InvalidInput(_),
     )
   }
 }
@@ -113,37 +111,31 @@ test "SCRAM batches include proof HMACs and hide incomplete state" {
       let scram = budget_scram()
       assert_true(
         @test.expect_error(() => scram.advance_update(max_steps=steps))
-        is @proto.ProtocolError::InvalidInput(_),
+        is InvalidInput(_),
       )
       scram.begin_update(first, max_iterations=count)
+      assert_true(@test.expect_error(() => scram.message()) is InvalidInput(_))
       assert_true(
-        @test.expect_error(() => scram.message())
-        is @proto.ProtocolError::InvalidInput(_),
-      )
-      assert_true(
-        @test.expect_error(() => scram.update(first))
-        is @proto.ProtocolError::InvalidInput(_),
+        @test.expect_error(() => scram.update(first)) is InvalidInput(_),
       )
       assert_true(
         @test.expect_error(() => scram.begin_update(first, max_iterations=count))
-        is @proto.ProtocolError::InvalidInput(_),
+        is InvalidInput(_),
       )
       assert_true(
-        @test.expect_error(() => scram.finish(b"v="))
-        is @proto.ProtocolError::InvalidInput(_),
+        @test.expect_error(() => scram.finish(b"v=")) is InvalidInput(_),
       )
       for invalid in [0, -1] {
         assert_true(
           @test.expect_error(() => scram.advance_update(max_steps=invalid))
-          is @proto.ProtocolError::InvalidInput(_),
+          is InvalidInput(_),
         )
       }
       let mut calls = 1
       while !scram.advance_update(max_steps=steps) {
         calls += 1
         assert_true(
-          @test.expect_error(() => scram.message())
-          is @proto.ProtocolError::InvalidInput(_),
+          @test.expect_error(() => scram.message()) is InvalidInput(_),
         )
       }
       assert_eq(calls, (count + 2 + steps - 1) / steps)

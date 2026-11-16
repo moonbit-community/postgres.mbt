@@ -74,21 +74,11 @@ async test "pool messages retain newest items with source IDs after close" {
       pool.close()
       assert_true(
         pool.next_message()
-        is Some(
-          {
-            connection_id: 1,
-            message: @client.AsyncMessage::ParameterStatus("n", "c"),
-          }
-        ),
+        is Some({ connection_id: 1, message: ParameterStatus("n", "c"), }),
       )
       assert_true(
         pool.next_message()
-        is Some(
-          {
-            connection_id: 2,
-            message: @client.AsyncMessage::ParameterStatus("n", "b"),
-          }
-        ),
+        is Some({ connection_id: 2, message: ParameterStatus("n", "b"), }),
       )
       assert_true(pool.next_message() is None)
     })

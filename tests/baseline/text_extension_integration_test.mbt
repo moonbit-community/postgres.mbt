@@ -18,7 +18,7 @@ async test "integration ltree extension string scalars views and arrays roundtri
       let (name, first, second) = case
       let row = client.query_one("select '\{first}'::\{name}")
       assert_eq(row.columns()[0].type_.name, name)
-      assert_eq(row.columns()[0].format, @client.WireFormat::Binary)
+      assert_eq(row.columns()[0].format, Binary)
       let read : String = row.get(0)
       assert_eq(read, first)
       let roundtrip : String = client

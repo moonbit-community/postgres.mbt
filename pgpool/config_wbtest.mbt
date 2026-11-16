@@ -186,7 +186,7 @@ async test "pool new updates status and config without connecting" {
           recycle_ms=Some(33),
         ),
         queue_mode=QueueMode::lifo(),
-        health_check=HealthCheck::Active,
+        health_check=Active,
         statement_cache_capacity=7,
       ),
     )
@@ -196,7 +196,7 @@ async test "pool new updates status and config without connecting" {
     @debug.assert_eq(timeouts.wait_ms, Some(11))
     @debug.assert_eq(timeouts.create_ms, Some(22))
     @debug.assert_eq(timeouts.recycle_ms, Some(33))
-    assert_true(pool.config().health_check == HealthCheck::Active)
+    assert_true(pool.config().health_check == Active)
     assert_eq(pool.config().statement_cache_capacity, 7)
     assert_false(pool.is_closed())
     pool.close()

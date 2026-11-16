@@ -104,8 +104,7 @@ async test "SCRAM cancellation observes both partial derivation and the final ba
           assert_true(scram.message().length() > 0)
         } else {
           assert_true(
-            @test.expect_error(() => scram.message())
-            is @proto.ProtocolError::InvalidInput(_),
+            @test.expect_error(() => scram.message()) is InvalidInput(_),
           )
         }
         task.cancel()

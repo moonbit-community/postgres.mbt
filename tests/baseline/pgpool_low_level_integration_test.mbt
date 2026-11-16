@@ -11,12 +11,12 @@ fn make_decl_pool(
   application_name~ : String,
   create_ms~ : Int32? = None,
   recycle_ms~ : Int32? = None,
-  health_check~ : @pgpool.HealthCheck = @pgpool.HealthCheck::Passive,
+  health_check~ : @pgpool.HealthCheck = Passive,
   statement_cache_capacity~ : Int32 = 100,
   options~ : @pgpool.PoolOptions = PoolOptions(),
 ) -> @pgpool.Pool raise {
   let declarative = @pgpool.Config::Config(
-    [@pgpool.ConnectionTarget(host=config.host, port=config.port)],
+    [ConnectionTarget(host=config.host, port=config.port)],
     user=config.user,
     dbname=config.database,
     password=config.password,
@@ -130,7 +130,7 @@ async test "integration pool connector and lifecycle hooks" {
       group,
       1,
       application_name="moonbit-postgres-pool-hooks",
-      health_check=@pgpool.HealthCheck::Active,
+      health_check=Active,
       options~,
     )
 
@@ -164,7 +164,7 @@ async test "integration pool discard resets session and rebuilds statement cache
       group,
       1,
       application_name="moonbit-postgres-pool-clean",
-      health_check=@pgpool.HealthCheck::Active,
+      health_check=Active,
     )
 
     let statement_count_sql = "select count(*)::int4 as count from pg_prepared_statements"

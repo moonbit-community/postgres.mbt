@@ -54,7 +54,7 @@ async test "integration escaped transaction callbacks retire backend and cannot 
         )
       })
       assert_true(error is @pgpool.PoolError::OperationInProgress)
-      assert_eq(record.status(), @pgpool.TransactionStatus::OutcomeUnknown)
+      assert_eq(record.status(), OutcomeUnknown)
       assert_eq(pool.status().size, 0)
       assert_true(old_task.val.unwrap().try_wait() is None)
       observer.batch_execute("select pg_advisory_lock(537294)")
@@ -101,7 +101,7 @@ async test "integration escaped transaction callbacks retire backend and cannot 
         next.check_connection()
       })
       assert_eq(pool.status().available, 1)
-      assert_eq(record.status(), @pgpool.TransactionStatus::OutcomeUnknown)
+      assert_eq(record.status(), OutcomeUnknown)
     }
   })
 }
@@ -174,7 +174,7 @@ async test "integration result intent records rollback and failed transaction CO
         record~,
       )
       assert_eq(rejected, Err("business validation"))
-      assert_eq(record.status(), @pgpool.TransactionStatus::RolledBack)
+      assert_eq(record.status(), RolledBack)
       assert_eq(
         session
         .query_one("select count(*)::int4 as n from moon_intent")
@@ -192,7 +192,7 @@ async test "integration result intent records rollback and failed transaction CO
         )
       })
       assert_true(error is @pgpool.PoolError::CommitRolledBack)
-      assert_eq(failed.status(), @pgpool.TransactionStatus::RolledBack)
+      assert_eq(failed.status(), RolledBack)
       session.check_connection()
     })
   })
@@ -250,7 +250,7 @@ async test "integration transaction prepared callbacks COPY and typed generic op
       record~,
     )
     assert_eq(result, Ok(()))
-    assert_eq(record.status(), @pgpool.TransactionStatus::Committed)
+    assert_eq(record.status(), Committed)
   })
 }
 
@@ -347,11 +347,7 @@ async test "integration return initialization failure preserves result and publi
 async test "integration PreserveSession and Reconnect are explicit reset policies" {
   guard integration_config() is Some(config) else { return }
   @async.with_task_group(group => {
-    for
-      policy in [
-        @pgpool.ResetPolicy::PreserveSession,
-        @pgpool.ResetPolicy::Reconnect,
-      ] {
+    for policy in [@pgpool.ResetPolicy::PreserveSession, Reconnect] {
       let pool = make_pool(
         group,
         as_client_config(config, application_name="pool-reset-policy"),
@@ -367,7 +363,7 @@ async test "integration PreserveSession and Reconnect are explicit reset policie
         "select pg_backend_pid()::int4 as pid, current_setting('application_name') as app",
       )
       let second : Int32 = row.get_name("pid")
-      if policy == @pgpool.ResetPolicy::PreserveSession {
+      if policy == PreserveSession {
         assert_eq(first, second)
         assert_eq(row.get_name("app"), "preserved")
       } else {

@@ -111,7 +111,7 @@ fn make_pool(
 ) -> @pgpool.Pool raise {
   let config = @pgpool.Config::Config(
     [
-      @pgpool.ConnectionTarget(
+      ConnectionTarget(
         host=config.host,
         hostaddr?=config.hostaddr,
         port=config.port,

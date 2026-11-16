@@ -20,16 +20,13 @@ test "SCRAM normalization preserves mapping and NFKC behavior" {
 ///|
 test "SCRAM normalization rejects invalid UTF-8 and prohibited characters" {
   let error = @test.expect_error(() => @authentication.normalize(b"\xFF"))
-  assert_true(error is @proto.ProtocolError::InvalidInput("invalid UTF-8"))
+  assert_true(error is InvalidInput("invalid UTF-8"))
   for input in ["a\u{0007}b", "\u{E000}", "\u{FDD0}", "\u{206A}", "\u{E0001}"] {
     let error = @test.expect_error(() => {
       @authentication.normalize(@utf8.encode(input))
     })
     assert_true(
-      error
-      is @proto.ProtocolError::InvalidInput(
-        "SCRAM password contains prohibited characters"
-      ),
+      error is InvalidInput("SCRAM password contains prohibited characters"),
     )
   }
 }

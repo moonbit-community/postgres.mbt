@@ -294,25 +294,23 @@ pub impl @debug.Debug for Config with fn to_repr(self) {
     None
   }
   @debug.Repr::record({
-    "user": @debug.Repr(self.user),
-    "password": @debug.Repr(password),
-    "dbname": @debug.Repr(self.dbname),
-    "options": @debug.Repr(self.options),
-    "application_name": @debug.Repr(self.application_name),
-    "ssl_mode": @debug.Repr(self.ssl_mode),
-    "ssl_root_cert": @debug.Repr(self.ssl_root_cert),
-    "channel_binding": @debug.Repr(self.channel_binding),
-    "max_backend_message_body_bytes": @debug.Repr(
-      self.max_backend_message_body_bytes,
-    ),
-    "scram_max_iterations": @debug.Repr(self.scram_max_iterations),
-    "targets": @debug.Repr(self.targets),
-    "connect_timeout_ms": @debug.Repr(self.connect_timeout_ms),
-    "keepalives": @debug.Repr(self.keepalives),
-    "keepalives_idle_s": @debug.Repr(self.keepalives_idle_s),
-    "target_session_attrs": @debug.Repr(self.target_session_attrs),
-    "load_balance_hosts": @debug.Repr(self.load_balance_hosts),
-    "pool": @debug.Repr(self.pool),
+    "user": Repr(self.user),
+    "password": Repr(password),
+    "dbname": Repr(self.dbname),
+    "options": Repr(self.options),
+    "application_name": Repr(self.application_name),
+    "ssl_mode": Repr(self.ssl_mode),
+    "ssl_root_cert": Repr(self.ssl_root_cert),
+    "channel_binding": Repr(self.channel_binding),
+    "max_backend_message_body_bytes": Repr(self.max_backend_message_body_bytes),
+    "scram_max_iterations": Repr(self.scram_max_iterations),
+    "targets": Repr(self.targets),
+    "connect_timeout_ms": Repr(self.connect_timeout_ms),
+    "keepalives": Repr(self.keepalives),
+    "keepalives_idle_s": Repr(self.keepalives_idle_s),
+    "target_session_attrs": Repr(self.target_session_attrs),
+    "load_balance_hosts": Repr(self.load_balance_hosts),
+    "pool": Repr(self.pool),
   })
 }
 

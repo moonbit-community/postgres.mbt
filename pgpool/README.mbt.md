@@ -108,7 +108,7 @@ pub async fn transaction_example(pool : @pgpool.Pool) -> Result[Int32, String] {
     },
     record~,
   )
-  assert_eq(record.status(), @pgpool.TransactionStatus::Committed)
+  assert_eq(record.status(), Committed)
   result
 }
 ```
