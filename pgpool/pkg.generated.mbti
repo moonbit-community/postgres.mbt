@@ -9,17 +9,20 @@ import {
 // Values
 
 // Errors
+#derive(@debug.Debug)
 pub suberror AcquireError {
   AttemptsFailed(Array[ConnectionAttempt])
-} derive(@debug.Debug)
+}
 pub fn AcquireError::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub suberror ConfigError {
   UsernameEmpty
   DbnameEmpty
   InvalidConfig(String)
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub suberror PoolError {
   Closed
   ExecutorAlreadyStarted
@@ -31,9 +34,10 @@ pub suberror PoolError {
   CommitOutcomeUnknown
   HookLeftOpenTransaction
   InvalidConfig(String)
-} derive(Eq, @debug.Debug)
+}
 
 // Types and methods
+#derive(Eq)
 pub struct Config {
   user : String
   password : String?
@@ -52,26 +56,28 @@ pub struct Config {
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
   // private fields
-} derive(Eq)
+}
 pub fn Config::Config(Array[ConnectionTarget], user~ : String, dbname? : String, password? : String, ssl_mode? : @client.SslMode, ssl_root_cert? : String, channel_binding? : @client.ChannelBinding, application_name~ : String, options? : String, max_backend_message_body_bytes? : Int32, scram_max_iterations? : Int32, connect_timeout_ms? : Int32, keepalives? : Bool, keepalives_idle_s? : Int32, target_session_attrs? : TargetSessionAttrs, load_balance_hosts? : LoadBalanceHosts, pool~ : PoolConfig) -> Self raise
 pub fn Config::get_connection_targets(Self) -> Array[@client.Config]
 pub fn Config::get_pool_config(Self) -> PoolConfig raise
 pub fn Config::targets(Self) -> ArrayView[ConnectionTarget]
 pub impl @debug.Debug for Config
 
+#derive(@debug.Debug)
 pub struct ConnectionAttempt {
   target : String
   phase : TimeoutKind
   elapsed_ms : Int64
   cause : Error
-} derive(@debug.Debug)
+}
 pub fn ConnectionAttempt::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub struct ConnectionTarget {
   host : String?
   hostaddr : String?
   port : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn ConnectionTarget::ConnectionTarget(host? : String, hostaddr? : String, port? : Int32) -> Self
 
 type Connector
@@ -91,19 +97,21 @@ pub async fn CopyOutStream::next(Self, deadline? : Deadline) -> Bytes?
 type Deadline
 pub fn Deadline::after_ms(Int32) -> Self raise
 
+#derive(Eq, @debug.Debug)
 pub(all) enum HealthCheck {
   Passive
   Active
   Custom(String)
-} derive(Eq, @debug.Debug)
+}
 pub fn HealthCheck::equal(Self, Self) -> Bool
 pub fn HealthCheck::not_equal(Self, Self) -> Bool
 pub fn HealthCheck::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum LoadBalanceHosts {
   Disable
   Random
-} derive(Eq, @debug.Debug)
+}
 
 type Pool
 pub async fn Pool::batch_execute(Self, String, deadline? : Deadline, timeouts? : Timeouts) -> Unit
@@ -138,14 +146,16 @@ pub async fn[T, E] Pool::with_transaction(Self, async (Transaction) -> Result[T,
 pub async fn[T] Pool::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline, timeouts? : Timeouts) -> T
 pub impl GenericClient for Pool
 
+#derive(Eq, @debug.Debug)
 pub struct PoolAsyncMessage {
   connection_id : Int32
   message : @client.AsyncMessage
-} derive(Eq, @debug.Debug)
+}
 pub fn PoolAsyncMessage::equal(Self, Self) -> Bool
 pub fn PoolAsyncMessage::not_equal(Self, Self) -> Bool
 pub fn PoolAsyncMessage::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub struct PoolConfig {
   max_size : Int32
   timeouts : Timeouts
@@ -156,9 +166,10 @@ pub struct PoolConfig {
   event_capacity : Int32
   statement_cache_capacity : Int32
   async_message_capacity : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn PoolConfig::PoolConfig(Int32, timeouts? : Timeouts, queue_mode? : QueueMode, health_check? : HealthCheck, reset_policy? : ResetPolicy, cleanup_ms? : Int32, event_capacity? : Int32, statement_cache_capacity? : Int32, async_message_capacity? : Int32) -> Self raise
 
+#derive(@debug.Debug)
 pub struct PoolEvent {
   kind : PoolEventKind
   connection_id : Int32?
@@ -169,9 +180,10 @@ pub struct PoolEvent {
   elapsed_ms : Int64
   cause : Error?
   transaction_status : TransactionStatus?
-} derive(@debug.Debug)
+}
 pub fn PoolEvent::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum PoolEventKind {
   ConnectionReplaced
   HealthChecked
@@ -180,7 +192,7 @@ pub(all) enum PoolEventKind {
   CleanupCompleted
   TransactionCompleted
   ConnectionAttempt
-} derive(Eq, @debug.Debug)
+}
 pub fn PoolEventKind::equal(Self, Self) -> Bool
 pub fn PoolEventKind::not_equal(Self, Self) -> Bool
 pub fn PoolEventKind::to_repr(Self) -> @debug.Repr
@@ -204,18 +216,20 @@ pub async fn PreparedStatement::query_one(Self, params? : Array[&@client.ToSql],
 pub async fn PreparedStatement::query_opt(Self, params? : Array[&@client.ToSql], deadline? : Deadline) -> @client.Row?
 pub async fn[T] PreparedStatement::with_stream(Self, params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
 
+#derive(Eq, @debug.Debug)
 pub enum QueueMode {
   Fifo
   Lifo
-} derive(Eq, @debug.Debug)
+}
 pub fn QueueMode::fifo() -> Self
 pub fn QueueMode::lifo() -> Self
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ResetPolicy {
   DiscardAll
   PreserveSession
   Reconnect
-} derive(Eq, @debug.Debug)
+}
 pub fn ResetPolicy::equal(Self, Self) -> Bool
 pub fn ResetPolicy::not_equal(Self, Self) -> Bool
 pub fn ResetPolicy::to_repr(Self) -> @debug.Repr
@@ -254,21 +268,24 @@ pub async fn SimpleQueryStream::collect(Self, deadline? : Deadline) -> Array[@cl
 pub async fn SimpleQueryStream::finish(Self, deadline? : Deadline) -> Unit
 pub async fn SimpleQueryStream::next(Self, deadline? : Deadline) -> @client.SimpleQueryMessage?
 
+#derive(Eq, @debug.Debug)
 pub struct Status {
   size : Int32
   available : Int32
   waiting : Int32
   max_size : Int32
   closed : Bool
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub enum TargetSessionAttrs {
   Any
   ReadWrite
-} derive(Eq, @debug.Debug)
+}
 pub fn TargetSessionAttrs::any() -> Self
 pub fn TargetSessionAttrs::read_write() -> Self
 
+#derive(Eq, @debug.Debug)
 pub enum TimeoutKind {
   Wait
   Create
@@ -276,13 +293,14 @@ pub enum TimeoutKind {
   Hook
   Query
   Cleanup
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub struct Timeouts {
   wait_ms : Int32?
   create_ms : Int32?
   recycle_ms : Int32?
-} derive(Eq, @debug.Debug)
+}
 pub fn Timeouts::Timeouts(wait_ms? : Int32?, create_ms? : Int32?, recycle_ms? : Int32?) -> Self
 
 type Transaction
@@ -307,17 +325,19 @@ pub async fn[T, E] Transaction::with_transaction(Self, async (Self) -> Result[T,
 pub async fn[T] Transaction::with_typed_stream(Self, String, Array[@client.Type], params? : Array[&@client.ToSql], async (RowStream) -> T, deadline? : Deadline) -> T
 pub impl GenericClient for Transaction
 
+#derive(Eq, @debug.Debug)
 pub struct TransactionOptions {
   isolation_level : @client.IsolationLevel?
   read_only : Bool?
   deferrable : Bool?
-} derive(Eq, @debug.Debug)
+}
 pub fn TransactionOptions::TransactionOptions(isolation_level? : @client.IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
 type TransactionRecord
 pub fn TransactionRecord::TransactionRecord() -> Self
 pub fn TransactionRecord::status(Self) -> TransactionStatus
 
+#derive(Eq, @debug.Debug)
 pub(all) enum TransactionStatus {
   NotStarted
   InProgress
@@ -325,7 +345,7 @@ pub(all) enum TransactionStatus {
   RolledBack
   SavepointReleased
   OutcomeUnknown
-} derive(Eq, @debug.Debug)
+}
 pub fn TransactionStatus::equal(Self, Self) -> Bool
 pub fn TransactionStatus::not_equal(Self, Self) -> Bool
 pub fn TransactionStatus::to_repr(Self) -> @debug.Repr

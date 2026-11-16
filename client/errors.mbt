@@ -6,6 +6,7 @@
 /// Optional fields are independent: one object name does not imply another.
 /// Positions preserve PostgreSQL's one-based character indices, not byte or
 /// UTF-16 offsets. Unknown protocol tags are ignored.
+#derive(Debug, Eq)
 pub struct DatabaseError {
   /// Localizable human-readable severity from `S`, for example `"ERROR"`.
   severity : String?
@@ -43,7 +44,7 @@ pub struct DatabaseError {
   line : UInt32?
   /// PostgreSQL source routine reporting the error.
   routine : String?
-} derive(Debug, Eq)
+}
 
 ///|
 /// Restore a query error after a pool scope has completed protected cleanup.
@@ -60,12 +61,13 @@ pub fn DatabaseError::into_client_error(self : DatabaseError) -> ClientError {
 /// user-provided `ToSql` or `FromSql` implementation. That keeps failures
 /// deterministic and prevents custom codec code from seeing obviously
 /// incompatible PostgreSQL types.
+#derive(Debug, Eq)
 pub struct WrongTypeError {
   /// The MoonBit-side type name reported by the codec implementation.
   moonbit_type : String
   /// The PostgreSQL column or parameter type that failed the compatibility check.
   postgres_type : Type
-} derive(Debug, Eq)
+}
 
 ///|
 /// Top-level error union raised by client operations.
@@ -74,6 +76,7 @@ pub struct WrongTypeError {
 /// database-originated failures, startup/authentication problems, connection
 /// lifecycle issues, protocol violations, codec errors, and higher-level query
 /// shape checks such as row-count assertions.
+#derive(Debug, Eq)
 pub suberror ClientError {
   RequestCancelled
   CommitRolledBack
@@ -114,4 +117,4 @@ pub suberror ClientError {
   UnfinishedChildTransaction
   /// The driver received a backend message that does not fit the current state.
   UnexpectedMessage(String)
-} derive(Debug, Eq)
+}

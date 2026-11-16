@@ -1,4 +1,5 @@
 ///|
+#derive(Eq, Debug)
 pub(all) enum PoolEventKind {
   ConnectionReplaced
   HealthChecked
@@ -7,10 +8,11 @@ pub(all) enum PoolEventKind {
   CleanupCompleted
   TransactionCompleted
   ConnectionAttempt
-} derive(Eq, Debug)
+}
 
 ///|
 /// Original errors remain inspectable, including PostgreSQL SQLSTATE fields.
+#derive(Debug)
 pub struct PoolEvent {
   kind : PoolEventKind
   connection_id : Int32?
@@ -21,20 +23,22 @@ pub struct PoolEvent {
   elapsed_ms : Int64
   cause : Error?
   transaction_status : TransactionStatus?
-} derive(Debug)
+}
 
 ///|
+#derive(Debug)
 pub struct ConnectionAttempt {
   target : String
   phase : TimeoutKind
   elapsed_ms : Int64
   cause : Error
-} derive(Debug)
+}
 
 ///|
+#derive(Debug)
 pub suberror AcquireError {
   AttemptsFailed(Array[ConnectionAttempt])
-} derive(Debug)
+}
 
 ///|
 fn emit_event(
@@ -87,6 +91,7 @@ pub fn Pool::dropped_events(self : Pool) -> Int64 {
 }
 
 ///|
+#derive(Eq, Debug)
 pub(all) enum TransactionStatus {
   NotStarted
   InProgress
@@ -94,7 +99,7 @@ pub(all) enum TransactionStatus {
   RolledBack
   SavepointReleased
   OutcomeUnknown
-} derive(Eq, Debug)
+}
 
 ///|
 /// One-shot completion storage, independent of task cancellation and events.

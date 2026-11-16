@@ -6,6 +6,7 @@
 /// A `Column` combines protocol-level row-description fields with the driver's
 /// resolved `Type` descriptor so higher-level code can inspect both raw wire
 /// details and semantic type information.
+#derive(Debug, Eq)
 pub struct Column {
   /// Column label chosen by the query.
   name : String
@@ -21,7 +22,7 @@ pub struct Column {
   type_modifier : Int32
   /// Wire format used for this column in the current result stream.
   format : WireFormat
-} derive(Debug, Eq)
+}
 
 ///|
 /// One fully materialized row from an extended query.
@@ -29,12 +30,13 @@ pub struct Column {
 /// The row stores its column metadata alongside the raw field payloads so each
 /// `get` call can validate the target type, decode on demand, and still support
 /// low-level access through `get_raw`.
+#derive(Debug, Eq)
 struct Row {
   /// Column metadata for each position.
   columns : Array[Column]
   /// Raw field payloads. `None` represents SQL `NULL`.
   values : Array[Bytes?]
-} derive(Debug, Eq)
+}
 
 ///|
 /// Return a read-only view of the row's column metadata.

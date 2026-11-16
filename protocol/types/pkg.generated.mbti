@@ -121,10 +121,11 @@ pub fn varbit_to_sql(Int32, Iter[Byte], @buffer.Buffer) -> Unit raise @protocol.
 // Errors
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub struct ArrayDimension {
   len : Int32
   lower_bound : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn ArrayDimension::new(Int32, Int32) -> Self
 
 pub struct ArrayDimensions {
@@ -138,10 +139,11 @@ pub struct ArrayValues {
 }
 pub fn ArrayValues::next(Self) -> Bytes?? raise @protocol.ProtocolError
 
+#derive(Eq, @debug.Debug)
 pub struct Box {
   upper_right : Point
   lower_left : Point
-} derive(Eq, @debug.Debug)
+}
 
 pub struct HstoreEntries {
   mut remaining : Int32
@@ -194,10 +196,11 @@ pub struct PgArray {
 pub fn PgArray::dimensions(Self) -> ArrayDimensions
 pub fn PgArray::values(Self) -> ArrayValues
 
+#derive(Eq, @debug.Debug)
 pub struct Point {
   x : Double
   y : Double
-} derive(Eq, @debug.Debug)
+}
 
 pub enum Range {
   Empty

@@ -7,6 +7,7 @@
 /// array, but the richer variants let the client cache enough metadata for
 /// advanced introspection and future extension points. Inspect this read-only
 /// classification through `type_.kind`.
+#derive(Debug, Eq)
 pub enum Kind {
   /// A plain scalar type such as `int4` or `timestamp`.
   Simple
@@ -24,16 +25,17 @@ pub enum Kind {
   Pseudo
   /// A placeholder used when only the OID is known.
   Unknown
-} derive(Debug, Eq)
+}
 
 ///|
 /// Field descriptor returned through `Kind::Composite`.
+#derive(Debug, Eq)
 pub struct Field {
   /// Field name as reported by PostgreSQL system catalogs.
   name : String
   /// Complete descriptor of the field type.
   type_ : Type
-} derive(Debug, Eq)
+}
 
 ///|
 /// Stable description of a PostgreSQL type known to the client.
@@ -43,6 +45,7 @@ pub struct Field {
 /// and then cached in the shared client state. Equality compares schema and
 /// complete child descriptors as well as OID and name. Cyclic catalog metadata
 /// raises `ClientError::UnsupportedRecursiveType` rather than forming a cycle.
+#derive(Debug, Eq)
 pub struct Type {
   /// Numeric PostgreSQL object identifier.
   oid : @proto.Oid
@@ -52,7 +55,7 @@ pub struct Type {
   schema : String?
   /// Structural classification used by higher-level logic.
   kind : Kind
-} derive(Debug, Eq)
+}
 
 ///|
 /// Return the built-in PostgreSQL `bool` type descriptor.

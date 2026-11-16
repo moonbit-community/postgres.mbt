@@ -6,10 +6,11 @@
 /// This setting affects only the order of the pool's idle list. It does not
 /// reorder waiting tasks, and it has no effect while the pool must open a new
 /// connection because no idle connection is available.
+#derive(Eq, Debug)
 pub enum QueueMode {
   Fifo
   Lifo
-} derive(Eq, Debug)
+}
 
 ///|
 /// Construct FIFO queue mode.
@@ -32,6 +33,7 @@ pub fn QueueMode::lifo() -> QueueMode {
 /// Wait includes executor readiness and capacity; Create includes startup and
 /// initialization; Recycle is checkout health verification. Query is business
 /// I/O, Hook is acquisition validation, and Cleanup is the shared grace period.
+#derive(Eq, Debug)
 pub enum TimeoutKind {
   Wait
   Create
@@ -39,7 +41,7 @@ pub enum TimeoutKind {
   Hook
   Query
   Cleanup
-} derive(Eq, Debug)
+}
 
 ///|
 /// Re-export the client isolation level for pooled transaction options.
@@ -47,6 +49,7 @@ pub using @client {type IsolationLevel}
 
 ///|
 /// Options for the `BEGIN` command used when opening a pooled transaction.
+#derive(Eq, Debug)
 pub struct TransactionOptions {
   /// Optional transaction isolation level.
   isolation_level : IsolationLevel?
@@ -54,7 +57,7 @@ pub struct TransactionOptions {
   read_only : Bool?
   /// `Some(true)` emits `DEFERRABLE`; `Some(false)` emits `NOT DEFERRABLE`.
   deferrable : Bool?
-} derive(Eq, Debug)
+}
 
 ///|
 /// Build transaction options for a future `BEGIN` command.
@@ -72,6 +75,7 @@ pub fn TransactionOptions::TransactionOptions(
 /// These values control how long the pool waits for capacity, creates a new
 /// connection, or recycles an idle connection. `None` leaves the phase
 /// unbounded. Negative values are rejected by `PoolConfig::PoolConfig` or checkout.
+#derive(Eq, Debug)
 pub struct Timeouts {
   /// Combined executor readiness and capacity wait; zero polls immediately.
   wait_ms : Int32?
@@ -79,7 +83,7 @@ pub struct Timeouts {
   create_ms : Int32?
   /// Maximum wait for checkout-time recycling of an idle connection.
   recycle_ms : Int32?
-} derive(Eq, Debug)
+}
 
 ///|
 /// Construct one timeout record.
@@ -96,22 +100,25 @@ pub fn Timeouts::Timeouts(
 
 ///|
 /// Checkout health verification, independent of session reset on return.
+#derive(Eq, Debug)
 pub(all) enum HealthCheck {
   Passive
   Active
   Custom(String)
-} derive(Eq, Debug)
+}
 
 ///|
 /// Session isolation policy applied before a connection becomes available.
+#derive(Eq, Debug)
 pub(all) enum ResetPolicy {
   DiscardAll
   PreserveSession
   Reconnect
-} derive(Eq, Debug)
+}
 
 ///|
 /// Capacity and checkout policy for one pool instance.
+#derive(Eq, Debug)
 pub struct PoolConfig {
   /// Maximum number of live physical PostgreSQL sessions owned by the pool.
   max_size : Int32
@@ -133,7 +140,7 @@ pub struct PoolConfig {
   statement_cache_capacity : Int32
   /// Maximum asynchronous messages retained across physical connections.
   async_message_capacity : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 /// Construct and validate one pool configuration.
@@ -179,11 +186,12 @@ pub fn PoolConfig::PoolConfig(
 /// Failures raised while validating declarative pool input.
 ///
 /// These errors are reported before the pool opens any physical connection.
+#derive(Eq, Debug)
 pub suberror ConfigError {
   UsernameEmpty
   DbnameEmpty
   InvalidConfig(String)
-} derive(Eq, Debug)
+}
 
 ///|
 /// PostgreSQL target-session policy checked right after a new connection opens.
@@ -192,10 +200,11 @@ pub suberror ConfigError {
 /// `ReadWrite` immediately runs `show transaction_read_only` and rejects a
 /// target whose value is `on`, which is useful when the target list may contain
 /// replicas.
+#derive(Eq, Debug)
 pub enum TargetSessionAttrs {
   Any
   ReadWrite
-} derive(Eq, Debug)
+}
 
 ///|
 /// Construct `Any`.
@@ -215,14 +224,16 @@ pub fn TargetSessionAttrs::read_write() -> TargetSessionAttrs {
 /// This affects only the order in which candidate targets are tried for a new
 /// connection. It does not reshuffle already-open idle connections, and it does
 /// not move a checked-out client from one target to another.
+#derive(Eq, Debug)
 pub(all) enum LoadBalanceHosts {
   Disable
   Random
-} derive(Eq, Debug)
+}
 
 ///|
 /// One PostgreSQL endpoint. When both addresses are set, the client connects
 /// to `hostaddr` and uses `host` for TLS hostname verification.
+#derive(Eq, Debug)
 pub struct ConnectionTarget {
   /// Hostname used for TLS verification and DNS connection when no address is set.
   host : String?
@@ -230,7 +241,7 @@ pub struct ConnectionTarget {
   hostaddr : String?
   /// TCP port for this endpoint.
   port : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 /// Construct one endpoint. `Config::Config` validates its address and port.
@@ -247,6 +258,7 @@ pub fn ConnectionTarget::ConnectionTarget(
 ///
 /// The constructor validates all endpoints and common connection settings.
 /// Its `Debug` representation replaces a configured password with `<hidden>`.
+#derive(Eq)
 pub struct Config {
   user : String
   /// Optional in the declarative config, but required at connection startup
@@ -271,7 +283,7 @@ pub struct Config {
   target_session_attrs : TargetSessionAttrs?
   load_balance_hosts : LoadBalanceHosts?
   pool : PoolConfig
-} derive(Eq)
+}
 
 ///|
 /// Keep pool diagnostics useful without rendering the password.
@@ -374,6 +386,7 @@ pub fn Config::Config(
 
 ///|
 /// Point-in-time snapshot of one pool's runtime state.
+#derive(Eq, Debug)
 pub struct Status {
   /// Number of currently live physical connections, both idle and checked out.
   size : Int32
@@ -385,7 +398,7 @@ pub struct Status {
   max_size : Int32
   /// Whether `Pool::close()` has started and new checkouts are rejected.
   closed : Bool
-} derive(Eq, Debug)
+}
 
 ///|
 /// Failures raised by pool lifecycle, checkout, and scoped-handle operations.
@@ -393,6 +406,7 @@ pub struct Status {
 /// `ScopeExpired` reports use-after-scope on pooled handles, `Closed` rejects
 /// new checkouts after `Pool::close()`, and `Timeout` identifies the checkout
 /// phase that expired.
+#derive(Eq, @debug.Debug)
 pub suberror PoolError {
   Closed
   ExecutorAlreadyStarted
@@ -405,7 +419,7 @@ pub suberror PoolError {
   /// A lifecycle hook returned with an open transaction; the connection was discarded.
   HookLeftOpenTransaction
   InvalidConfig(String)
-} derive(Eq, @debug.Debug)
+}
 
 ///|
 /// Validate pool config values before the pool is built.

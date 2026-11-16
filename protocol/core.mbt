@@ -6,11 +6,12 @@
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS
 /// Protocol error type used when a packet violates the wire-level invariants
 /// described in PostgreSQL protocol Sections 54.6 and 54.7.
+#derive(Debug, Eq)
 pub(all) suberror ProtocolError {
   InvalidInput(String)
   UnexpectedEof(String)
   Overflow(String)
-} derive(Debug, Eq)
+}
 
 ///|
 /// A PostgreSQL object identifier.

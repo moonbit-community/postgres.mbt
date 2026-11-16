@@ -117,10 +117,11 @@ pub struct CopyOutResponseBody {
 }
 pub fn CopyOutResponseBody::column_formats(Self) -> ColumnFormats
 
+#derive(Eq, @debug.Debug)
 pub struct DataRowBody {
   storage : Bytes
   len : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn DataRowBody::buffer(Self) -> BytesView
 pub fn DataRowBody::ranges(Self) -> DataRowRanges
 
@@ -165,10 +166,11 @@ pub struct Fields {
 }
 pub fn Fields::next(Self) -> Field? raise @protocol.ProtocolError
 
+#derive(@debug.Debug)
 pub struct Header {
   tag : Byte
   len : Int32
-} derive(@debug.Debug)
+}
 pub fn Header::parse(BytesView) -> Self? raise @protocol.ProtocolError
 
 pub enum Message {

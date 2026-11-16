@@ -26,11 +26,12 @@ pub fn validate_utf8(BytesView) -> Unit raise ProtocolError
 pub fn write_nullable((@buffer.Buffer) -> IsNull raise ProtocolError, @buffer.Buffer) -> Unit raise ProtocolError
 
 // Errors
+#derive(Eq, @debug.Debug)
 pub(all) suberror ProtocolError {
   InvalidInput(String)
   UnexpectedEof(String)
   Overflow(String)
-} derive(Eq, @debug.Debug)
+}
 
 // Types and methods
 pub struct ByteReader {

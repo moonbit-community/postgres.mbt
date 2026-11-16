@@ -79,10 +79,11 @@ pub const READY_FOR_QUERY_TAG : Byte = b'Z'
 /// Parsed `Byte1 tag + Int32 len` prefix of a backend message.
 ///
 /// `len` includes the 4-byte length word itself, but not the initial tag byte.
+#derive(Debug)
 pub struct Header {
   tag : Byte
   len : Int32
-} derive(Debug)
+}
 
 ///|
 /// Parse a backend message header if enough bytes are available.
@@ -585,10 +586,11 @@ pub fn CopyOutResponseBody::column_formats(
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY
 /// - https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
 /// - https://www.postgresql.org/docs/current/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-DATAROW
+#derive(Debug, Eq)
 pub struct DataRowBody {
   storage : Bytes
   len : Int32
-} derive(Debug, Eq)
+}
 
 ///|
 /// Return an iterator over the raw value ranges in this row.

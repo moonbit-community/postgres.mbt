@@ -6,6 +6,7 @@
 /// The modes are intentionally strict:
 /// plaintext is opt-in via `Disable`, while TLS-using callers choose between
 /// certificate-chain verification with or without endpoint identity checks.
+#derive(Debug, Eq)
 pub(all) enum SslMode {
   /// Explicit plaintext mode.
   ///
@@ -27,7 +28,7 @@ pub(all) enum SslMode {
   /// certificate chain and the requested hostname or IP address, and is the
   /// default and recommended mode.
   VerifyFull
-} derive(Debug, Eq)
+}
 
 ///|
 /// Controls whether SCRAM channel binding is disabled, preferred, or required.
@@ -45,11 +46,12 @@ pub(all) enum SslMode {
 /// support is missing. Because non-SCRAM authentication methods cannot employ
 /// PostgreSQL channel binding, `Require` rejects them before sending
 /// authentication credentials.
+#derive(Debug, Eq)
 pub(all) enum ChannelBinding {
   Disable
   Prefer
   Require
-} derive(Debug, Eq)
+}
 
 ///|
 /// Immutable configuration supplied to `Client::create`.
@@ -59,6 +61,7 @@ pub(all) enum ChannelBinding {
 /// cancellation, can reopen a control connection with the exact same host and
 /// port. Its `Debug` representation replaces a configured password with
 /// `<hidden>`.
+#derive(Eq)
 pub struct Config {
   /// Hostname used for TLS verification and default server-name handling.
   host : String
@@ -100,7 +103,7 @@ pub struct Config {
   keepalives : Bool?
   /// Idle time in seconds before the first TCP keepalive probe.
   keepalives_idle_s : Int32?
-} derive(Eq)
+}
 
 ///|
 /// Keep connection diagnostics useful without rendering the password.

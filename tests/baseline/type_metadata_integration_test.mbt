@@ -1,9 +1,10 @@
 ///|
 /// One scalar codec suffices for Array[SchemaStatus] and its nullable elements.
+#derive(Debug, Eq)
 priv enum SchemaStatus {
   Ready
   Done
-} derive(Debug, Eq)
+}
 
 ///|
 fn schema_status_accepts(type_ : @client.Type) -> Bool {

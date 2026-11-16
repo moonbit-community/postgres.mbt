@@ -1,8 +1,9 @@
 ///|
+#derive(Debug, Eq)
 priv enum MetadataMood {
   Ready
   Done
-} derive(Debug, Eq)
+}
 
 ///|
 fn metadata_mood_accepts(type_ : Type) -> Bool {

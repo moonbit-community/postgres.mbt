@@ -1,9 +1,10 @@
 ///|
 /// This type intentionally claims it only accepts `text`.
 /// The test later passes it to an `int4` parameter to verify write-side type checking.
+#derive(Debug, Eq)
 struct TextOnlyParam {
   value : String
-} derive(Debug, Eq)
+}
 
 ///|
 impl @client.ToSql for TextOnlyParam with fn format(_, _) {
