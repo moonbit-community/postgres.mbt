@@ -162,7 +162,7 @@ async test "zero recycle budget retires the dequeued client and restores exactly
     assert_true(pool.shared.slots.try_get() is None)
     assert_true(pool.shared.slots.try_put(()))
     let replacement = pool.checkout_session()
-    defer replacement.release()
+    defer @async.protect_from_cancel(() => replacement.release())
     assert_true(replacement.state.connection.id != retired.id)
     assert_eq(pool.status().size, 1)
     assert_true(

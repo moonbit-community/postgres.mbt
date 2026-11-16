@@ -36,6 +36,24 @@ async fn check_pending_cancellation() -> Unit noraise {
 }
 
 ///|
+/// Finish protected work, then propagate pending cancellation even if it failed.
+/// An enclosing protection keeps cancellation pending for its own boundary.
+async fn[T] with_cancellation_boundary(f : async () -> T) -> T {
+  let outcome : Result[T, Error] = @async.protect_from_cancel(() => {
+    try f() catch {
+      error => Err(error)
+    } noraise {
+      value => Ok(value)
+    }
+  })
+  check_pending_cancellation()
+  match outcome {
+    Ok(value) => value
+    Err(error) => raise error
+  }
+}
+
+///|
 /// Run a fully consumed logical operation under the client's FIFO gate.
 async fn[T] Client::run_operation(
   self : Client,
@@ -47,8 +65,7 @@ async fn[T] Client::run_operation(
   ensure_open(self.shared)
   check_pending_cancellation()
   // Finish protocol cleanup, then propagate cancellation at this public boundary.
-  defer check_pending_cancellation()
-  @async.protect_from_cancel(() => f(self.operation_context()))
+  with_cancellation_boundary(() => f(self.operation_context()))
 }
 
 ///|

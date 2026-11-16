@@ -13,7 +13,7 @@ async test "integration escaped transaction callbacks retire backend and cannot 
         as_client_config(config, application_name="pool-escape-observer"),
         group,
       )
-      defer observer.close()
+      defer @async.protect_from_cancel(() => observer.close())
       let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
       let release_callback : @async.Queue[Unit] = Queue(kind=Unbounded)
       defer release_callback.close()
@@ -60,8 +60,10 @@ async test "integration escaped transaction callbacks retire backend and cannot 
       observer.batch_execute("select pg_advisory_lock(537294)")
       pool.with_session(next => {
         let unlocked = Ref(false)
-        defer (if !unlocked.val {
-          observer.batch_execute("select pg_advisory_unlock(537294)")
+        defer @async.protect_from_cancel(() => {
+          if !unlocked.val {
+            observer.batch_execute("select pg_advisory_unlock(537294)")
+          }
         })
         let pid : Int32 = next
           .query_one("select pg_backend_pid()::int4 as pid")

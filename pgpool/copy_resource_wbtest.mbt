@@ -24,7 +24,7 @@ async test "one COPY transport failure leaves the pool and its other connection 
   with_control_pool(CopyDisconnect, (_, pool, _) => {
     pool.resize(2)
     let peer = pool.checkout_session()
-    defer peer.release()
+    defer @async.protect_from_cancel(() => peer.release())
     let peer_id = peer.state.connection.id
     let error = expect_pgpool_error_async(() => {
       pool.with_copy_in("broken copy in", sink => {

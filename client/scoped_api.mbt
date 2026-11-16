@@ -25,10 +25,7 @@ async fn[R, T] Client::with_scoped_resource(
   check_pending_cancellation()
   // Also observe cancellation received while cleanup was protected, even if
   // cleanup itself fails. An error from f keeps its original cause instead.
-  {
-    defer check_pending_cancellation()
-    @async.protect_from_cancel(() => finalize(resource))
-  }
+  with_cancellation_boundary(() => finalize(resource))
   result
 }
 
