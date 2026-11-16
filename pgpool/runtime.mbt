@@ -49,10 +49,11 @@ struct Pool {
 
 ///|
 /// Asynchronous backend message tagged with its physical pool connection.
+#derive(Debug, Eq)
 pub struct PoolAsyncMessage {
   connection_id : Int32
   message : @client.AsyncMessage
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend PoolAsyncMessage with @debug.Debug::{to_repr}

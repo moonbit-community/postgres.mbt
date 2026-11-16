@@ -2,12 +2,13 @@
 
 ///|
 /// PostgreSQL transaction isolation level accepted by `TransactionOptions`.
+#derive(Eq, Debug)
 pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
-} derive(Eq, Debug)
+}
 
 ///|
 /// Return one fixed SQL spelling for a transaction isolation level.
@@ -22,6 +23,7 @@ fn isolation_level_sql(level : IsolationLevel) -> String {
 
 ///|
 /// Options for the `BEGIN` command used when opening a transaction.
+#derive(Eq, Debug)
 pub struct TransactionOptions {
   /// Optional transaction isolation level.
   isolation_level : IsolationLevel?
@@ -29,7 +31,7 @@ pub struct TransactionOptions {
   read_only : Bool?
   /// `Some(true)` emits `DEFERRABLE`; `Some(false)` emits `NOT DEFERRABLE`.
   deferrable : Bool?
-} derive(Eq, Debug)
+}
 
 ///|
 /// Build transaction options for a future `BEGIN` command.

@@ -2,6 +2,7 @@
 
 ///|
 /// Final summary reported after an extended query stream is fully drained.
+#derive(Debug, Eq)
 pub struct QuerySummary {
   /// Raw PostgreSQL command tag, for example `"INSERT 0 3"` or `"SELECT 1"`.
   command_tag : String
@@ -9,7 +10,7 @@ pub struct QuerySummary {
   row_count : UInt64
   /// Whether the server suspended a portal because of a row limit.
   suspended : Bool
-} derive(Debug, Eq)
+}
 
 ///|
 /// Incremental stream of rows produced by the extended query protocol.

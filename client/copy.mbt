@@ -258,6 +258,7 @@ fn start_abandoned_copy_in(
 
 ///|
 /// Payload of PostgreSQL `NotificationResponse`.
+#derive(Debug, Eq)
 pub struct Notification {
   /// Backend process ID that sent the notification.
   process_id : Int32
@@ -265,13 +266,14 @@ pub struct Notification {
   channel : String
   /// Optional payload string attached to the notification.
   payload : String
-} derive(Debug, Eq)
+}
 
 ///|
 /// Message delivered out-of-band from the main request/response flow.
 ///
 /// These messages are emitted by the private driver and can be consumed through
 /// `Client::next_message`.
+#derive(Debug, Eq)
 pub enum AsyncMessage {
   /// Server notice that did not fail the active request.
   Notice(DatabaseError)
@@ -279,7 +281,7 @@ pub enum AsyncMessage {
   Notification(Notification)
   /// Session parameter update such as `server_version`.
   ParameterStatus(String, String)
-} derive(Debug, Eq)
+}
 
 ///|
 /// Stream of raw chunks produced by `COPY ... TO STDOUT`.

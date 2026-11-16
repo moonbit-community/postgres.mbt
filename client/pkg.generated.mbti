@@ -5,11 +5,13 @@ import {
   "moonbit-community/postgres/protocol",
   "moonbitlang/core/buffer",
   "moonbitlang/core/debug",
+  "moonbitlang/core/json",
 }
 
 // Values
 
 // Errors
+#derive(Eq, @debug.Debug)
 pub suberror ClientError {
   RequestCancelled
   CommitRolledBack
@@ -32,24 +34,26 @@ pub suberror ClientError {
   RowCount(String)
   UnfinishedChildTransaction
   UnexpectedMessage(String)
-} derive(Eq, @debug.Debug)
+}
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub enum AsyncMessage {
   Notice(DatabaseError)
   Notification(Notification)
   ParameterStatus(String, String)
-} derive(Eq, @debug.Debug)
+}
 
 type CancelToken
 pub async fn CancelToken::cancel(Self) -> Unit
 pub fn CancelToken::process_id(Self) -> Int32
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ChannelBinding {
   Disable
   Prefer
   Require
-} derive(Eq, @debug.Debug)
+}
 
 type Client
 pub fn Client::abort(Self) -> Unit
@@ -92,6 +96,7 @@ pub async fn[T] Client::with_typed_stream(Self, String, Array[Type], params? : A
 type ClientExecutor
 pub async fn ClientExecutor::run(Self) -> Unit
 
+#derive(Eq, @debug.Debug)
 pub struct Column {
   name : String
   table_oid : UInt32
@@ -100,8 +105,9 @@ pub struct Column {
   type_size : Int32
   type_modifier : Int32
   format : WireFormat
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq)
 pub struct Config {
   host : String
   hostaddr : String?
@@ -119,7 +125,7 @@ pub struct Config {
   connect_timeout_ms : Int32?
   keepalives : Bool?
   keepalives_idle_s : Int32?
-} derive(Eq)
+}
 pub fn Config::Config(String, hostaddr? : String, port? : Int32, user~ : String, database? : String, password? : String, ssl_mode? : SslMode, ssl_root_cert? : String, channel_binding? : ChannelBinding, application_name~ : String, options? : String, max_backend_message_body_bytes? : Int32, scram_max_iterations? : Int32, connect_timeout_ms? : Int32, keepalives? : Bool, keepalives_idle_s? : Int32) -> Self
 pub fn Config::new_internal(String, String?, Int32, String, String, String?, SslMode, String?, ChannelBinding, String, String?, Int32?, Bool?, Int32?, max_backend_message_body_bytes? : Int32, scram_max_iterations? : Int32) -> Self
 pub impl @debug.Debug for Config
@@ -136,6 +142,7 @@ pub async fn CopyOutStream::finish(Self) -> Unit
 pub fn CopyOutStream::formats(Self) -> ArrayView[WireFormat]
 pub async fn CopyOutStream::next(Self) -> Bytes?
 
+#derive(Eq, @debug.Debug)
 pub struct DatabaseError {
   severity : String?
   severity_nonlocalized : String?
@@ -155,20 +162,23 @@ pub struct DatabaseError {
   file : String?
   line : UInt32?
   routine : String?
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub struct Field {
   name : String
   type_ : Type
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum IsolationLevel {
   ReadUncommitted
   ReadCommitted
   RepeatableRead
   Serializable
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub enum Kind {
   Simple
   Array(Type)
@@ -178,28 +188,31 @@ pub enum Kind {
   Range(Type)
   Pseudo
   Unknown
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub struct Notification {
   process_id : Int32
   channel : String
   payload : String
-} derive(Eq, @debug.Debug)
+}
 
 type Portal
 pub fn Portal::columns(Self) -> ArrayView[Column]
 pub async fn Portal::execute(Self) -> UInt64
 pub async fn[T] Portal::with_stream(Self, Int32, async (RowStream) -> T) -> T
 
+#derive(Eq, @debug.Debug)
 pub struct QuerySummary {
   command_tag : String
   row_count : UInt64
   suspended : Bool
-} derive(Eq, @debug.Debug)
+}
 
 type RequestControl
 
-type Row derive(Eq, @debug.Debug)
+#derive(Eq, @debug.Debug)
+type Row
 pub fn Row::columns(Self) -> ArrayView[Column]
 pub fn[T : FromSql] Row::get(Self, Int32) -> T raise
 pub fn[T : FromSql] Row::get_name(Self, String) -> T raise
@@ -229,13 +242,15 @@ pub fn ScopedStatement::params(Self) -> ArrayView[Type]
 pub async fn[T] ScopedStatement::with_portal(Self, params? : Array[&ToSql], async (Portal) -> T) -> T
 pub async fn[T] ScopedStatement::with_stream(Self, params? : Array[&ToSql], async (RowStream) -> T) -> T
 
+#derive(Eq, @debug.Debug)
 pub enum SimpleQueryMessage {
   RowDescription(ArrayView[String])
   Row(SimpleQueryRow)
   CommandComplete(String)
-} derive(Eq, @debug.Debug)
+}
 
-type SimpleQueryRow derive(Eq, @debug.Debug)
+#derive(Eq, @debug.Debug)
+type SimpleQueryRow
 pub fn SimpleQueryRow::columns(Self) -> ArrayView[String]
 pub fn SimpleQueryRow::get(Self, Int32) -> String?
 pub fn SimpleQueryRow::get_name(Self, String) -> String? raise
@@ -249,11 +264,12 @@ pub fn SimpleQueryStream::detach(Self) -> Unit
 pub async fn SimpleQueryStream::finish(Self) -> Unit
 pub async fn SimpleQueryStream::next(Self) -> SimpleQueryMessage?
 
+#derive(Eq, @debug.Debug)
 pub(all) enum SslMode {
   Disable
   VerifyCa
   VerifyFull
-} derive(Eq, @debug.Debug)
+}
 
 type Statement
 pub async fn Statement::close(Self) -> Unit
@@ -281,19 +297,21 @@ pub async fn[T] Transaction::with_statement_stream(Self, Statement, params? : Ar
 pub async fn[T] Transaction::with_stream(Self, String, params? : Array[&ToSql], async (RowStream) -> T) -> T
 pub async fn[T] Transaction::with_transaction(Self, async (Self) -> T) -> T
 
+#derive(Eq, @debug.Debug)
 pub struct TransactionOptions {
   isolation_level : IsolationLevel?
   read_only : Bool?
   deferrable : Bool?
-} derive(Eq, @debug.Debug)
+}
 pub fn TransactionOptions::TransactionOptions(isolation_level? : IsolationLevel, read_only? : Bool, deferrable? : Bool) -> Self
 
+#derive(Eq, @debug.Debug)
 pub struct Type {
   oid : UInt32
   name : String
   schema : String?
   kind : Kind
-} derive(Eq, @debug.Debug)
+}
 pub fn Type::bool() -> Self
 pub fn Type::bool_array() -> Self
 pub fn Type::bytea() -> Self
@@ -329,15 +347,17 @@ pub fn Type::uuid_array() -> Self
 pub fn Type::varchar() -> Self
 pub fn Type::varchar_array() -> Self
 
+#derive(Eq, @debug.Debug)
 pub(all) enum WireFormat {
   Text
   Binary
-} derive(Eq, @debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub struct WrongTypeError {
   moonbit_type : String
   postgres_type : Type
-} derive(Eq, @debug.Debug)
+}
 
 // Type aliases
 
@@ -358,7 +378,7 @@ pub impl FromSql for String
 pub impl[T : FromSql] FromSql for T?
 pub impl FromSql for Bytes
 pub impl[T : FromSql] FromSql for Array[T]
-pub impl FromSql for Json
+pub impl FromSql for @json.Json
 
 pub(open) trait ToSql {
   fn format(Self, Type) -> WireFormat = _
@@ -376,5 +396,5 @@ pub impl ToSql for String
 pub impl[T : ToSql] ToSql for T?
 pub impl ToSql for Bytes
 pub impl[T : ToSql] ToSql for Array[T]
-pub impl ToSql for Json
+pub impl ToSql for @json.Json
 pub impl ToSql for StringView

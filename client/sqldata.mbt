@@ -2,10 +2,11 @@
 
 ///|
 /// PostgreSQL wire-format selection for parameters and result columns.
+#derive(Debug, Eq)
 pub(all) enum WireFormat {
   Text
   Binary
-} derive(Debug, Eq)
+}
 
 ///|
 fn encode_wire_format(format : WireFormat) -> Int32 {

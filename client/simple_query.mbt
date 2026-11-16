@@ -5,12 +5,13 @@
 ///
 /// Simple-query rows always carry text-format values because PostgreSQL's
 /// simple query protocol does not support selecting per-column binary formats.
+#derive(Debug, Eq)
 struct SimpleQueryRow {
   /// Column labels from the most recent `RowDescription`.
   columns : Array[String]
   /// Text values for the row. `None` represents SQL `NULL`.
   values : Array[String?]
-} derive(Debug, Eq)
+}
 
 ///|
 /// Return a read-only view of the column labels for this result row.
@@ -66,6 +67,7 @@ pub fn SimpleQueryRow::get_name(
 /// The protocol can interleave row descriptions, rows, and command-complete
 /// messages when a SQL string contains multiple statements, so the stream
 /// surfaces all three explicitly.
+#derive(Debug, Eq)
 pub enum SimpleQueryMessage {
   /// Announces the column labels for subsequent `Row` messages.
   RowDescription(ArrayView[String])
@@ -73,7 +75,7 @@ pub enum SimpleQueryMessage {
   Row(SimpleQueryRow)
   /// Terminal message for one statement inside the simple-query batch.
   CommandComplete(String)
-} derive(Debug, Eq)
+}
 
 ///|
 /// Incremental stream of `SimpleQueryMessage` values.
