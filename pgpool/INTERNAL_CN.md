@@ -1,45 +1,44 @@
 # 连接池实现约束
 
-`PoolExecutor` 管理物理连接执行器以及建连、关闭任务。
-checkout 只预留一个容量槽；交接前由 checkout 的异常清理归还，交接后只由
-`Session::release` 归还。淘汰连接只修改物理连接计数，不能再次释放容量。
-归还时完成全部重置后才能加入 idle 队列。
-空闲连接出队后立即注册异常淘汰，再检查 recycle deadline，防止立即到期的
-回收预算留下无人持有的物理连接。
+`PoolExecutor` 管理物理连接的执行器以及建连和关闭任务。
+每次 checkout 预留一个容量槽。交接前由 checkout 的异常清理归还，交接后由
+`Session::release` 归还。淘汰连接只更新物理连接计数。连接完成重置后才加入空闲队列。
+获取连接时收到取消，会淘汰当时持有的连接。空闲连接出队后先登记失败时的淘汰操作，
+再检查回收期限。这样，即使期限已经过了，该连接也会关闭。
 
 Session 和 Transaction 共用 `ClientLeaseState`。业务操作先检查作用域有效性，
-再以 `Mutex::try_acquire` 立即获取或拒绝，不排队。事务持有父 Session 的锁，
-保存点持有父 Transaction 的锁；子作用域过期后才恢复父句柄。prepared 回调只
-保留作用域计数，实际准备或执行时才加锁。流和 COPY 持有连接至回调退出，句柄
-另外检查过期和重叠调用。逃逸到外层任务的活动操作会导致连接淘汰，不能进入下一次借用。
+再用 `Mutex::try_acquire` 立即获取连接锁，重叠调用直接失败。事务持有父 Session
+的锁，保存点持有父 Transaction 的锁。子作用域过期后才释放父锁。prepared 回调计入
+活动作用域，准备、执行和释放句柄时获取父锁。流和 COPY 持有连接锁直到清理结束，
+句柄通过单独的锁和活动标记检查过期及重叠调用。仍在外层任务中运行的操作会导致连接淘汰。
 
 事务、prepared、stream/COPY 和 Session 归还共用 `with_scope_exit` 退出协议。
-body 在可取消环境中执行，调用前后检查取消；局部 `errdefer` 受保护地执行
-`on_unwind` 并忽略其异常，保留原回调异常或原生取消。正常返回则受保护地执行
-`on_return`，将其普通异常保存为内部 `Result[Unit, Error]`，退出保护后必经取消检查，
-再返回回调值或抛出收尾错误。因此正常收尾期间收到的取消优先于收尾成功或失败。
-`on_return` 失败不会再调用 `on_unwind`；各适配器负责自己的失败恢复，只释放一次。
-此 helper 不新增任务组或清理预算，也不把取消转换成普通 Error。
+回调保持可取消，调用前后都检查取消。局部 `errdefer` 在保护下执行 `on_unwind`，
+忽略清理异常，保留原回调异常或原生取消。回调正常返回时，助手在保护下执行
+`on_return`，将普通异常存入内部 `Result[Unit, Error]`，再到保护外检查取消。
+收尾期间收到的取消优先于收尾结果。`on_return` 失败时由各适配器自行恢复，只释放
+一次资源。`with_scope_exit` 使用调用方的任务组和清理预算，取消仍由运行时处理。
 
 输出流作用域在有时限的清理中调用客户端内部 `finish_scope`，再在清理边界之外
 抛出其返回的查询 SQL 错误。同步或资源清理实际失败才淘汰连接，回调异常仍优先。
-prepared 流在创建和收尾阶段处理 26000/0A000 缓存失效，即使回调异常遮蔽了
-SQL 错误也会失效；不重试执行。prepared 和流句柄在释放开始前失效，清理继续遵守
-原有的连接锁、句柄锁和缓存租约规则。
+prepared 流在创建或清理时遇到 26000/0A000 会使缓存条目失效，即使回调异常优先于
+SQL 错误。是否重试由调用方决定。prepared 和流句柄在释放前失效，清理时仍获取相应的锁
+并归还缓存租约。
 
-Deadline 使用 `@async.now()` 的毫秒计时基准，子范围只能缩短。等待 executor
-和容量共用 wait 预算；所有 host 共用 create 预算。健康检查失败允许换连接，
-hook 失败则立即结束获取。最终建连错误保存各目标、阶段、耗时和原始错误。
+Deadline 使用 `@async.now()` 的毫秒计时基准，子作用域继承最早到期的期限。
+等待执行器和容量共用 wait 预算，所有主机共用 create 预算。健康检查失败时可以换连接。
+钩子失败会结束获取。若获取抛出 `AcquireError::AttemptsFailed`，错误中会保留已记录的
+各次尝试的目标、阶段、耗时和原始错误。
 
 `supervise` 为整个操作或资源作用域安装一个 RequestControl；私有
 `supervise_worker` 启动工作任务，在受保护 I/O 之外的独立等待者上应用 deadline。
 流方法复用作用域已有的控制和连接锁，只保留自身的互斥锁，直到工作任务退出。
-因此方法级 deadline 遇到受保护的临时语句 Close 时，也受共享清理预算约束。
-底层为每个请求记录编号、可能发送、命令标签和
-协议完成状态；唯一读取任务在转发队列前记录标签，因此断连不能抹去已确认提交。
-取消后禁止后续业务请求，Close 等清理请求必须等 CancelRequest 连接关闭后才能发送。
-监督器等待取消连接和原协议清理都结束后才释放锁。取消发送失败、超时或状态不可信
-时 abort。COPY IN 必须等待取消 send/finish 后移交给 executor 的 drain。
+流方法超时时，受保护的临时语句 Close 也受共享清理预算约束。每个请求都有编号。
+驱动器在写入前标记请求可能已发送，读取任务在转发前保存命令标签和协议完成状态，
+所以断连后仍能保留已确认的提交。取消后会阻止后续业务请求，Close 等清理请求须等待
+取消屏障。如果确实需要发送 CancelRequest，屏障所有者等待独立 TCP 连接读到 EOF。
+监督器等待取消流程和原请求的协议清理完成，再释放锁。取消发送失败、超时或无法确认
+协议同步时，关闭连接。COPY IN 的 send/finish 取消后若把排空交给执行器，清理仍会等它结束。
 嵌套监督器先取消工作任务，再通过 `cancel_active` 加入取消流程并等待协议清理。
 只有取消流程的所有者发送取消包并释放栅栏，其他监督器只能等待。
 预算耗尽时 abort，仍须等待工作任务退出后才释放连接锁或流锁。
@@ -48,17 +47,18 @@ stream/COPY 回调运行在受监督的工作任务中。回调抛出普通异�
 若异常在等待者已开始取消之后才出现（例如流方法稍后完成超时解栈），不能覆盖取消。
 正常返回后的收尾错误和原生取消不进入这条错误传递路径。
 
-一次异常解栈共用 `cleanup_deadline`，drain、嵌套 rollback、reset、初始化 hook
-不能各自领取新的宽限期。watchdog 在 raw I/O 的取消保护之外执行 abort。
-重置 hook 使用 cleanup_mode，不能通过嵌套查询重置预算。调用者已处理错误后，
-下一次真正接受的业务操作可以开始新的清理周期。
-子回调作用域只能在 `with_scope_exit` 正常返回后重置已结束的清理周期；失败或取消
-解栈保留同一个预算，即使子作用域的清理本身成功也不能重置。
+异常解栈共用 `cleanup_deadline`。排空、嵌套回滚、重置和初始化都使用剩余预算。
+即使底层 I/O 有取消保护，清理超时仍会关闭连接。重置钩子使用 cleanup_mode，钩子里的
+查询沿用当前期限。调用方处理错误后，下一次接受的业务操作可以开始新的清理周期。
+子回调作用域在 `with_scope_exit` 正常返回后才能清除已用的预算。失败或取消时，就算
+子作用域已顺利清理，外层作用域仍沿用剩余预算。
 
-事务回调以 Ok/Err 表达提交或回滚意图，完成由 helper 管理。单次使用的
-TransactionRecord 独立于事件队列。COMMIT 发送前取消则回滚；可能发送后只等待
-真实结果，不追加 ROLLBACK。COMMIT、ROLLBACK、RELEASE 分别记录提交、回滚和
-保存点释放。响应缺失记录未知并淘汰连接；已收到 COMMIT 标签后断连仍保留已提交。
+事务回调返回 Ok 时提交事务或释放保存点，返回 Err、抛出异常或取消时回滚。单次使用的
+TransactionRecord 独立于事件队列。取消发生在 COMMIT 发送前时回滚，可能已发送时等待
+服务器结果。COMMIT、ROLLBACK 和 RELEASE 标签分别记录提交、回滚和保存点释放。
+缺少能确定结果的标签时，记录未知状态并淘汰连接，且不补发 ROLLBACK。若服务器已返回
+明确的数据库错误，就继续抛出该错误，否则抛出 CommitOutcomeUnknown。已收到 COMMIT
+标签后，即使连接断开也保留提交记录。
 
 COMMIT/RELEASE 和 rollback helper 先完成协议操作、诊断和独立的事务记录，
 再由 `with_scope_exit` 决定调用方如何退出。正常收尾适配器还负责提交前失败的条件
@@ -69,32 +69,35 @@ COMMIT/RELEASE 和 rollback helper 先完成协议操作、诊断和独立的事
 记录 OutcomeUnknown；取消及之后的 Session 归还失败不能改写已确认的完成记录。
 
 事务或保存点退出时，必须在完成 SQL 前同步检查自身 `active_ops`。仍有活动子任务
-属于作用域使用错误：设置 releasing，保留 `OperationInProgress` 诊断并立即 abort，
-整个检查不能暂停。仅将 InProgress 记录改为 OutcomeUnknown 并通知完成；异常清理和
+属于作用域使用错误。连接池设置 releasing，保留 `OperationInProgress` 诊断并同步关闭
+连接。仅将 InProgress 记录改为 OutcomeUnknown 并通知完成。异常清理和
 最终 defer 再次检查时不能重复通知或覆盖已确认结果。回调返回 Ok 时抛出
-OperationInProgress；业务 Err、异常、取消及 deadline 错误保持原结果。关闭连接没有
+OperationInProgress。业务 Err、异常、取消及 deadline 错误保持原结果。关闭连接没有
 显式回滚确认，因此不能记录已回滚，也不能发送 COMMIT、RELEASE 或继续回滚。
 外层回滚保留未知状态及原诊断，迟到清理不能用连接关闭或句柄过期错误覆盖淘汰原因。
-先使子作用域失效，再释放父锁，容量仍只由最外层 Session 归还一次。不等待外层任务组
-中的应用任务；旧 ConnectionState 永远不能重新绑定新客户端，旧任务后续操作失败且
-清理不能影响新借用者。正常结束所有子任务的调用保持原有提交和复用行为。
+先使子作用域失效，再释放父锁，容量由最外层 Session 归还。外层任务可能在作用域退出后
+继续运行，其 ConnectionState 只关联已淘汰的连接。
+
 所有淘汰路径都负责关闭物理连接，包括健康检查成功前连接池已关闭的情况。
-重复淘汰只结算一次连接计数和诊断事件；容量许可由 checkout/session 单独归还。
+重复淘汰只更新一次连接计数并记录一次诊断事件。容量许可由 checkout 或 Session 归还。
 淘汰已关闭的客户端时跳过 `Client::shutdown()`。调用 `Client::close()` 后由驱动器
 清理传输连接。逃逸的 stream/COPY 可能仍持有底层许可，等待该许可会阻塞关闭任务和连接池退出。
 
-归还顺序：协议同步 → 清理遗留事务 → 单独执行 DISCARD ALL → 清空 statement/type
-cache → initialize_session → 空闲队列。PreserveSession 保留状态但仍同步协议和回滚；
-Reconnect 直接淘汰。归还清理失败以 PoolEvent 保留原始原因，不覆盖业务结果。
+在默认策略下，归还时先完成协议清理，必要时回滚遗留事务，再单独执行 DISCARD ALL。
+清除语句和类型缓存、运行 initialize_session 后，连接才能进入空闲队列。
+PreserveSession 完成协议和事务清理后保留会话状态。Reconnect 在必要的回滚之后关闭连接。
+归还失败会通过 PoolEvent 保留原始错误，业务结果照常返回。
 `with_session` 将正常退出和异常解栈交给 `with_scope_exit`，每条路径只调用一次
 `Session::release`。回调正常完成后，在 reset 或初始化 hook 期间收到的取消，
 会在调用方继续执行前传播，Pool 便捷方法和事务入口也遵守此规则。已有回调异常
 保持优先级，已确认的事务记录保持原状态。
 事件缓冲区溢出丢弃最旧条目并计数，不能影响事务完成记录。
 
-确定性协议测试见 request_control_wbtest.mbt；受保护 Close 和方法 deadline
-回归测试见 stream_deadline_wbtest.mbt，立即到期的回收预算及容量计数测试见
-recycle_cancel_wbtest.mbt。transaction_scope_wbtest.mbt 覆盖各事务入口和退出原因下
+## 测试
+
+request_control_wbtest.mbt 包含确定性协议测试。stream_deadline_wbtest.mbt 覆盖受保护
+的 Close 和方法期限，recycle_cancel_wbtest.mbt 覆盖立即到期的回收预算和容量计数。
+transaction_scope_wbtest.mbt 覆盖各事务入口和退出原因下
 逃逸 prepared 回调及阻塞 SQL、缓存和重置策略、诊断、父锁、容量及正常复用。
 真实数据库状态隔离、事务意图、stream/COPY 取消及逃逸 prepared/COPY 回调对新
 借用者阻塞查询的隔离测试见 tests/baseline/pgpool_redesign_integration_test.mbt。

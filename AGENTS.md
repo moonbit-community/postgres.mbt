@@ -1,28 +1,24 @@
-# Project Agents.md Guide
+# Project guide
 
 This is a [MoonBit](https://docs.moonbitlang.com) project.
 
-You can browse and install extra skills here:
-<https://github.com/moonbitlang/skills>
+Additional MoonBit skills are available at
+<https://github.com/moonbitlang/skills>.
 
-## Project Structure
+## Project structure
 
-- MoonBit packages are organized per directory; each directory contains a
-  `moon.pkg` file listing its dependencies. Each package has its files and
-  blackbox test files (ending in `_test.mbt`) and whitebox test files (ending in
-  `_wbtest.mbt`).
+Each MoonBit package has its own directory. Its `moon.pkg` lists dependencies.
+The directory also contains source files, blackbox tests (`_test.mbt`), and
+whitebox tests (`_wbtest.mbt`).
 
-- In the toplevel directory, there is a `moon.mod.json` file listing module
-  metadata.
+The top-level `moon.mod` lists module metadata.
 
 ## Coding convention
 
-- MoonBit code is organized in block style, each block is separated by `///|`,
-  the order of each block is irrelevant. In some refactorings, you can process
-  block by block independently.
+- Separate MoonBit blocks with `///|`. Block order does not matter, so some
+  refactors can proceed one block at a time.
 
-- Try to keep deprecated blocks in file called `deprecated.mbt` in each
-  directory.
+- Where possible, keep each package's deprecated blocks in `deprecated.mbt`.
 
 ## Documentation
 
@@ -34,35 +30,31 @@ You can browse and install extra skills here:
   configuration, examples, or workflows change. If no documentation update is
   needed, make that explicit in the final summary.
 
-- Keep internal comments accurate when implementation details, invariants,
-  assumptions, or non-obvious control flow change. Remove stale comments instead
-  of preserving explanations that no longer match the code.
+- Revise internal comments when the implementation details, invariants,
+  assumptions, or control flow they describe change. Remove stale explanations.
 
 ## Tooling
 
-- `moon fmt` is used to format your code properly.
+- Format code with `moon fmt`.
 
 - `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
   `find-references`. See $moonbit-agent-guide for details.
 
-- `moon info` is used to update the generated interface of the package, each
-  package has a generated interface file `.mbti`, it is a brief formal
-  description of the package. If nothing in `.mbti` changes, this means your
-  change does not bring the visible changes to the external package users, it is
-  typically a safe refactoring.
+- `moon info` updates each package's generated `.mbti` interface. An unchanged
+  `.mbti` indicates that the declared public interface stayed the same, as it
+  usually does in an internal refactor.
 
 - In the last step, run `moon info && moon fmt` to update the interface and
   format the code. Check the diffs of `.mbti` file to see if the changes are
   expected.
 
-- Run `moon test` to check package tests pass. For real PostgreSQL integration
+- Run `moon test` for package tests. For real PostgreSQL integration
   tests, run `node scripts/pg_integration_test.mjs`. When you need integration
   coverage, run `node scripts/pg_integration_test.mjs --enable-coverage`.
   MoonBit supports snapshot testing; when changes affect outputs, run
   `moon test --update` to refresh snapshots.
 
-- Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for results that
-  are stable or very unlikely to change. Use snapshot tests to record current
-  behavior. For solid, well-defined results (e.g. scientific computations),
-  prefer assertion tests. You can use `moon coverage analyze > uncovered.log` to
-  see which parts of your code are not covered by tests.
+- Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for well-defined,
+  stable results, such as scientific computations. Use snapshot tests to record
+  current behavior. Run `moon coverage analyze > uncovered.log` to find code
+  that tests did not cover.
