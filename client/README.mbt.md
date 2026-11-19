@@ -22,13 +22,14 @@ async fn _quick_start() -> Unit {
       application_name="my-service",
     )
     let (client, executor) = @client.Client::create(config)
+    defer client.close()
     let task = group.spawn(no_wait=true, () => executor.run())
     client.ready()
     let current_user : String = client
       .query_one("select current_user::text as current_user")
       .get_name("current_user")
     ignore(current_user)
-    client.close()
+    client.shutdown()
     task.wait()
   })
 }
@@ -39,20 +40,20 @@ await `ready()` to observe connection and authentication errors. Any number of
 tasks may await the same readiness result. Async database operations also wait
 for readiness. Before startup finishes, `parameter()` and `cancel_token()`
 raise `ClientError::NotReady`. A repeated `run()` raises
-`ClientError::ExecutorAlreadyStarted`. `Client::close()` is asynchronous: it stops
-new work, waits for already queued work, sends PostgreSQL `Terminate`, and waits
-for the driver to finish.
+`ClientError::ExecutorAlreadyStarted`. The asynchronous `Client::shutdown()`
+waits for work already ahead of it in the FIFO gate, rejects later work, sends
+PostgreSQL `Terminate`, and waits for the driver to finish.
 
-`Client::abort()` is the hard-stop counterpart. It is synchronous and
-idempotent: it marks the runtime unusable immediately and requests driver
-cancellation without sending `Terminate`. Active, queued, and later operations
-fail with `ClientError::Closed("connection aborted")`. The driver closes the
-discarded physical transport as cancellation unwinds.
+`Client::close()` is synchronous and idempotent. Use `defer client.close()` to
+request driver cancellation on scope exit. The call marks the runtime unusable
+immediately. Active, queued, and later operations fail with
+`ClientError::Closed("connection aborted")`. The driver closes the physical
+transport as cancellation unwinds.
 
 `Client::is_closed()` reports whether the runtime can still be used, not whether
 every teardown callback has already completed. It therefore returns `true`
-immediately after `abort()`; `close()` waits for graceful
-PostgreSQL shutdown and completed transport cleanup.
+immediately after `close()`. Use `shutdown()` to wait for graceful PostgreSQL
+shutdown and completed transport cleanup.
 
 `Client::is_transaction_idle()` returns `true` only after successful startup,
 while the client remains open, and when the most recent `ReadyForQuery` status
@@ -534,7 +535,7 @@ stream or sink methods interrupted inside the callback.
 Scopes do not automatically send PostgreSQL `CancelRequest`. Cancellation can
 therefore wait for the current SQL request to finish and drain. Use a raw
 stream's `detach()` when the caller needs to return before draining completes,
-or `Client::abort()` when the physical connection may be discarded.
+or `Client::close()` when the physical connection may be discarded.
 
 Pending cancellation is checked before starting a new operation and after its
 outermost cancellation protection ends. Transaction callbacks check before
@@ -549,10 +550,9 @@ hands the created stream to a background drain. An explicit caller protection
 defers cancellation to the caller's boundary. Task cancellation does not
 automatically send PostgreSQL cancel requests or retry operations.
 
-Use `Client::abort()` when a caller must enforce a hard local deadline and the
-physical connection may be discarded. Unlike a PostgreSQL cancel token, abort
-does not try to preserve the session, send `Terminate`, or perform a TLS
-`close_notify` exchange.
+Use `Client::close()` when a caller must enforce a hard local deadline and the
+physical connection may be discarded. The close cancels the driver and
+discards the session without sending `Terminate` or TLS `close_notify`.
 
 `CopyInSink::abort(message=...)` validates the message before changing the
 sink. A NUL character raises `ProtocolError::InvalidInput`; the sink remains

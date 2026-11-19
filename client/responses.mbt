@@ -73,7 +73,7 @@ async fn close_temporary_statement_after_error(
 ) -> Unit {
   close_temporary_statement(context, name) catch {
     ClientError::Database(_) => ()
-    _ => context.client.abort()
+    _ => context.client.close()
   }
 }
 
@@ -370,6 +370,6 @@ async fn close_unresolved_statement_after_error(
   name : Bytes,
 ) -> Unit {
   close_temporary_statement(context, name) catch {
-    _ => context.client.abort()
+    _ => context.client.close()
   }
 }

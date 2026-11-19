@@ -120,9 +120,10 @@ replacement client. This scope usage error does not change normal completion.
 Every retirement owns physical closure, including a successful health check
 that finishes after pool close. Repeated retirement settles size and diagnostics
 once; checkout/session release separately restores capacity.
-Retirement does not enqueue graceful close for an already closed client: abort
-owns transport shutdown, and an escaped stream/COPY may still hold a raw permit
-that would block the close worker and pool shutdown.
+Retirement skips enqueueing `Client::shutdown()` for an already closed client.
+The driver handles transport cleanup after `Client::close()`. An escaped
+stream/COPY may still hold a raw permit that would block the close worker and
+pool shutdown.
 
 Return ordering is protocol completion, rollback if non-idle, standalone
 DISCARD ALL, statement/type cache invalidation, initialize_session, then idle

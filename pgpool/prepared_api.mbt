@@ -89,7 +89,7 @@ async fn acquire_cached_statement(
       entry.in_use.val += 1
       close(statement) catch {
         @client.ClientError::Database(_) => ()
-        _ => if connection.client.val is Some(client) { client.abort() }
+        _ => if connection.client.val is Some(client) { client.close() }
       }
       { entry, }
     } else {
@@ -241,7 +241,7 @@ async fn PreparedStatement::release_internal(self : PreparedStatement) -> Unit {
     if !state.gate.try_acquire() {
       // An escaped task still owns the socket. Retire rather than race Close
       // against that task or wait on a callback that can wait on this one.
-      state.scoped_client().abort()
+      state.scoped_client().close()
       raise PoolError::OperationInProgress
     }
     defer state.gate.release()
@@ -268,7 +268,7 @@ async fn[T] prepared_scope(
   errdefer (if acquired.val is Some(handle) {
     state.cleanup_best_effort(() => {
       if !state.gate.try_acquire() {
-        state.scoped_client().abort()
+        state.scoped_client().close()
         raise PoolError::OperationInProgress
       }
       defer state.gate.release()

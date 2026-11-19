@@ -17,7 +17,7 @@ async fn[R, T] Client::with_scoped_resource(
   errdefer @async.protect_from_cancel(() => {
     finalize(resource) catch {
       ClientError::Database(_) => ()
-      _ => self.abort()
+      _ => self.close()
     }
   })
   check_pending_cancellation()

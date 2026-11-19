@@ -26,7 +26,7 @@ shutdown exchange, so cancellation and error unwinding can always release the
 transport synchronously.
 
 The driver is private. Its task handle is the only background task handle
-stored in shared state, so `Client::abort()` can request cancellation
+stored in shared state, so `Client::close()` can request cancellation
 synchronously, including during startup. The executor keeps its task group
 local to `run()`. The driver owns all socket reads, writes ordinary frontend
 messages, and publishes notices, notifications, and parameter-status updates.
@@ -363,12 +363,12 @@ A fatal socket/protocol error is terminal shared state. The driver:
 3. lets operation-gate waiters acquire and observe the closed runtime
 4. closes the async-message queue
 
-`Client::close()` seals the gate against new work, waits behind already
-accepted FIFO operations, submits `Terminate`, and waits for driver exit.
-Repeated close calls wait for the same result. Cancelling one close caller does
-not undo a close that has already started.
+`Client::shutdown()` waits behind already accepted FIFO operations, rejects
+later work, submits `Terminate`, and waits for driver exit. Repeated shutdown
+calls wait for the same result. Cancelling a shutdown caller after submission
+leaves the `Terminate` request queued for the driver.
 
-`Client::abort()` instead marks the runtime closed immediately, closes the
+`Client::close()` marks the runtime closed immediately, closes the
 submission queue without discarding its buffered request records, and cancels
 the stored driver task. Driver teardown then fails both the active response
 queue and every buffered request queue with the same

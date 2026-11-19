@@ -59,7 +59,7 @@ fn Transaction::abort_active_children(self : Transaction) -> Bool {
   let cause = PoolError::OperationInProgress
   self.state.connection.failure.val = Some(cause)
   if self.state.connection.client.val is Some(client) {
-    client.abort()
+    client.close()
   }
   // Closing a socket does not acknowledge rollback. Do not overwrite a
   // confirmed result or emit completion again during errdefer/final defer.
@@ -138,7 +138,7 @@ async fn Transaction::commit_internal(self : Transaction) -> Unit {
   } else if self.savepoint is Some(_) && tags.contains("RELEASE") {
     self.record_completion(SavepointReleased, failure)
   } else if control.was_sent() {
-    client.abort()
+    client.close()
     self.record_completion(OutcomeUnknown, failure)
     // Preserve explicit database errors while retaining the independent
     // uncertain completion record. Lost responses use a distinct error.

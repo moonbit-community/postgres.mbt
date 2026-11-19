@@ -57,12 +57,12 @@ async fn[T] ClientLeaseState::cleanup(
   let started = @async.now()
   @async.protect_from_cancel(() => {
     let client = self.scoped_client()
-    errdefer client.abort()
+    errdefer client.close()
     let outcome = try
       run_with_timeout(
         remaining_ms(self.cleanup_deadline.val, Cleanup),
         Cleanup,
-        on_timeout=() => client.abort(),
+        on_timeout=() => client.close(),
         f,
       )
     catch {
@@ -132,7 +132,7 @@ async fn[T] ClientLeaseState::supervise(
     // Worker completion is not sufficient evidence of protocol completion:
     // a parser or transport error may have returned before ReadyForQuery.
     if control.was_sent() && !control.protocol_complete() {
-      client.abort()
+      client.close()
     }
     self.active_control.val = None
     client.end_request_control()
@@ -259,7 +259,7 @@ async fn Session::release(self : Session) -> Unit {
   self.state.releasing.val = true
   // A callback may leave work in an outer task group. Never return its socket.
   if self.state.active_ops.val > 0 {
-    self.state.scoped_client().abort() catch {
+    self.state.scoped_client().close() catch {
       _ => ()
     }
   }

@@ -47,7 +47,7 @@ async fn[R, T] resource_scope(
     scope.active.val = false
     owner.cleanup(() => {
       if !scope.gate.try_acquire() {
-        owner.scoped_client().abort()
+        owner.scoped_client().close()
         raise PoolError::OperationInProgress
       }
       defer scope.gate.release()
