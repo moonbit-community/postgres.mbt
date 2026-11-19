@@ -1,7 +1,9 @@
 # PostgreSQL connection pool
 
-`Pool` owns physical connections. Start its executor once, await readiness, and
-close the pool when finished.
+`Pool` owns physical connections. Start its executor once and call `pool.ready()`
+to wait for its maintenance workers. The pool opens connections on demand at
+checkout. Call `pool.close()` to stop new checkouts. Sessions already checked
+out can finish before the pool closes their connections.
 
 ```mbt check
 ///|
@@ -20,10 +22,11 @@ pub async fn example(config : @pgpool.Config) -> Unit {
 }
 ```
 
-Pool, Session and Transaction implement `GenericClient`, including typed
-all/one/optional queries and execution. Pool convenience methods borrow a
-session automatically. Session and Transaction also support prepared callbacks,
-row streams, simple queries and both COPY directions.
+Pool, Session, and Transaction implement `GenericClient`, with execution and
+queries for all rows, exactly one row, or an optional row. These methods also
+accept explicit parameter types through their typed variants. All three
+handles support prepared callbacks, row streams, simple queries, and COPY in
+both directions. Pool methods borrow a session automatically.
 
 A Session or Transaction accepts one operation at a time. Overlapping calls
 raise `OperationInProgress` immediately, including reentry through the outer
@@ -31,64 +34,60 @@ Session inside a transaction and through the parent Transaction inside a
 savepoint. The parent becomes usable when its child ends. An escaped handle
 raises `ScopeExpired`. Use separate Pool calls for concurrent database work.
 
-Prepared callbacks do not occupy the connection: other queries and prepared
-callbacks can compose within them. Each actual preparation or execution is
-exclusive. Stream and COPY callbacks hold the connection until their scope
-ends. Their handles are pool-owned capabilities; concurrent calls to one stream
-also raise `OperationInProgress`. COPY IN requires `finish()` to accept input;
-an unfinished sink is aborted on scope exit. A NUL in an abort message raises
-`ProtocolError::InvalidInput` locally; scope cleanup can still abort the sink.
-COPY transport/writer failures retire that physical connection and release its
-checkout capacity; the pool and other physical connections remain usable.
+The pool locks the connection for each preparation or execution. A prepared
+callback can run other queries or open another prepared scope between
+operations. Stream and COPY callbacks hold the connection through cleanup.
+Concurrent calls to the same stream also raise `OperationInProgress`.
+Call `finish()` to complete COPY IN. Scope cleanup aborts an unfinished sink.
+A NUL in an abort message raises `ProtocolError::InvalidInput` locally, and
+the scope can still abort the sink. A COPY transport or writer failure closes
+the affected connection. The session releases its checkout slot on return,
+and the pool can continue using other connections.
 
-SQL errors from row, typed, prepared, simple-query and COPY OUT streams leave
+SQL errors from row, typed, prepared, simple-query, and COPY OUT streams leave
 the session usable once the protocol reaches `ReadyForQuery` and resource
-cleanup succeeds. This also applies when the callback stops reading early or
-the remaining results drain in the background. A failed transaction still
-requires rollback; a savepoint scope can roll back its error and let the outer
-transaction continue. Returning the connection to the pool still runs its
-configured reset policy.
+cleanup succeeds. This includes early callback return and internally detached
+drains. A failed transaction requires rollback. A savepoint scope can roll
+back its error and let the outer transaction continue. Returning the connection
+still runs the configured reset policy.
 
 Prepared stream errors with SQLSTATE `26000` or `0A000` invalidate the cached
-statement. The next prepared scope acquires a fresh statement; failed SQL is
-never automatically retried. Invalidation also happens when scope cleanup first
-observes the error or a callback exception takes precedence.
+statement, even when cleanup first observes the error or a callback exception
+takes precedence. The next prepared scope acquires a fresh statement. The
+pool leaves retries to the caller.
 
 `Config::Config` accepts `max_backend_message_body_bytes`, defaulting to
 `67_108_864` (64 MiB). It applies to every physical connection, including
 startup, and counts each backend frame's body without its tag or length word.
-Use a larger positive value for servers returning larger rows or COPY chunks;
-the maximum is `2_147_483_642`, and zero does not disable the limit. Invalid
-values raise `ConfigError::InvalidConfig` during config construction. A
-malformed or oversized frame closes that connection with
-`ClientError::Protocol`; other pool connections remain available. This does
-not limit the total memory used by results or by the pool.
+Use a larger value for servers returning larger rows or COPY chunks. Values
+outside `1..=2_147_483_642` raise `ConfigError::InvalidConfig` at construction.
+An invalid header or an oversized body closes that connection with
+`ClientError::Protocol`. The limit applies to each frame, so results and the
+pool can consume more memory in total.
 
 `scram_max_iterations` defaults to `100_000` on all physical connections. Raise
 it explicitly on `Config::Config` for a server using a higher SCRAM iteration
-count; the valid range is `1..=2_147_483_647`. Zero does not disable the limit,
-and invalid settings raise `ConfigError::InvalidConfig` at construction.
+count. The valid range is `1..=2_147_483_647`. Invalid settings raise
+`ConfigError::InvalidConfig` at construction.
 Excessive or malformed server counts fail authentication before PBKDF2 begins.
 Computation yields between bounded batches, so connection/create deadlines and
 cancellation can stop authentication without sending an incomplete proof.
 
 ## Transactions
 
-Callbacks return `Result[T, E]`. `Ok(value)` requests commit; `Err(error)` requests
-rollback. Without task cancellation, the same business error is returned even
-if rollback cleanup fails. Exceptions and task cancellation request rollback.
-Transaction handles have no public `commit` or `rollback`.
+Callbacks return `Result[T, E]`. `Ok(value)` requests commit or savepoint
+release. `Err(error)`, exceptions, and task cancellation request rollback.
+Without task cancellation, a business `Err` is returned even if rollback
+cleanup fails. The scope manages completion.
 
 Finish all child tasks before returning from a transaction or savepoint callback.
-Leaving a prepared, stream, COPY or query task active is a scope usage error:
-the pool closes the physical connection before sending COMMIT or RELEASE
-SAVEPOINT. An `Ok` return raises `OperationInProgress`; a business `Err`,
-exception, cancellation or deadline error keeps its original result. A started
-transaction records `OutcomeUnknown`, since closing the connection does not
-acknowledge rollback, and diagnostics retain `OperationInProgress`. The pool
-does not wait for escaped application tasks; later calls through their handles
-fail, and their cleanup cannot reach a new borrower's connection. Callbacks
-whose child tasks finish normally keep the usual commit and reuse behavior.
+If a prepared, stream, COPY, or query task is still active when the callback
+exits, the pool closes the physical connection without sending completion
+SQL. An `Ok` return raises `OperationInProgress`. A business `Err`, exception,
+cancellation, or deadline error keeps its original result. A started
+transaction records `OutcomeUnknown`, and diagnostics retain
+`OperationInProgress`. Escaped tasks can outlive the scope. Their handles expire
+and their cleanup can only reach the retired connection.
 
 ```mbt check
 ///|
@@ -115,18 +114,18 @@ pub async fn transaction_example(pool : @pgpool.Pool) -> Result[Int32, String] {
 
 `TransactionRecord` is optional, one-shot storage that can be read synchronously
 outside the cancelled task. Statuses are `NotStarted`, `InProgress`, `Committed`,
-`RolledBack`, `SavepointReleased`, and `OutcomeUnknown`. Savepoint release does
-not mean the top-level transaction committed. Reusing a record raises
+`RolledBack`, `SavepointReleased`, and `OutcomeUnknown`. `SavepointReleased`
+records completion of the child scope only. Reusing a record raises
 `TransactionRecordUsed`.
 
-The server command tag decides completion. Without task cancellation, COMMIT
-returning ROLLBACK raises `CommitRolledBack`. A possibly sent COMMIT without a
-decisive response raises `CommitOutcomeUnknown` and retires the connection.
-The library does not follow
-that uncertain COMMIT with ROLLBACK. A confirmed COMMIT remains recorded even
-when the connection fails before protocol synchronization. Task cancellation
-can still be observed after a confirmed commit: inspect the record to determine
-what happened.
+The server command tag decides commit and savepoint release. Without task
+cancellation, a ROLLBACK tag in response to COMMIT raises `CommitRolledBack`.
+If COMMIT or RELEASE may have been sent and the pool receives no decisive tag,
+it retires the connection and records `OutcomeUnknown`. It propagates an
+explicit PostgreSQL error if one arrived, or raises `CommitOutcomeUnknown`
+otherwise. It sends no follow-up ROLLBACK on that connection. A confirmed
+COMMIT stays recorded if the connection fails before protocol synchronization.
+Check the record when task cancellation prevents you from receiving the result.
 
 ## Deadlines and cleanup
 
@@ -135,18 +134,20 @@ cover executor readiness, capacity wait, health checks, host attempts, connectio
 startup, hooks and SQL. Child scopes inherit deadlines and can only shorten
 them. There is no default SQL duration limit. `with_session` and Pool convenience
 methods accept a per-call `timeouts` record. `wait_ms` covers both executor
-readiness and capacity; zero polls without waiting. Create and recycle timeouts
-are additional phase limits, not fresh total budgets for each host.
+readiness and capacity. Zero polls without waiting. Create and recycle
+timeouts limit their respective phases. All host attempts in one checkout
+share the create deadline.
 
-Task cancellation and deadlines automatically supervise active SQL. The library
-prevents subsequent business requests, sends a PostgreSQL CancelRequest when a
-request may be active, waits for the cancellation connection to close, and
-synchronizes the original protocol before allowing reuse. CancelRequest alone
-does not confirm the SQL stopped. Already-sent SQL is never replayed.
+On cancellation or timeout, the pool blocks further business requests. If a
+request may be active, it sends PostgreSQL CancelRequest and waits for the
+cancellation connection to close. Before reusing the session, it also drains
+the original response to confirm protocol synchronization. The pool leaves
+retries to the caller.
 
-Drain, rollback and reset share a finite cleanup budget: `cleanup_ms` defaults
-to 5000. Cleanup failures, untrusted protocol state and expired cleanup budgets
-abort and retire the connection. Cleanup also runs on normal scope exit.
+Drain, rollback, and reset share `cleanup_ms`, which defaults to 5000.
+The pool also cleans up on normal scope exit. It retires the connection if
+cleanup fails, protocol synchronization cannot be confirmed, or the budget
+expires.
 SQL errors reported after successful stream cleanup do not count as cleanup
 failures. Temporary-statement Close results, including failures, are retained
 so a repeated finish cannot turn failed cleanup into success.
@@ -154,58 +155,58 @@ Stream and COPY method deadlines use the same supervision and cleanup budget,
 including protected I/O such as closing a temporary statement. A method timeout
 returns `Timeout(Query)` after cancellation and protocol cleanup complete, or
 after the cleanup budget expires and the connection is aborted. The method's
-gate is released only after its worker exits; the connection is available to
+gate is released only after its worker exits. The connection is available to
 another borrower only after the owning scope finishes cleanup.
-The completion bound applies to library I/O; application callbacks must
+The completion bound applies to library I/O. Application callbacks must
 cooperate with async cancellation. Cleanup errors are diagnostic events and do
 not replace an earlier database error, business `Err`, or callback exception.
 
-Transactions, prepared handles, stream/COPY scopes and session return share one
-exit protocol: run the callback, finish protected cleanup and record its result,
-then check cancellation before returning or reporting a completion error.
+Transactions, prepared handles, stream/COPY scopes, and session return check
+for cancellation after protected cleanup, before reporting a normal return or
+completion error.
 This includes COMMIT, savepoint RELEASE/rollback, stream drain, statement Close,
 `DISCARD ALL` and session initialization.
 
 | Callback exit | Behavior after cleanup |
 | --- | --- |
-| Normal return, cancellation during cleanup | Propagate native cancellation, even if cleanup fails; an ordinary `catch` cannot resume caller code. |
-| Normal return, no cancellation | Return the value or report the scope's completion error. Session-return cleanup failures remain diagnostic; a transaction business `Err` is preserved. |
+| Normal return, cancellation during cleanup | Propagate native cancellation, even if cleanup fails. An ordinary `catch` cannot resume caller code. |
+| Normal return, no cancellation | Return the value or report the scope's completion error. Report session-return failures through diagnostics and preserve a transaction business `Err`. |
 | Exception | Preserve the original callback exception over later cancellation or cleanup errors. |
 | Native cancellation | Finish cleanup and continue propagating native cancellation. |
 
 A transaction business `Err` is a normal callback return requesting rollback,
-so cancellation during rollback still takes precedence. Transaction completion
-and task completion are independent: the `TransactionRecord` is written before
-cancellation propagates. A confirmed `Committed`, `RolledBack` or
-`SavepointReleased` status is retained; missing decisive completion records
-`OutcomeUnknown`. Cancellation unwind shares the remaining cleanup budget with
-enclosing scopes, even when a child's cleanup succeeded.
+so cancellation during rollback still takes precedence. The pool writes the
+`TransactionRecord` before propagating cancellation and retains confirmed
+`Committed`, `RolledBack`, and `SavepointReleased` statuses. Enclosing scopes
+share the remaining cleanup budget during cancellation, even when a child's
+cleanup succeeded.
 
 ## Session isolation and hooks
 
 `HealthCheck` (`Passive`, `Active`, or `Custom(sql)`) validates connections on
-checkout. The default is `Active`. `ResetPolicy` is independent:
+checkout of an idle connection. The default is `Active`. On return, the pool
+applies `ResetPolicy`.
 
-- `DiscardAll` (default): synchronize protocol, roll back unfinished transactions,
+- With `DiscardAll` (default), synchronize protocol, roll back unfinished transactions,
   execute `DISCARD ALL` outside a transaction, clear statement/type caches,
   restore the application baseline, then make capacity available.
-- `PreserveSession`: synchronize and roll back unfinished transactions while
+- With `PreserveSession`, synchronize and roll back unfinished transactions while
   retaining session state, including prepared statements. Choose this explicitly
   for persistent LISTEN or other intentional affinity across borrows.
-- `Reconnect`: retire on return, for extension state that standard SQL cannot
-  reliably reset.
+- With `Reconnect`, retire the connection on return. Use this for extension
+  state that standard SQL cannot reliably reset.
 
 `PoolOptions::initialize_session` receives a scoped Session on new connections
 and after full reset. Use it to restore application settings. `before_acquire`
 runs before every checkout. A hook error or a hook leaving an open transaction
-ends that acquisition. An initialization failure during return retires the
-connection and emits an event while preserving the business result. Temporary
-settings should use transaction-local `SET LOCAL`, as above.
+ends that acquisition, as does a hook leaving an operation active. An
+initialization failure during return retires the connection and emits an event
+while preserving the business result. Use transaction-local `SET LOCAL` for
+temporary settings.
 
 `DISCARD ALL` clears server prepared statements, so the default cache is useful
-within a lease and is deliberately invalidated between borrowers. The idle queue
-can use FIFO or LIFO order; this is unrelated to same-connection operation
-rejection.
+within a lease and clears between borrowers. FIFO or LIFO idle queue order
+determines which idle connection the pool checks out next.
 
 ## Diagnostics
 
@@ -214,9 +215,10 @@ health checks, hooks, cancellation, cleanup and transaction completion. Events
 carry connection, scope and request identifiers where applicable, phase, target,
 elapsed time and original errors. The default buffer holds 256 events; oldest
 events are dropped on overflow and `dropped_events()` counts them. Transaction
-records remain available independently. `AcquireError::AttemptsFailed` retains
-all failed targets, health-check attempts, phases and original causes, including
-connection-stage timeouts.
+records remain available independently. When checkout reports
+`AcquireError::AttemptsFailed`, its attempt list retains the targets, phases,
+elapsed time, and original causes of failed health checks and connections.
 
-Protocol references: [PostgreSQL cancellation](https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS)
+See the PostgreSQL documentation for
+[cancellation](https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS)
 and [DISCARD ALL](https://www.postgresql.org/docs/current/sql-discard.html).

@@ -1,64 +1,67 @@
 ## Postgres.mbt
 
-A secure, easy-to-use PostgreSQL client library for MoonBit with an included connection pool.
+A PostgreSQL client and connection pool for MoonBit.
 
 ### Packages
 
-- `moonbit-community/postgres/client`: one FIFO single-flight
-  PostgreSQL session
-- `moonbit-community/postgres/pgpool`: a connection pool that provides
-  concurrency across independent sessions
+- `moonbit-community/postgres/client` runs operations one at a time on a single
+  PostgreSQL session, in FIFO order.
+- `moonbit-community/postgres/pgpool` runs operations concurrently across
+  separate sessions.
 
 The `client`, `pgpool`, and PostgreSQL integration-test packages support the
-`native` and classic `wasm` targets. They intentionally exclude WasmGC because
-the socket/TLS runtime used by live PostgreSQL connections is not available
-there. The packages under `protocol` remain backend-independent.
+`native` and classic `wasm` targets. WasmGC lacks the socket and TLS runtime
+required for live connections. The packages under `protocol` are
+backend-independent.
 
-Calls sharing one `client.Client` execute one complete logical operation at a
-time. Streams and transactions retain the session until they finish. Use
-`pgpool.Pool` when multiple async tasks should run database work concurrently;
-ordinary pool methods checkout and return sessions automatically, while
-`Pool::with_session` provides callback-scoped session affinity.
+Streams and transactions hold their `client.Client` session until they finish.
+Use `pgpool.Pool` for concurrent work. Ordinary pool methods check out and
+return sessions automatically. Use `Pool::with_session` to keep the same
+session for a callback.
 
 Pooled Session and Transaction handles reject overlapping operations immediately
-with `OperationInProgress`. Deadlines and task cancellation supervise SQL and
-bounded cleanup. The default return policy runs `DISCARD ALL` and restores the
-initialization hook before reuse. Pooled transaction callbacks return `Result`:
-`Ok` requests commit and `Err` requests rollback; a `TransactionRecord` preserves
-completion independently of task cancellation. See the
-[pool documentation](./pgpool/README.mbt.md) for scoped operations, deadlines,
-session isolation, and diagnostics.
+with `OperationInProgress`. Deadlines and task cancellation apply to active SQL,
+with a separate cleanup budget. By default the pool runs `DISCARD ALL` and
+reruns the initialization hook before reuse. Pooled transaction callbacks return
+`Result`. `Ok` requests commit and `Err` requests rollback. A
+`TransactionRecord` preserves completion independently of task cancellation.
+See [pool documentation](./pgpool/README.mbt.md).
 
 For client streams and COPY, prefer `Client::with_stream`,
 `with_typed_stream`, `with_statement_stream`, `with_simple_query`,
 `with_copy_in`, and `with_copy_out`. Create portals with
 `Transaction::with_portal` or a transaction-owned `ScopedStatement::with_portal`,
 then fetch successive windows through `Portal::with_stream`.
-These scopes keep the callback cancellable
-and wait for cleanup on every exit. COPY IN commits only when the callback
-explicitly calls `finish()`; otherwise it is aborted.
+These scopes keep the callback cancellable and wait for cleanup on every exit.
+Call `finish()` inside the COPY IN callback to complete the copy. Scope cleanup
+aborts unfinished input.
+
 For named statements, `Client::with_prepared` and
 `Transaction::with_prepared` close the Statement after the callback.
-Statements belong to their creating connection; passing one to another Client
+Statements belong to their creating connection. Passing one to another Client
 or Transaction raises `ClientError::StatementConnectionMismatch` locally.
-`Portal` is the only public portal handle: each fetch finishes its stream,
-and the portal closes when its callback ends. A caller-owned `Statement` remains
+`Portal` is the only public portal handle. Each fetch finishes its stream, and
+the portal closes when its callback ends. A caller-owned `Statement` remains
 open for reuse, including across transactions. See the
 [pagination example](./client/README.mbt.md#prepared-statements-and-portals).
-Async backend messages use bounded buffers on both Client and Pool.
-Transaction scopes also drain unfinished query streams before completion and
-roll back with `UnfinishedChildTransaction` if a nested transaction is left open.
 
-Observed row counts (`QuerySummary.row_count`) and affected row counts from
-`execute`, `execute_raw`, and COPY IN `finish` use `UInt64` throughout the client
-and pool. Commands without a row count return zero. Missing, invalid, or
-overflowing counts in counted command tags raise `ClientError::Protocol`.
+Client transaction scopes drain unfinished query streams before completion.
+An open nested transaction at commit causes rollback and raises
+`UnfinishedChildTransaction`. Client and Pool both buffer async backend
+messages with a size limit.
+
+The client and pool use `UInt64` for observed row counts
+(`QuerySummary.row_count`) and for affected row counts from `execute` and COPY IN
+`finish`. The client's `execute_raw` also returns `UInt64`. Commands without a
+row count return zero. Missing, invalid, or overflowing counts in counted
+command tags raise `ClientError::Protocol`.
 
 `Client::create(config)` returns a handle and a single-use
-`ClientExecutor`. Spawn `executor.run()` in a task group, then await
-`client.ready()` to observe connection and authentication errors. `Pool::create`
-likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
-physical connection executors. Async database calls wait for readiness.
+`ClientExecutor`. Spawn `executor.run()` in a task group, then call
+`client.ready()` to observe connection and authentication errors. Async client
+operations also wait for startup. `Pool::create` returns a `Pool` and
+`PoolExecutor`. Pool readiness means its workers can accept requests. Checkout
+opens physical connections on demand.
 
 `Client::shutdown()` waits for graceful shutdown. `Client::close()` is synchronous
 and idempotent, so it can be used in `defer`. It immediately marks the runtime
@@ -72,10 +75,9 @@ the former `Client::abort()` with the synchronous `close()`.
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)
 
-**Dangerous operation:** changing `client_encoding` away from UTF-8 can cause
-decode failures or silently store incorrect text. The client always uses UTF-8
-and currently does not reject encoding changes. Keep `client_encoding=UTF8`
-for the lifetime of every client and pooled session; see the
+Keep `client_encoding=UTF8` for the lifetime of every client and pooled session.
+The client keeps using UTF-8 even if the server reports a different encoding.
+A mismatch can cause decode errors or silently corrupt stored text. See the
 [client encoding warning](./client/README.mbt.md#client-encoding) and
 [TODO.md](./TODO.md).
 
@@ -84,52 +86,44 @@ for the lifetime of every client and pooled session; see the
 Client and pool configs limit each backend message body to 64 MiB by default
 (`max_backend_message_body_bytes=67_108_864`). The body excludes the tag and
 four-byte length word. For servers returning larger rows or COPY chunks, set a
-larger positive limit explicitly on `client.Config` or `pgpool.Config`; the
-maximum is `2_147_483_642`. Zero does not disable the limit. Invalid client
-settings fail `ready()` with `ClientError::InvalidConfig` before connecting;
-invalid pool settings fail construction with `ConfigError::InvalidConfig`.
-Malformed or oversized frames fail the connection with `ClientError::Protocol`
-before reading the body. This is a per-frame bound, not a total result-memory
-or pool-memory budget.
+larger positive limit explicitly on `client.Config` or `pgpool.Config`. The
+maximum is `2_147_483_642`, and zero is invalid. Invalid client settings fail
+`ready()` with `ClientError::InvalidConfig` before connecting. Invalid pool
+settings fail construction with `ConfigError::InvalidConfig`.
+An invalid header or a body size over the limit fails the connection with
+`ClientError::Protocol` before the body is read. Results and the pool can
+consume more memory in total.
 
 SCRAM authentication accepts at most `100_000` server-requested iterations by
 default. If your server uses a higher count, explicitly set
 `scram_max_iterations` on `client.Config` or `pgpool.Config` to a suitable larger
-value in `1..=2_147_483_647`. Zero does not disable the limit. Invalid settings
-use the same configuration errors as the message budget; excessive or malformed
-server counts fail with `ClientError::Authentication` before PBKDF2 begins.
+value in `1..=2_147_483_647`. Zero is invalid. Invalid settings use the same
+configuration errors as the message limit. Excessive or malformed server
+counts fail with `ClientError::Authentication` before PBKDF2 begins.
 The client yields after batches of at most 256 HMAC operations, so cancellation,
 connection timeouts, and other connections can progress during authentication.
-The protocol package remains synchronous and independent of the async runtime;
-`ScramSha256::update(..., max_iterations=...)` has the same default count limit,
-while the low-level `hi` function keeps its caller-selected positive count.
+The protocol package is synchronous and independent of the async runtime.
+`ScramSha256::update(..., max_iterations=...)` has the same default limit.
+The low-level `hi` function uses the positive count supplied by its caller.
 
 ### TLS
 
-The client and pool support three explicit TLS modes:
+`client.Config::Config` and `pgpool.Config::Config` accept the following
+`ssl_mode` values.
 
-- `disable`: plaintext only
-- `verify-ca`: TLS with certificate-chain validation but without hostname/IP validation
-- `verify-full`: TLS with certificate-chain validation and hostname/IP validation
+| Mode | Connection |
+| --- | --- |
+| `disable` | Plaintext only |
+| `verify-ca` | TLS with certificate-chain validation only |
+| `verify-full` (default) | TLS with certificate-chain and hostname/IP validation |
 
-`verify-full` is the default for both `client.Config::Config` and
-`pgpool.Config::Config`.
+With TLS enabled, the platform trust store is the default. The explicit value
+`ssl_root_cert="system"` also selects that store and requires
+`SslMode::VerifyFull`. The client passes a custom `ssl_root_cert` path to
+`moonbitlang/async/tls` as a PEM root certificate file.
 
-`client.Config::Config` and `pgpool.Config::Config` expose TLS fields with
-libpq-equivalent semantics:
-
-- `ssl_mode`
-- `ssl_root_cert`
-
-`ssl_root_cert="system"` uses the platform trust store and requires
-`SslMode::VerifyFull`. Custom `ssl_root_cert` paths are passed to
-`moonbitlang/async/tls` as PEM root
-certificates.
-
-`verify-full` requires an explicit `host` or `hostaddr`; every pool target
-requires one even when TLS verification is disabled.
-
-Configure the pool with connection targets and explicit options:
+`verify-full` requires an explicit `host` or `hostaddr`. Every pool target
+requires one, regardless of TLS mode.
 
 ```mbt check
 ///|
@@ -147,31 +141,36 @@ fn _pool_config_example() -> @pgpool.Config raise {
 }
 ```
 
-References:
+#### TLS references
 
-- Aembit, "The Strange World of Postgres TLS":
-  <https://aembit.io/blog/the-strange-world-of-postgres-tls>
-- PostgreSQL `sslmode`:
-  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLMODE>
-- PostgreSQL certificate verification semantics:
-  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-CERTIFICATES>
-- PostgreSQL TLS protection matrix:
-  <https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-PROTECTION>
-- PostgreSQL `sslrootcert`:
-  <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLROOTCERT>
-- PostgreSQL unsupported parameters called out in this project:
-  `sslcert`, `sslkey`, `sslpassword`, `sslcrl`, `sslcrldir`, `sslsni`,
-  `ssl_min_protocol_version`, `ssl_max_protocol_version`, `sslnegotiation`,
-  `sslcertmode`, `sslkeylogfile`, `sslcompression`
+- Aembit, [The Strange World of Postgres TLS](https://aembit.io/blog/the-strange-world-of-postgres-tls)
+- [PostgreSQL `sslmode`](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLMODE)
+- [PostgreSQL certificate verification](https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-CERTIFICATES)
+- [PostgreSQL TLS protection matrix](https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-PROTECTION)
+- [PostgreSQL `sslrootcert`](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLROOTCERT)
+
+Unsupported libpq options include `sslcert`, `sslkey`, `sslpassword`,
+`sslcrl`, `sslcrldir`, `sslsni`, `ssl_min_protocol_version`,
+`ssl_max_protocol_version`, `sslnegotiation`, `sslcertmode`,
+`sslkeylogfile`, and `sslcompression`.
 
 ### Testing
 
-- Run resource safety regressions with an independent process watchdog: `node scripts/resource_safety_test.mjs`
-- Run PostgreSQL integration tests: `node scripts/pg_integration_test.mjs`
-- Run PostgreSQL integration coverage tests: `node scripts/pg_integration_test.mjs --enable-coverage`
+- `node scripts/resource_safety_test.mjs` runs resource safety regressions with an independent process watchdog.
+- `node scripts/pg_integration_test.mjs` runs PostgreSQL integration tests.
+- `node scripts/pg_integration_test.mjs --enable-coverage` adds coverage.
 
-MD5 password authentication is not supported by this client. If the server sends `AuthenticationMD5Password`, connection startup fails with a client authentication error; configure `scram-sha-256` or `password`.
+Configure PostgreSQL to use `scram-sha-256` or `password`. The client rejects
+`AuthenticationMD5Password` with an authentication error during startup.
 
-The integration tests only execute when `RUN_POSTGRES_INTEGRATION=1`. The script above starts a temporary PostgreSQL cluster with `pg_virtualenv`, picks a high local port, creates a `moondb` database plus `moon_scram` and `moon_password` users, and runs the `integration*` test suite on both the native and WebAssembly backends against those two authentication modes.
+The integration tests run only when `RUN_POSTGRES_INTEGRATION=1`. The script
+starts a temporary PostgreSQL cluster with `pg_virtualenv` on a high local
+port and generates TLS certificates with `openssl`. It creates the `moondb`
+database and the `moon_scram` and `moon_password` users, then runs the
+`integration*` suite by default on the native and WebAssembly backends for
+both authentication modes. It also runs the untrusted-certificate test on
+both backends.
 
-When `--enable-coverage` is set, the same script runs `moon test --enable-coverage` for each backend and authentication mode, merges the resulting traces, and then prints caret-style line-level coverage details for all instrumented packages.
+With `--enable-coverage`, the script runs `moon test --enable-coverage` for
+each backend and authentication mode. It then prints caret-style line coverage
+for the instrumented packages.
