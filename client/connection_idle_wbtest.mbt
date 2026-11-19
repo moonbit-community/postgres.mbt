@@ -56,7 +56,7 @@ async test "partial idle notification stays aligned when a request arrives" {
       assert_true(
         client.next_message()
         is Some(
-          Notification({ channel: "moon_partial", payload: "second", .. })
+          Notification({ channel: "moon_partial", payload: "second", .. }),
         ),
       )
       ping.wait()

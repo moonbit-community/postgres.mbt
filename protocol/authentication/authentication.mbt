@@ -482,9 +482,7 @@ pub fn ScramSha256::advance_update(
   let client_proof = xor_bytes(client_key[:], client_signature[:])
   let client_proof_b64 = @proto.utf8_encode(@base64.encode(client_proof[:]))
   let final_msg = Buffer(
-    capacity=client_final_without_proof.length() +
-      3 +
-      client_proof_b64.length(),
+    capacity=client_final_without_proof.length() + 3 + client_proof_b64.length(),
   )
   final_msg.write_bytesview(client_final_without_proof[:])
   final_msg.write_bytesview(b",p="[:])

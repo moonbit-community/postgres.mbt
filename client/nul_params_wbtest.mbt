@@ -51,7 +51,7 @@ fn assert_string_nul_error(param : &ToSql, type_ : Type) -> Unit raise {
   assert_true(
     @test.expect_error(() => encode_param(param, type_))
     is ClientError::Encode(
-      "PostgreSQL string parameters must not contain NUL (U+0000)"
+      "PostgreSQL string parameters must not contain NUL (U+0000)",
     ),
   )
 }
@@ -107,7 +107,7 @@ test "string codec NUL failures leave existing buffers untouched" {
       assert_true(
         @test.expect_error(() => param.to_sql(type_, buf))
         is ClientError::Encode(
-          "PostgreSQL string parameters must not contain NUL (U+0000)"
+          "PostgreSQL string parameters must not contain NUL (U+0000)",
         ),
       )
       assert_eq(buf.to_bytes(), b"existing\x00bytes")
@@ -152,7 +152,7 @@ test "custom text payloads reject zero bytes after encoding and format selection
     assert_true(
       @test.expect_error(() => encode_param(param, Type::text()))
       is ClientError::Encode(
-        "PostgreSQL text-format parameters must not contain NUL (0x00)"
+        "PostgreSQL text-format parameters must not contain NUL (0x00)",
       ),
     )
     assert_eq(param.events, ["accepts", "to_sql", "format"])
