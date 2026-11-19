@@ -40,7 +40,7 @@ async fn read_socket_packet(socket : @socket.Tcp) -> Bytes {
   let header = socket.read_exactly(5)
   let body_len = @proto.ByteReader::new(header[1:]).read_i32_be()
   let body = socket.read_exactly(body_len - 4)
-  let packet = Buffer(size_hint=header.length() + body.length())
+  let packet = Buffer(capacity=header.length() + body.length())
   packet.write_bytes(header)
   packet.write_bytes(body)
   packet.to_bytes()
