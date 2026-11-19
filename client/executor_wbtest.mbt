@@ -22,7 +22,7 @@ async test "client executor does not connect before run and rejects a second run
     @async.pause()
     assert_true(first.try_wait() is None)
     assert_true(second.try_wait() is None)
-    client.close()
+    client.shutdown()
     assert_true(
       expect_error_async(() => first.wait()) is ClientError::Closed(_),
     )
@@ -79,13 +79,13 @@ async test "several client ready waiters observe the same startup result" {
     client.ready()
     assert_eq(client.parameter("client_encoding"), Some("UTF8"))
     assert_eq(client.cancel_token().process_id(), 321)
-    client.close()
+    client.shutdown()
     driver.wait()
   })
 }
 
 ///|
-async test "close during client startup cancels authentication and waits for cleanup" {
+async test "shutdown during client startup cancels authentication and waits for cleanup" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
@@ -109,7 +109,7 @@ async test "close during client startup cancels authentication and waits for cle
     )
     let driver = group.spawn(no_wait=true, () => executor.run())
     accepted.get()
-    @async.with_timeout(1000, () => client.close())
+    @async.with_timeout(1000, () => client.shutdown())
     assert_true(client.is_closed())
     assert_true(
       expect_error_async(() => client.ready()) is ClientError::Closed(_),

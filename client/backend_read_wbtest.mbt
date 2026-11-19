@@ -40,7 +40,7 @@ async fn check_backend_length_rejection(
           max_backend_message_body_bytes=8,
         ),
       )
-      defer client.abort()
+      defer client.close()
       let running = group.spawn(allow_failure=true, () => executor.run())
       if startup {
         let first = group.spawn(allow_failure=true, () => client.ready())
@@ -89,7 +89,7 @@ async test "backend framing accepts zero body and the exact configured limit" {
   @async.with_timeout(2000, () => {
     @async.with_task_group(group => {
       let (client, driver, backend) = connection_test_pair(group)
-      defer client.abort()
+      defer client.close()
       defer driver.stream.close()
       defer backend.close()
       for
@@ -136,12 +136,12 @@ async test "startup and runtime accept frames exactly at the configured limit" {
           max_backend_message_body_bytes=4,
         ),
       )
-      defer client.abort()
+      defer client.close()
       let running = group.spawn(() => executor.run())
       client.ready()
       client.check_connection()
       assert_eq(client.parameter("a"), Some("b"))
-      client.close()
+      client.shutdown()
       running.wait()
       backend.wait()
     })

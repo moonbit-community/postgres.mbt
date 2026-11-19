@@ -10,8 +10,8 @@ async test "integration statements reject foreign connections and retain manual 
       as_client_config(config, application_name="statement-owner-second"),
       group,
     )
-    defer first.abort()
-    defer second.abort()
+    defer first.close()
+    defer second.close()
     @async.with_timeout(5000, () => {
       let first_statement = first.prepare("select 11::int4 as value")
       let second_statement = second.prepare("select 22::int4 as value")
@@ -112,7 +112,7 @@ async test "integration statements reject foreign connections and retain manual 
       assert_false(first.is_closed())
       assert_false(second.is_closed())
     })
-    first.close()
-    second.close()
+    first.shutdown()
+    second.shutdown()
   })
 }

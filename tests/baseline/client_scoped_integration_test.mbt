@@ -22,7 +22,7 @@ async test "integration scoped statement portals bind parameters and drain each 
       ),
       group,
     )
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(5000, () => {
       let prepared_before = scoped_prepared_count(client)
       client.with_transaction(tx => {
@@ -69,7 +69,7 @@ async test "integration scoped statement portals bind parameters and drain each 
         .get(0)
       assert_eq(count, 5)
     })
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -84,7 +84,7 @@ async test "integration scoped streams drain early exits and release temporary s
       ),
       group,
     )
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(5000, () => {
       let prepared_before = scoped_prepared_count(client)
       let first : Int32 = client.with_stream(
@@ -119,7 +119,7 @@ async test "integration scoped streams drain early exits and release temporary s
       let probe : Int32 = client.query_one("select 42::int4").get(0)
       assert_eq(probe, 42)
     })
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -131,7 +131,7 @@ async test "integration scoped COPY IN aborts unfinished returns errors and canc
       as_client_config(config, application_name="moonbit-postgres-scoped-copy"),
       group,
     )
-    defer client.abort()
+    defer client.close()
     client.batch_execute("create temp table scoped_copy(value int4)")
     @async.with_timeout(5000, () => {
       assert_eq(
@@ -184,7 +184,7 @@ async test "integration scoped COPY IN aborts unfinished returns errors and canc
         .get(0)
       assert_eq(committed, 2)
     })
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -199,7 +199,7 @@ async test "integration scoped row decoding and parameter encoding errors keep c
       ),
       group,
     )
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(5000, () => {
       let prepared_before = scoped_prepared_count(client)
       assert_true(
@@ -232,6 +232,6 @@ async test "integration scoped row decoding and parameter encoding errors keep c
       let probe : Int32 = client.query_one("select 42::int4").get(0)
       assert_eq(probe, 42)
     })
-    client.close()
+    client.shutdown()
   })
 }

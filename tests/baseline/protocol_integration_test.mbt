@@ -534,7 +534,7 @@ async test "integration cancel request uses protocol frontend" {
       _ => fail("expected DataRow after cancellation")
     }
     assert_true(ping[3] is ReadyForQuery(_))
-    observer.close()
+    observer.shutdown()
   })
   ignore(result)
 }

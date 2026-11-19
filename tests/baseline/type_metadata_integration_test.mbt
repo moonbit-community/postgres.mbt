@@ -231,6 +231,6 @@ async test "integration schema recursive descriptors and scalar codecs for enum 
       .get(0)
     assert_eq(after_clear, values)
     client.batch_execute(drop_sql)
-    client.close()
+    client.shutdown()
   })
 }

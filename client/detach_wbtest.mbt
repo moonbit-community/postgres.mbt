@@ -73,7 +73,7 @@ async test "detached stream abort reports Closed without failing sibling connect
       client.shared.driver_task.val = Some(
         group.spawn(no_wait=true, () => driver.run(group)),
       )
-      defer client.abort()
+      defer client.close()
       let (sibling, sibling_driver, sibling_backend) = connection_test_pair(
         group,
       )
@@ -81,7 +81,7 @@ async test "detached stream abort reports Closed without failing sibling connect
       sibling.shared.driver_task.val = Some(
         group.spawn(no_wait=true, () => sibling_driver.run(group)),
       )
-      defer sibling.abort()
+      defer sibling.close()
       @async.with_timeout(2000, () => {
         let permit = client.shared.operation_gate.acquire()
         let bytes = simple_query_bytes("select 1")
@@ -94,7 +94,7 @@ async test "detached stream abort reports Closed without failing sibling connect
         )
         assert_eq(backend.read_exactly(bytes.length()), bytes)
         detach()
-        client.abort()
+        client.close()
         for _ in 0..<2 {
           assert_true(
             expect_error_async(finish)

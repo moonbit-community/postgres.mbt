@@ -55,7 +55,7 @@ async test "SCRAM invalid counts fail authentication before a proof is sent" {
             scram_max_iterations=limit,
           ),
         )
-        defer client.abort()
+        defer client.close()
         let running = group.spawn(allow_failure=true, () => executor.run())
         let error = expect_error_async(() => client.ready())
         assert_true(error is ClientError::Authentication(_))
@@ -76,7 +76,7 @@ async test "SCRAM cancellation observes both partial derivation and the final ba
     @async.with_timeout(2000, () => {
       @async.with_task_group(group => {
         let (client, driver, backend) = connection_test_pair(group)
-        defer client.abort()
+        defer client.close()
         defer driver.stream.close()
         defer backend.close()
         let scram = @auth.ScramSha256::new_inner(
@@ -147,12 +147,12 @@ async test "SCRAM derivation permits another connection and obeys cancellation a
             connect_timeout_ms?=if timeout { Some(150) } else { None },
           ),
         )
-        defer client.abort()
+        defer client.close()
         let running = group.spawn(allow_failure=true, () => executor.run())
         let ready = group.spawn(allow_failure=true, () => client.ready())
         challenged.get()
         let (peer, peer_driver, peer_backend) = connection_test_pair(group)
-        defer peer.abort()
+        defer peer.close()
         defer peer_backend.close()
         let peer_running = group.spawn(() => peer_driver.run(group))
         peer.shared.driver_task.val = Some(peer_running)
@@ -182,7 +182,7 @@ async test "SCRAM derivation permits another connection and obeys cancellation a
         }
         assert_true(client.is_closed())
         backend.wait()
-        peer.abort()
+        peer.close()
         peer_running.wait() catch {
           @async.WaitedTaskAlreadyCancelled => ()
           error => raise error

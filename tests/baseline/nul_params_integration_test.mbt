@@ -30,7 +30,7 @@ async test "integration NUL encoding errors do not execute or abort the transact
       as_client_config(config, application_name="moonbit-nul-parameters"),
       group,
     )
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(10000, () => {
       let prepared_before = scoped_prepared_count(client)
       client.with_transaction(tx => {
@@ -117,6 +117,6 @@ async test "integration NUL encoding errors do not execute or abort the transact
         .get(0)
       assert_eq(value, "中文🌙")
     })
-    client.close()
+    client.shutdown()
   })
 }

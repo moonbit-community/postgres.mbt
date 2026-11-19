@@ -61,6 +61,6 @@ async test "integration wrong type errors on read and write" {
     @debug.assert_eq(write_err.moonbit_type, "TextOnlyParam")
     @debug.assert_eq(write_err.postgres_type, @client.Type::int4())
 
-    client.close()
+    client.shutdown()
   })
 }

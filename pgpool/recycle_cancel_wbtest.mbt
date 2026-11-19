@@ -68,7 +68,7 @@ async fn check_recycle_cancellation(post~ : Bool) -> Unit {
       // Also close any checked-out connection if an assertion fails early.
       for connection in pool.shared.connections {
         if connection.client.val is Some(client) {
-          client.abort()
+          client.close()
         }
       }
       pool.close()
@@ -219,7 +219,7 @@ async test "pool close during health check closes and retires the connection onc
       let session = pool.checkout_session()
       let retired = session.state.connection
       let physical = retired.client.val.unwrap()
-      defer physical.abort()
+      defer physical.close()
       session.release()
       let checkout = group.spawn(allow_failure=true, () => {
         pool.checkout_session()

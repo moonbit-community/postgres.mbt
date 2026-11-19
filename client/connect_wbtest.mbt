@@ -91,7 +91,7 @@ fn make_shared(
     transaction_status: Ref(b'I'),
     closed: Ref(closed),
     closing: Ref(closing),
-    close_requested: Ref(false),
+    shutdown_requested: Ref(false),
     aborted: Ref(false),
     operation_gate: OperationGate::new(),
     driver_task: Ref(None),
@@ -134,7 +134,7 @@ async fn start_test_client(
 }
 
 ///|
-async test "connect captures startup state and close waits for the driver" {
+async test "connect captures startup state and shutdown waits for the driver" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
@@ -152,7 +152,7 @@ async test "connect captures startup state and close waits for the driver" {
       )
       conn.write(backend_key_data_packet(321, 654))
       conn.write(ready_for_query_packet(b'I'))
-      // The executor-owned driver sends a five-byte Terminate frame on close.
+      // The executor-owned driver sends a five-byte Terminate frame on shutdown.
       ignore(conn.read_exactly(5))
     })
 
@@ -187,14 +187,14 @@ async test "connect captures startup state and close waits for the driver" {
     assert_true(client.shared.types.get(Type::bool().oid) == Some(Type::bool()))
     assert_true(client.shared.types.get(99999U) is None)
 
-    client.close()
+    client.shutdown()
     assert_true(client.is_closed())
-    client.close()
+    client.shutdown()
   })
 }
 
 ///|
-async test "abort closes plaintext transport without terminate" {
+async test "close discards plaintext transport without terminate" {
   @async.with_task_group(group => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     defer server.close()
@@ -206,7 +206,7 @@ async test "abort closes plaintext transport without terminate" {
       conn.write(auth_ok_packet())
       conn.write(backend_key_data_packet(321, 654))
       conn.write(ready_for_query_packet(b'I'))
-      // Abort must close TCP without writing PostgreSQL's Terminate frame.
+      // Close must discard TCP without writing PostgreSQL's Terminate frame.
       conn.read_some(max_len=5)
     })
 
@@ -225,9 +225,9 @@ async test "abort closes plaintext transport without terminate" {
     )
 
     assert_true(!client.is_closed())
-    client.abort()
+    client.close()
     assert_true(client.is_closed())
-    client.abort()
+    client.close()
     assert_true(client.is_closed())
     let trailing = @async.with_timeout(1000, () => server_task.wait())
     assert_true(trailing is None)
@@ -272,12 +272,12 @@ async test "connect timeout surfaces protocol timeout" {
 }
 
 ///|
-async test "client close handles closed request queue and check_connection rejects closed runtime" {
+async test "client shutdown handles closed request queue and check_connection rejects closed runtime" {
   let shared = make_shared()
   let client : Client = { shared, }
 
   shared.requests.close()
-  client.close()
+  client.shutdown()
   @debug.assert_eq(shared.closed.val, true)
   @debug.assert_eq(shared.closing.val, true)
 
@@ -301,21 +301,21 @@ async test "cancel token returns early when connection is already closed" {
 }
 
 ///|
-async test "a cancelled close can be resumed without queuing another terminate" {
+async test "a cancelled shutdown can be resumed without queuing another terminate" {
   @async.with_task_group(group => {
     let shared = make_shared()
     let client : Client = { shared, }
-    let first_close = group.spawn(allow_failure=true, () => client.close())
+    let first_shutdown = group.spawn(allow_failure=true, () => client.shutdown())
     let request = shared.requests.get()
     assert_true(request.kind is Terminate)
 
-    first_close.cancel()
-    let _ = first_close.wait() catch { _ => () }
+    first_shutdown.cancel()
+    let _ = first_shutdown.wait() catch { _ => () }
 
     let resumed_started : @async.Queue[Unit] = Queue(kind=Unbounded)
-    let resumed_close = group.spawn(() => {
+    let resumed_shutdown = group.spawn(() => {
       resumed_started.put(())
-      client.close()
+      client.shutdown()
     })
     resumed_started.get()
     @async.sleep(1)
@@ -324,7 +324,7 @@ async test "a cancelled close can be resumed without queuing another terminate" 
 
     close_runtime(shared)
     shared.done.complete(None)
-    ignore(resumed_close.wait())
+    ignore(resumed_shutdown.wait())
     assert_true(client.is_closed())
   })
 }

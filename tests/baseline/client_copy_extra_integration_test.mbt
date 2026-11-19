@@ -37,7 +37,7 @@ async fn assert_copy_in_early_error_reuses_connection(
     .query_one("select 31::int4 as value")
     .get_name("value")
   @debug.assert_eq(probe, 31)
-  client.close()
+  client.shutdown()
 }
 
 ///|
@@ -85,7 +85,7 @@ async test "integration copy in startup error keeps connection reusable" {
       .get_name("value")
     @debug.assert_eq(probe, 17)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -120,7 +120,7 @@ async test "integration copy in finish closes sink and commits rows" {
       .get_name("value")
     @debug.assert_eq(count, 2)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -145,7 +145,7 @@ async test "integration copy out collect keeps connection reusable" {
       .get_name("value")
     @debug.assert_eq(probe, 23)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -171,6 +171,6 @@ async test "integration copy out finish drains large payload and keeps connectio
       .get_name("value")
     @debug.assert_eq(probe, 29)
 
-    client.close()
+    client.shutdown()
   })
 }

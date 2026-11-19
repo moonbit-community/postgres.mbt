@@ -52,7 +52,7 @@ async test "COPY NUL abort stays usable and scope cleanup sends a valid failure"
             application_name="copy-abort-validation",
           ),
         )
-        defer client.abort()
+        defer client.close()
         let running = group.spawn(() => executor.run())
         client.ready()
         if scoped {
@@ -77,7 +77,7 @@ async test "COPY NUL abort stays usable and scope cleanup sends a valid failure"
           assert_true(sink.permit.released.val)
         }
         client.check_connection()
-        client.close()
+        client.shutdown()
         running.wait()
         backend.wait()
       })
@@ -111,7 +111,7 @@ async test "COPY writer failure stops its executor and wakes every request queue
           application_name="copy-writer-failure",
         ),
       )
-      defer client.abort()
+      defer client.close()
       let running = group.spawn(allow_failure=true, () => executor.run())
       client.ready()
       let sink = client.copy_in("COPY t FROM STDIN")
@@ -158,7 +158,7 @@ async test "COPY socket write failure reaches the connection task group" {
   @async.with_timeout(2000, () => {
     @async.with_task_group(group => {
       let (client, driver, backend) = connection_test_pair(group)
-      defer client.abort()
+      defer client.close()
       defer backend.close()
       driver.stream.close()
       let input : @async.Queue[CopyInAction] = Queue(kind=Unbounded)

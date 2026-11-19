@@ -187,7 +187,7 @@ fn copy_test_shared(
     transaction_status: Ref(b'I'),
     closed: Ref(false),
     closing: Ref(false),
-    close_requested: Ref(false),
+    shutdown_requested: Ref(false),
     aborted: Ref(false),
     operation_gate: OperationGate::new(),
     driver_task: Ref(None),

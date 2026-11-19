@@ -37,7 +37,7 @@ async test "integration quoted savepoint identifiers and SQL text" {
     .collect()[0].get(0)
     assert_eq(after_rollback, 0)
     tx.commit()
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -164,7 +164,7 @@ async test "integration transaction options savepoints and raw statement helpers
     )
     follow_up.rollback()
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -232,7 +232,7 @@ async test "integration transaction default path and named savepoint commit" {
       [1, 2],
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -264,6 +264,6 @@ async test "integration transaction blocks outer client FIFO" {
       ),
       17,
     )
-    client.close()
+    client.shutdown()
   })
 }
