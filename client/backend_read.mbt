@@ -22,7 +22,7 @@ async fn read_backend_message(
       )
     }
     let body = stream.read_exactly(body_len)
-    let packet = Buffer(size_hint=body_len + 5)
+    let packet = Buffer(capacity=body_len + 5)
     packet.write_bytes(prefix)
     packet.write_bytes(body)
     guard @backend.Message::parse(packet.to_bytes()[:]) is Some(parsed) else {

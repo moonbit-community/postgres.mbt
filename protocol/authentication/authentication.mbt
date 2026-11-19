@@ -40,7 +40,7 @@ pub fn normalize(pass : BytesView) -> Bytes raise @proto.ProtocolError {
 
 ///|
 fn map_saslprep_input(s : String) -> String {
-  let out = StringBuilder(size_hint=s.length())
+  let out = StringBuilder(capacity=s.length())
   for ch in s {
     if is_mapped_to_nothing(ch) {
       continue
@@ -288,7 +288,7 @@ pub fn ScramSha256::new_inner(
 ) -> ScramSha256 raise @proto.ProtocolError {
   validate_nonce(nonce[:])
   let msg = Buffer(
-    size_hint=channel_binding.gs2_header().length() + 4 + nonce.length(),
+    capacity=channel_binding.gs2_header().length() + 4 + nonce.length(),
   )
   msg.write_bytesview(channel_binding.gs2_header())
   msg.write_bytesview(b"n=,r="[:])
@@ -396,7 +396,7 @@ pub fn ScramSha256::begin_update(
   }
   let hi = HiState::new(password[:], salt[:], parsed.iteration_count)
   let cbind = Buffer(
-    size_hint=channel_binding.gs2_header().length() +
+    capacity=channel_binding.gs2_header().length() +
       channel_binding.cbind_data().length(),
   )
   // The `c=` field is base64(gs2-header || channel-binding-data).
@@ -404,7 +404,7 @@ pub fn ScramSha256::begin_update(
   cbind.write_bytesview(channel_binding.cbind_data())
   let cbind_b64 = @proto.utf8_encode(@base64.encode(cbind.to_bytes()[:]))
   let client_final = Buffer(
-    size_hint=2 + cbind_b64.length() + 3 + parsed.nonce.length(),
+    capacity=2 + cbind_b64.length() + 3 + parsed.nonce.length(),
   )
   client_final.write_bytesview(b"c="[:])
   client_final.write_bytesview(cbind_b64[:])
@@ -415,7 +415,7 @@ pub fn ScramSha256::begin_update(
   // client-first-message-bare "," server-first-message ","
   // client-final-message-without-proof.
   let auth = Buffer(
-    size_hint=4 +
+    capacity=4 +
       client_nonce.length() +
       1 +
       message.length() +
@@ -482,7 +482,7 @@ pub fn ScramSha256::advance_update(
   let client_proof = xor_bytes(client_key[:], client_signature[:])
   let client_proof_b64 = @proto.utf8_encode(@base64.encode(client_proof[:]))
   let final_msg = Buffer(
-    size_hint=client_final_without_proof.length() +
+    capacity=client_final_without_proof.length() +
       3 +
       client_proof_b64.length(),
   )

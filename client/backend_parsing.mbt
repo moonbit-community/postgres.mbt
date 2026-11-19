@@ -196,7 +196,7 @@ fn parse_error_uint(
   guard !value.is_empty() && value.iter().all(c => c >= '0' && c <= '9') else {
     raise InvalidInput("invalid numeric error field: \{value}")
   }
-  let number = @string.parse_uint(value, base=10) catch {
+  let number = @string.parse_uint(value, radix=10) catch {
     _ => raise InvalidInput("invalid numeric error field: \{value}")
   }
   guard !positive || number > 0U else {

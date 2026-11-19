@@ -325,7 +325,7 @@ fn rows_affected(command_tag : String) -> UInt64 raise {
       "invalid row count in command tag: \{command_tag}",
     )
   }
-  @string.parse_uint64(count, base=10) catch {
+  @string.parse_uint64(count, radix=10) catch {
     _ =>
       raise ClientError::Protocol(
         "invalid row count in command tag: \{command_tag}",

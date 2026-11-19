@@ -18,7 +18,7 @@ fn HiState::new(
   if iterations <= 0 {
     raise InvalidInput("iteration count must be positive")
   }
-  let first = Buffer(size_hint=salt.length() + 4)
+  let first = Buffer(capacity=salt.length() + 4)
   first.write_bytesview(salt)
   first.write_bytes(b"\x00\x00\x00\x01")
   {
