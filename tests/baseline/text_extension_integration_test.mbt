@@ -7,7 +7,7 @@ async test "integration ltree extension string scalars views and arrays roundtri
       as_client_config(config, application_name="moonbit-text-extensions"),
       group,
     )
-    defer @async.protect_from_cancel(() => client.close())
+    defer @async.protect_from_cancel(() => client.shutdown())
     client.batch_execute("CREATE EXTENSION IF NOT EXISTS ltree")
     let cases = [
       ("ltree", "a.b", "c.d"),

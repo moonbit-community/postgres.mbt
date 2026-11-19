@@ -359,7 +359,7 @@ async fn with_control_pool(
     defer {
       for connection in pool.shared.connections {
         if connection.client.val is Some(client) {
-          client.abort()
+          client.close()
         }
       }
       pool.close()
@@ -370,7 +370,7 @@ async fn with_control_pool(
       @async.sleep(2500)
       for connection in pool.shared.connections {
         if connection.client.val is Some(client) {
-          client.abort()
+          client.close()
         }
       }
     })

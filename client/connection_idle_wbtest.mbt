@@ -21,7 +21,7 @@ async test "idle connection delivers notifications without another request" {
       connection.run(group)
     })
     client.shared.driver_task.val = Some(driver)
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(2000, () => {
       backend.write(idle_notification_packet("moon_idle", "first"))
       assert_true(
@@ -45,7 +45,7 @@ async test "partial idle notification stays aligned when a request arrives" {
       connection.run(group)
     })
     client.shared.driver_task.val = Some(driver)
-    defer client.abort()
+    defer client.close()
     @async.with_timeout(2000, () => {
       let notification = idle_notification_packet("moon_partial", "second")
       backend.write(notification[:3].to_owned())

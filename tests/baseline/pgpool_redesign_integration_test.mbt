@@ -13,7 +13,7 @@ async test "integration escaped transaction callbacks retire backend and cannot 
         as_client_config(config, application_name="pool-escape-observer"),
         group,
       )
-      defer @async.protect_from_cancel(() => observer.close())
+      defer @async.protect_from_cancel(() => observer.shutdown())
       let entered : @async.Queue[Unit] = Queue(kind=Unbounded)
       let release_callback : @async.Queue[Unit] = Queue(kind=Unbounded)
       defer release_callback.close()

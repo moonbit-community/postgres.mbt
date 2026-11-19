@@ -111,7 +111,7 @@ async fn assert_pool_idle_notification(
         }
       }
     })
-    publisher.close()
+    publisher.shutdown()
     pool.close()
   })
 }

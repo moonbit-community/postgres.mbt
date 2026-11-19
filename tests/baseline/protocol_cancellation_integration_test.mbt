@@ -56,12 +56,12 @@ async test "integration client transaction cancellation during SQL rolls back wr
       as_client_config(config, application_name="client-sql-cancel"),
       group,
     )
-    defer client.abort()
+    defer client.close()
     let observer = start_client(
       as_client_config(config, application_name="client-sql-cancel-observer"),
       group,
     )
-    defer observer.abort()
+    defer observer.close()
     client.batch_execute("create temp table moon_sql_cancel(value int4)")
     for batch in [false, true] {
       cancel_during_locked_sql(observer, client.cancel_token().process_id(), sql => {
@@ -86,8 +86,8 @@ async test "integration client transaction cancellation during SQL rolls back wr
       .query_one("select value from moon_sql_cancel")
       .get_name("value")
     assert_eq(value, 2)
-    client.close()
-    observer.close()
+    client.shutdown()
+    observer.shutdown()
   })
 }
 
@@ -129,7 +129,7 @@ async test "integration pooled SQL and savepoint cancellation roll back without 
       as_client_config(config, application_name="pool-lock-observer"),
       group,
     )
-    defer observer.abort()
+    defer observer.close()
     pool.with_session(session => {
       session.batch_execute("create temp table moon_sql_cancel(value int4)")
       let pid : Int32 = session
@@ -187,12 +187,12 @@ async test "integration prepare timeout behind a table lock does not leak the op
       as_client_config(config, application_name="prepare-lock-timeout"),
       group,
     )
-    defer client.abort()
+    defer client.close()
     let blocker = start_client(
       as_client_config(config, application_name="prepare-lock-holder"),
       group,
     )
-    defer blocker.abort()
+    defer blocker.close()
     let schema = "moon_prepare_cancel_\{client.cancel_token().process_id()}"
     blocker.batch_execute(
       "create schema \{schema}; create table \{schema}.t(value int4)",
@@ -239,7 +239,7 @@ async test "integration prepare timeout behind a table lock does not leak the op
     assert_false(delivered)
     @async.with_timeout(5000, () => {
       client.check_connection()
-      client.close()
+      client.shutdown()
     })
   })
 }

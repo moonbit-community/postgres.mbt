@@ -91,7 +91,7 @@ async test "integration database error distinguishes constraints and not null co
       .query_one("select count(*)::int4 as count from error_objects")
       .get_name("count")
     assert_eq(count, 1)
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -125,7 +125,7 @@ async test "integration database error query position counts Unicode characters"
       .query_one("select 42::int4 as value")
       .get_name("value")
     assert_eq(probe, 42)
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -169,7 +169,7 @@ async test "integration database error preserves internal query and context" {
       .query_one("select 43::int4 as value")
       .get_name("value")
     assert_eq(probe, 43)
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -210,7 +210,7 @@ async test "integration database notice preserves object fields and multiline te
       .query_one("select 44::int4 as value")
       .get_name("value")
     assert_eq(probe, 44)
-    client.close()
+    client.shutdown()
   })
 }
 

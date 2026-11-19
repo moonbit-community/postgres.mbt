@@ -27,7 +27,7 @@ async fn assert_auth_ok(
       .get_name("current_user")
     assert_eq(current_user, user)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -79,7 +79,7 @@ async fn connect_error(config : @client.Config) -> Error {
   expect_error_async(() => {
     @async.with_task_group(group => {
       let client = start_client(config, group)
-      client.close()
+      client.shutdown()
     })
   })
 }
@@ -195,7 +195,7 @@ async fn assert_tls_query_ok(config : @client.Config) -> Unit {
       .get_name("value")
     assert_eq(value, 1)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -376,7 +376,7 @@ async test "integration connect and typed query" {
     assert_eq(answer, 42)
     assert_eq(enabled, true)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -675,7 +675,7 @@ async test "integration check connection" {
       .get_name("value")
     assert_eq(value, 1)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -695,7 +695,7 @@ async test "integration exposes startup parameters" {
       Some("moonbit-postgres"),
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -728,7 +728,7 @@ async test "integration prepare and parameterized execute" {
     assert_eq(name, "moonbit")
     assert_eq(next_id, 8)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -758,7 +758,7 @@ async test "integration raw query closes temporary prepared statements" {
       .get_name("count")
     assert_eq(after, before)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -801,7 +801,7 @@ async test "integration row stream detach closes temporary prepared statements" 
       before,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -846,7 +846,7 @@ async test "integration simple query supports multiple result sets" {
     @debug.assert_eq(try! right_row.get_name("side"), Some("right"))
     assert_eq(right_tag, "SELECT 1")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -890,7 +890,7 @@ async test "integration simple query is FIFO single-flight" {
       9,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -941,7 +941,7 @@ async test "integration simple query detach unblocks later requests" {
       13,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -971,7 +971,7 @@ async test "integration simple query detach swallows trailing database error" {
       .get_name("value")
     assert_eq(value, 21)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1063,7 +1063,7 @@ async test "integration portal pagination" {
       3,
     )
     statement.close()
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1108,7 +1108,7 @@ async test "integration row stream is FIFO single-flight" {
       5,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1146,7 +1146,7 @@ async test "integration row stream backpressures after bounded buffering" {
       7,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1194,7 +1194,7 @@ async test "integration row stream detach unblocks later requests" {
       15,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1231,7 +1231,7 @@ async test "integration transaction commit" {
     assert_eq(id, 1)
     assert_eq(name, "alpha")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1266,7 +1266,7 @@ async test "integration transaction rollback" {
       .get_name("count")
     assert_eq(count, 0)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1319,7 +1319,7 @@ async test "integration transaction options" {
     let name : String = rows[0].get_name("name")
     assert_eq(name, "steven")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1365,16 +1365,16 @@ async test "integration cancel token cancels running query" {
       .get_name("value")
     assert_eq(value, 1)
 
-    client.close()
-    observer.close()
+    client.shutdown()
+    observer.shutdown()
   })
   ignore(result)
 }
 
 ///|
-/// Hard abort cancels the private driver instead of waiting for the active
+/// Synchronous close cancels the private driver instead of waiting for the active
 /// protocol operation, and every later use observes the dedicated abort error.
-async test "integration client abort interrupts running query and is idempotent" {
+async test "integration client close interrupts running query and is idempotent" {
   guard integration_config() is Some(config) else { return }
 
   let result = @async.with_task_group(group => {
@@ -1406,8 +1406,8 @@ async test "integration client abort interrupts running query and is idempotent"
     assert_task_stays_pending(
       queued, "expected second query to remain queued before abort",
     )
-    client.abort()
-    client.abort()
+    client.close()
+    client.close()
 
     assert_eq(expect_closed_error(task.wait()), "connection aborted")
     assert_eq(expect_closed_error(queued.wait()), "connection aborted")
@@ -1418,8 +1418,8 @@ async test "integration client abort interrupts running query and is idempotent"
       ),
       "connection aborted",
     )
-    client.close()
-    observer.close()
+    client.shutdown()
+    observer.shutdown()
   })
   ignore(result)
 }
@@ -1427,7 +1427,7 @@ async test "integration client abort interrupts running query and is idempotent"
 ///|
 /// TLS teardown must close the TCP transport beneath the TLS state so
 /// PostgreSQL can release the physical backend session after a hard abort.
-async test "integration tls client abort closes backend session" {
+async test "integration tls client close ends backend session" {
   guard integration_config() is Some(config) else { return }
   guard !integration_tls_failure_expected() else { return }
 
@@ -1458,10 +1458,10 @@ async test "integration tls client abort closes backend session" {
       .get_name("using_tls")
     assert_true(using_tls)
 
-    client.abort()
+    client.close()
     assert_true(client.is_closed())
     wait_for_backend_session_exit(observer, backend_pid)
-    observer.close()
+    observer.shutdown()
   })
 }
 
@@ -1508,7 +1508,7 @@ async test "integration notice and notification surface as async messages" {
     assert_eq(second_notification.channel, "moon_driver_notification")
     assert_eq(second_notification.payload, "world")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1547,7 +1547,7 @@ async test "integration copy out" {
     assert_true(chunks.length() >= 1)
     assert_eq(payload.contents(), b"1\tjim\n2\tjoe\n")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1592,7 +1592,7 @@ async test "integration copy out is FIFO single-flight" {
       11,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1639,7 +1639,7 @@ async test "integration copy out detach unblocks later requests" {
       17,
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1675,7 +1675,7 @@ async test "integration copy in" {
     assert_eq(id2, 2)
     assert_eq(name2, "joe")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1721,7 +1721,7 @@ async test "integration copy in large" {
       .get_name("count")
     assert_eq(count, 10000)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1749,7 +1749,7 @@ async test "integration copy in abort rolls back copy" {
       .get_name("count")
     assert_eq(count, 0)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1791,7 +1791,7 @@ async test "integration query one" {
     )
     assert_eq(many_message, "expected exactly one row, got 3")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1832,7 +1832,7 @@ async test "integration query opt" {
     )
     assert_eq(many_message, "expected zero or one row, got 3")
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1868,7 +1868,7 @@ async test "integration deferred constraint" {
       .get_name("count")
     assert_eq(count, 0)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -1927,7 +1927,7 @@ async test "integration query typed without transaction" {
       .collect()
     assert_eq(updated.length(), 0)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -2012,7 +2012,7 @@ async test "integration scalar type roundtrips" {
       [Some("moon"), None, Some("bit")],
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -2073,7 +2073,7 @@ async test "integration float roundtrips" {
     )
     assert_double_nan_roundtrip(client)
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -2144,7 +2144,7 @@ async test "integration bytea and bpchar roundtrips" {
       "123  ",
     )
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -2214,7 +2214,7 @@ async test "integration resolves custom type metadata" {
     }
     assert_eq(subtype, @client.Type::int4())
 
-    client.close()
+    client.shutdown()
   })
 }
 
@@ -2234,6 +2234,6 @@ async test "integration database errors surface" {
     )
     @debug.assert_eq(err.code, Some("22012"))
 
-    client.close()
+    client.shutdown()
   })
 }
