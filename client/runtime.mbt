@@ -156,7 +156,7 @@ priv struct Shared {
   transaction_status : @ref.Ref[Byte]
   closed : @ref.Ref[Bool]
   closing : @ref.Ref[Bool]
-  close_requested : @ref.Ref[Bool]
+  shutdown_requested : @ref.Ref[Bool]
   aborted : @ref.Ref[Bool]
   operation_gate : OperationGate
   driver_task : @ref.Ref[@async.Task[Unit]?]

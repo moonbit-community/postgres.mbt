@@ -51,7 +51,7 @@ fn Client::create_with_capacity_unchecked(
     transaction_status: Ref(b'I'),
     closed: Ref(false),
     closing: Ref(false),
-    close_requested: Ref(false),
+    shutdown_requested: Ref(false),
     aborted: Ref(false),
     operation_gate: OperationGate::new(),
     driver_task: Ref(None),
@@ -134,7 +134,7 @@ pub async fn ClientExecutor::run(self : ClientExecutor) -> Unit {
     task.wait()
   }) catch {
     @async.WaitedTaskAlreadyCancelled as error =>
-      if !self.shared.aborted.val && !self.shared.close_requested.val {
+      if !self.shared.aborted.val && !self.shared.shutdown_requested.val {
         failure = Some(error)
       }
     error => if !self.shared.aborted.val { failure = Some(error) }
@@ -225,8 +225,8 @@ pub async fn Client::ready(self : Client) -> Unit {
 ///|
 /// Return whether the shared runtime can no longer accept or perform work.
 ///
-/// Graceful close sets this after the driver exits. Abort sets it immediately;
-/// the driver then closes the physical transport while cancellation unwinds.
+/// `close()` sets this immediately. The driver then closes the physical
+/// transport while cancellation unwinds. `shutdown()` waits for driver cleanup.
 pub fn Client::is_closed(self : Client) -> Bool {
   self.shared.closed.val
 }
@@ -247,18 +247,18 @@ pub fn Client::is_transaction_idle(self : Client) -> Bool {
 ///|
 /// Gracefully shut down the client runtime.
 ///
-/// Close is an operation barrier: it waits behind work already accepted by the
+/// Shutdown is an operation barrier: it waits behind work already accepted by the
 /// FIFO gate, rejects later work, sends `Terminate`, and returns only after the
 /// private driver has closed the transport. Cancellation of the caller still
 /// propagates while executor failure after shutdown is ignored.
-pub async fn Client::close(self : Client) -> Unit {
+pub async fn Client::shutdown(self : Client) -> Unit {
   let permit = self.shared.operation_gate.acquire()
   defer permit.release()
   if self.shared.closing.val {
     self.wait_for_shutdown()
     return
   }
-  self.shared.close_requested.val = true
+  self.shared.shutdown_requested.val = true
   self.shared.closing.val = true
   if !self.shared.ready.done.val {
     if self.shared.driver_task.val is Some(task) {
@@ -310,14 +310,13 @@ async fn Client::wait_for_shutdown(self : Client) -> Unit {
 }
 
 ///|
-/// Immediately abandon this physical connection.
+/// Immediately mark this connection unusable and request driver cancellation.
 ///
-/// Unlike `close`, abort does not wait behind active work or send PostgreSQL's
-/// graceful `Terminate` message. It synchronously rejects new work and requests
-/// driver cancellation; the driver closes the transport as cancellation
-/// unwinds. Active and queued operations fail with
+/// This synchronous call is safe to use in `defer`. The driver closes the
+/// transport as cancellation unwinds. Active and queued operations fail with
 /// `ClientError::Closed("connection aborted")`. Repeated calls are safe.
-pub fn Client::abort(self : Client) -> Unit {
+/// Use `shutdown()` to finish accepted work and wait for transport cleanup.
+pub fn Client::close(self : Client) -> Unit {
   if self.shared.closed.val || self.shared.aborted.val {
     return
   }

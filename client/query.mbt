@@ -76,8 +76,8 @@ async fn OpContext::prepare_for_delivery(
     self.close_statement(statement) catch {
       // A failed Close invalidates this cancellation handoff even if the
       // server returned ReadyForQuery.
-      ClientError::Database(_) => self.client.abort()
-      _ => self.client.abort()
+      ClientError::Database(_) => self.client.close()
+      _ => self.client.close()
     }
   })
   check_pending_cancellation()
@@ -370,7 +370,7 @@ async fn OpContext::execute(
     errdefer @async.protect_from_cancel(() => {
       self.close_statement(statement) catch {
         ClientError::Database(_) => ()
-        _ => self.client.abort()
+        _ => self.client.close()
       }
     })
     self.execute_raw(statement, params)
@@ -409,12 +409,12 @@ async fn OpContext::execute_raw(
     if stream.detached_done is Some(done) {
       done.wait() catch {
         ClientError::Database(_) => ()
-        _ => self.client.abort()
+        _ => self.client.close()
       }
     } else {
       stream.drain_discard() catch {
         ClientError::Database(_) => ()
-        _ => self.client.abort()
+        _ => self.client.close()
       }
     }
   })
@@ -466,7 +466,7 @@ async fn OpContext::bind(
           errdefer @async.protect_from_cancel(() => {
             self.close_portal_by_name(name) catch {
               ClientError::Database(_) => ()
-              _ => self.client.abort()
+              _ => self.client.close()
             }
           })
           // Resolve column OIDs lazily here so callers still get enriched

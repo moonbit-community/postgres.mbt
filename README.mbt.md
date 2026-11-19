@@ -60,11 +60,14 @@ overflowing counts in counted command tags raise `ClientError::Protocol`.
 likewise returns a `Pool` and `PoolExecutor`; the pool executor owns its
 physical connection executors. Async database calls wait for readiness.
 
-`Client::close()` performs graceful shutdown. `Client::abort()` is the synchronous,
-idempotent hard-stop for deadlines and emergency teardown: it immediately marks
-the runtime closed, asks the driver to discard the physical connection, and
-fails active or queued work with `ClientError::Closed("connection aborted")`.
-The driver completes physical transport cleanup while cancellation unwinds.
+`Client::shutdown()` waits for graceful shutdown. `Client::close()` is synchronous
+and idempotent, so it can be used in `defer`. It immediately marks the runtime
+closed, requests driver cancellation, and fails active or queued work with
+`ClientError::Closed("connection aborted")`. The driver closes the physical
+connection while cancellation unwinds.
+
+When migrating, replace the former async `Client::close()` with `shutdown()` and
+the former `Client::abort()` with the synchronous `close()`.
 
 - [client doc](./client/README.mbt.md)
 - [pgpool doc](./pgpool/README.mbt.md)

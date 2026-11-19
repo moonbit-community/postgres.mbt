@@ -60,7 +60,7 @@ pub async fn Client::transaction(
     if started.val && !self.shared.closed.val {
       @async.protect_from_cancel(() => context.batch_execute("ROLLBACK")) catch {
         ClientError::Closed(_) => ()
-        _ => self.abort()
+        _ => self.close()
       }
     }
   }
@@ -135,7 +135,7 @@ pub async fn[T] Client::with_transaction(
         // SQL rollback errors have completed their protocol exchange; the
         // callback error remains the one returned to its caller.
         ClientError::Database(_) | ClientError::Closed(_) => ()
-        _ => self.abort()
+        _ => self.close()
       }
     }
   })
@@ -172,7 +172,7 @@ pub async fn[T] Transaction::with_transaction(
       child.wait_for_resource_scopes()
       child.rollback() catch {
         ClientError::Closed(_) => ()
-        _ => self.client.abort()
+        _ => self.client.close()
       }
     }
   })
@@ -199,7 +199,7 @@ pub async fn[T] Transaction::with_savepoint(
       child.wait_for_resource_scopes()
       child.rollback() catch {
         ClientError::Closed(_) => ()
-        _ => self.client.abort()
+        _ => self.client.close()
       }
     }
   })
@@ -332,7 +332,7 @@ async fn Transaction::begin_savepoint(
         ClientError::Database(_) as error => creation_error.val = Some(error)
         error => {
           creation_error.val = Some(error)
-          self.client.abort()
+          self.client.close()
         }
       }
     }
@@ -359,7 +359,7 @@ async fn Transaction::begin_savepoint(
     }
     error => {
       creation_error.val = Some(error)
-      self.client.abort()
+      self.client.close()
       raise error
     }
   }
@@ -449,7 +449,7 @@ async fn Transaction::bind(
   errdefer @async.protect_from_cancel(() => {
     self.context.close_portal(portal) catch {
       ClientError::Database(_) => ()
-      _ => self.client.abort()
+      _ => self.client.close()
     }
   })
   check_pending_cancellation()
@@ -583,7 +583,7 @@ async fn Transaction::start_stream(
     error => {
       creation_error.val = Some(error)
       if !local_child_error(error) {
-        self.client.abort()
+        self.client.close()
       }
       raise error
     }
@@ -704,7 +704,7 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
         cleanup_error.val = None
       } else {
         // A protocol or transport failure has no trustworthy ReadyForQuery.
-        self.client.abort()
+        self.client.close()
         self.invalidate_if_connection_closed()
         raise error
       }
@@ -769,7 +769,7 @@ async fn Transaction::finish(self : Transaction, action : String) -> Unit {
       ClientError::Database(_) | ClientError::CommitRolledBack as error =>
         raise error
       error => {
-        self.client.abort()
+        self.client.close()
         raise error
       }
     }

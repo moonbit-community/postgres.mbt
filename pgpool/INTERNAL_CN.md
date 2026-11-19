@@ -80,8 +80,8 @@ OperationInProgress；业务 Err、异常、取消及 deadline 错误保持原�
 清理不能影响新借用者。正常结束所有子任务的调用保持原有提交和复用行为。
 所有淘汰路径都负责关闭物理连接，包括健康检查成功前连接池已关闭的情况。
 重复淘汰只结算一次连接计数和诊断事件；容量许可由 checkout/session 单独归还。
-已关闭连接的淘汰不再排队执行 graceful close：abort 已负责关闭传输，逃逸的
-stream/COPY 可能仍持有底层 permit，等待该 permit 会阻塞关闭任务和连接池退出。
+淘汰已关闭的客户端时跳过 `Client::shutdown()`。调用 `Client::close()` 后由驱动器
+清理传输连接。逃逸的 stream/COPY 可能仍持有底层许可，等待该许可会阻塞关闭任务和连接池退出。
 
 归还顺序：协议同步 → 清理遗留事务 → 单独执行 DISCARD ALL → 清空 statement/type
 cache → initialize_session → 空闲队列。PreserveSession 保留状态但仍同步协议和回滚；

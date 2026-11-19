@@ -114,7 +114,7 @@ async fn ScopedStatementState::finish(self : ScopedStatementState) -> Unit {
     ClientOwner(client) => client.close_statement_for_scope(self.statement)
     TransactionOwner(transaction) => {
       errdefer {
-        transaction.client.abort()
+        transaction.client.close()
         transaction.invalidate_if_connection_closed()
       }
       transaction.close_statement(self.statement)
@@ -127,7 +127,7 @@ async fn Client::close_statement_for_scope(
   self : Client,
   statement : Statement,
 ) -> Unit {
-  errdefer self.abort()
+  errdefer self.close()
   statement.close()
 }
 
@@ -138,7 +138,7 @@ async fn Portal::finish(self : Portal) -> Unit {
     @async.pause()
   }
   errdefer {
-    self.transaction.client.abort()
+    self.transaction.client.close()
     self.transaction.invalidate_if_connection_closed()
   }
   self.transaction.close_portal(self)
@@ -167,7 +167,7 @@ pub async fn[T] Client::with_prepared_typed(
   errdefer @async.protect_from_cancel(() => {
     scoped.state.finish() catch {
       ClientError::Closed(_) => ()
-      _ => self.abort()
+      _ => self.close()
     }
   })
   check_pending_cancellation()
@@ -206,7 +206,7 @@ pub async fn[T] Transaction::with_prepared_typed(
   errdefer @async.protect_from_cancel(() => {
     scoped.state.finish() catch {
       ClientError::Closed(_) => ()
-      _ => self.client.abort()
+      _ => self.client.close()
     }
   })
   check_pending_cancellation()
@@ -292,7 +292,7 @@ pub async fn[T] Transaction::with_portal(
   errdefer @async.protect_from_cancel(() => {
     portal.finish() catch {
       ClientError::Closed(_) => ()
-      _ => self.client.abort()
+      _ => self.client.close()
     }
   })
   check_pending_cancellation()
