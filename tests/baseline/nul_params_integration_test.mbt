@@ -93,7 +93,7 @@ async test "integration NUL encoding errors do not execute or abort the transact
               }
             })
             is @client.ClientError::Encode(
-              "PostgreSQL string parameters must not contain NUL (U+0000)"
+              "PostgreSQL string parameters must not contain NUL (U+0000)",
             ),
           )
           let bytes = b"\x00a\x00b\x00"

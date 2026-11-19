@@ -91,7 +91,7 @@ async fn check_transaction_completion_exit(cancel~ : Bool) -> Unit {
                 assert_true(
                   caught.val
                   is Some(
-                    @client.ClientError::Database({ code: Some("40001"), .. })
+                    @client.ClientError::Database({ code: Some("40001"), .. }),
                   ),
                 )
               Disconnect | Timeout =>

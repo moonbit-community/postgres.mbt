@@ -394,7 +394,7 @@ async test "statement close rejects root transaction waiting for client permit" 
     assert_true(
       expect_error_async(() => statement.close())
       is ClientError::Closed(
-        "transaction owns the connection; use Transaction::close_statement"
+        "transaction owns the connection; use Transaction::close_statement",
       ),
     )
     waiter.cancel()
